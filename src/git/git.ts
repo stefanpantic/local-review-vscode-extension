@@ -6,13 +6,22 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { DiffSource, RepoInfo, DiffResult } from '../model/ReviewDiff';
 import { diffArgs } from './diffSources';
-import { normalize } from './normalize';
+import { normalize, synthesizeUntracked } from './normalize';
+import { parseBranches } from './parse';
 
 const pexec = promisify(execFile);
+const MAX_BUFFER = 128 * 1024 * 1024;
 
 async function git(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await pexec('git', args, { cwd, maxBuffer: 128 * 1024 * 1024 });
+  const { stdout } = await pexec('git', args, { cwd, maxBuffer: MAX_BUFFER });
   return stdout;
+}
+
+/** Run git but resolve stdout regardless of exit code (for `diff --no-index`, which exits 1 on differences). */
+function gitAllowFail(cwd: string, args: string[]): Promise<string> {
+  return new Promise((resolve) => {
+    execFile('git', args, { cwd, maxBuffer: MAX_BUFFER }, (_err, stdout) => resolve(stdout ?? ''));
+  });
 }
 
 async function isUnbornHead(repoRoot: string): Promise<boolean> {
@@ -41,18 +50,46 @@ export async function getRepositories(): Promise<RepoInfo[]> {
   return [...byRoot.values()];
 }
 
+/** Local branch names, for the vs-base picker. */
+export async function listBranches(repoRoot: string): Promise<string[]> {
+  try {
+    return parseBranches(await git(repoRoot, ['for-each-ref', '--format=%(refname:short)', 'refs/heads']));
+  } catch {
+    return [];
+  }
+}
+
+/** Synthesized diff of untracked files (opt-in), rendered as all-additions. Read-only (no index mutation). */
+async function untrackedDiff(repoRoot: string): Promise<string> {
+  const listing = await gitAllowFail(repoRoot, ['ls-files', '--others', '--exclude-standard', '-z']);
+  const files = listing.split('\0').filter(Boolean);
+  const parts: string[] = [];
+  for (const f of files) {
+    const d = await gitAllowFail(repoRoot, ['diff', '--no-index', '--no-color', '--', '/dev/null', f]);
+    if (d.trim()) parts.push(d);
+  }
+  return parts.join('');
+}
+
 /** Compute the normalized diff for a repo + source, resolving the top-level state. */
 export async function getDiff(req: {
   repoRoot: string;
   source: DiffSource;
   baseRef?: string;
+  includeUntracked?: boolean;
 }): Promise<DiffResult> {
-  const { repoRoot, source, baseRef } = req;
+  const { repoRoot, source, baseRef, includeUntracked } = req;
   try {
     const unbornHead = await isUnbornHead(repoRoot);
     const raw = await git(repoRoot, diffArgs(source, { unbornHead, baseRef }));
     const headSha = unbornHead ? null : (await git(repoRoot, ['rev-parse', 'HEAD'])).trim();
     const diff = normalize(raw, { repoRoot, source, headSha, baseRef });
+
+    if (includeUntracked && (source === 'worktree-vs-head' || source === 'unstaged')) {
+      const uraw = await untrackedDiff(repoRoot);
+      if (uraw.trim()) diff.files.push(...synthesizeUntracked(uraw, { repoRoot, source, headSha, baseRef }));
+    }
+
     if (diff.files.length === 0) {
       return { state: unbornHead ? 'unborn-head' : 'no-changes', repoRoot };
     }

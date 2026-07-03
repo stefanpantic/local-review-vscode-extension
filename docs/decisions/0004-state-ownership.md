@@ -15,3 +15,6 @@ Webviews are disposed and re-created (tab hidden, window reload) and lose in-mem
 - No split-brain: each pref has exactly one authority.
 - The Iteration 1 skeleton carries no broadcast bus or correlation registry it doesn't yet need.
 - One sidebar + at most one panel per repo (see [ADR-0005](./0005-ui-placement-editor-tab.md)); a push targets the surfaces that exist, not a general subscriber bus.
+
+## Iteration 2 addendum — shared "viewed" state
+With the sidebar added, "viewed" is reflected by **both** the tree and the panel, so it becomes **host-owned and persisted** in `workspaceState` (keyed by `repoRoot + source + filePath`) and broadcast to both surfaces via `viewedUpdated`. The `ReviewController` is the single hub — tree and panel never talk directly. Scroll position stays webview-only. This is the intended evolution of "the host owns durable state" once a second surface exists.

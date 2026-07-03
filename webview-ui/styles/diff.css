@@ -41,10 +41,10 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 14px;
+  margin-top: 0;
   padding: 8px 12px;
-  border: 1px solid var(--lr-border);
-  border-bottom: none;
+  border: none;
+  border-bottom: 1px solid var(--lr-border);
   background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
   font-family: var(--vscode-font-family);
 }
@@ -67,6 +67,8 @@ body {
 
 .lr-stat {
   flex: none;
+  display: inline-flex;
+  gap: 6px;
   font-family: var(--vscode-editor-font-family, monospace);
 }
 .lr-add-count { color: var(--vscode-gitDecoration-addedResourceForeground, #2ea043); }
@@ -88,8 +90,6 @@ body {
   padding: 2px 12px;
   color: var(--vscode-descriptionForeground);
   background: var(--vscode-diffEditor-unchangedRegionBackground, rgba(128, 128, 128, 0.08));
-  border-left: 1px solid var(--lr-border);
-  border-right: 1px solid var(--lr-border);
   white-space: pre;
   overflow-x: auto;
 }
@@ -98,8 +98,6 @@ body {
   display: flex;
   align-items: baseline;
   white-space: pre;
-  border-left: 1px solid var(--lr-border);
-  border-right: 1px solid var(--lr-border);
 }
 .lr-row.lr-add { background: var(--lr-add-bg); }
 .lr-row.lr-del { background: var(--lr-del-bg); }
@@ -139,4 +137,60 @@ body {
   font-size: 15px;
   font-weight: 600;
   color: var(--vscode-foreground);
+}
+
+/* Iteration 2: summary bar, per-file sections, collapse chevron, viewed control */
+.lr-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.lr-summary-files {
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+.lr-source {
+  margin-left: auto;
+  color: var(--vscode-descriptionForeground);
+}
+
+.lr-file {
+  display: block;
+  margin: 14px 12px 0;
+  border: 1px solid var(--lr-border);
+}
+.lr-file.lr-collapsed .lr-file-header {
+  border-bottom: none;
+}
+
+.lr-chevron {
+  flex: none;
+  width: 16px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--vscode-foreground);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.lr-viewed {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  user-select: none;
+}
+.lr-viewed input {
+  margin: 0;
+}
+
+/* let the viewed control own the right edge of the file header */
+.lr-noncommentable {
+  margin-left: 0;
 }

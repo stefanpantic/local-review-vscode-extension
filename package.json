@@ -28,14 +28,14 @@
     "views": {
       "localReview": [
         {
-          "id": "localReview.launcher",
-          "name": "Review"
+          "id": "localReview.files",
+          "name": "Changes"
         }
       ]
     },
     "viewsWelcome": [
       {
-        "view": "localReview.launcher",
+        "view": "localReview.files",
         "contents": "Review your local changes as a pull request.\n[Start a Review](command:localReview.startReview)"
       }
     ],
@@ -43,23 +43,69 @@
       {
         "command": "localReview.startReview",
         "title": "Start a Review",
-        "category": "Local Review"
+        "category": "Local Review",
+        "icon": "$(git-pull-request)"
       },
       {
         "command": "localReview.refresh",
         "title": "Refresh",
         "category": "Local Review",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "localReview.selectSource",
+        "title": "Select Diff Source",
+        "category": "Local Review",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "localReview.selectRepo",
+        "title": "Select Repository",
+        "category": "Local Review",
+        "icon": "$(repo)"
+      },
+      {
+        "command": "localReview.revealFile",
+        "title": "Reveal File",
+        "category": "Local Review"
       }
     ],
     "menus": {
       "view/title": [
-        {
-          "command": "localReview.refresh",
-          "when": "view == localReview.launcher",
-          "group": "navigation"
-        }
+        { "command": "localReview.startReview", "when": "view == localReview.files", "group": "navigation@1" },
+        { "command": "localReview.selectSource", "when": "view == localReview.files", "group": "navigation@2" },
+        { "command": "localReview.selectRepo", "when": "view == localReview.files", "group": "navigation@3" },
+        { "command": "localReview.refresh", "when": "view == localReview.files", "group": "navigation@4" }
+      ],
+      "commandPalette": [
+        { "command": "localReview.revealFile", "when": "false" }
       ]
+    },
+    "configuration": {
+      "title": "Local Review",
+      "properties": {
+        "localReview.defaultSource": {
+          "type": "string",
+          "enum": ["worktree-vs-head", "unstaged", "staged", "vs-base"],
+          "default": "worktree-vs-head",
+          "description": "Default diff source when a review is first opened."
+        },
+        "localReview.includeUntracked": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include untracked files (shown as all-addition entries)."
+        },
+        "localReview.largeFileThreshold": {
+          "type": "number",
+          "default": 1000,
+          "description": "Files with more than this many changed lines start collapsed."
+        },
+        "localReview.contextLines": {
+          "type": "number",
+          "default": 3,
+          "description": "Lines of surrounding context captured for comments and export (used from Iteration 4)."
+        }
+      }
     }
   },
   "scripts": {

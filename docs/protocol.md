@@ -74,6 +74,17 @@ interface DiffResult {
   diff?: ReviewDiff;
   message?: string;          // for 'error'
 }
+
+// Snapshot the webview renders from (getState response / stateChanged event) — it.2.
+interface ReviewStatePayload {
+  result: DiffResult;
+  repoRoot?: string;
+  source: DiffSource;
+  baseRef?: string;
+  repos: RepoInfo[];
+  viewed: Record<string, boolean>;   // filePath -> viewed, for the current repo+source
+  config: { largeFileThreshold: number };
+}
 ```
 
 **Invariant:** every `DiffRow` carries *both* `oldLineNo` and `newLineNo` (one may be null) — required even in unified mode so comments can anchor to the `old` side and side-by-side (it.3) needs no re-fetch.
@@ -182,9 +193,8 @@ The webview keeps `let seq = 0` and a `Map<number, {resolve, reject}>`. A reques
 
 | `type` | payload | response payload | Intro |
 |---|---|---|---|
-| `listRepositories` | `{}` | `RepoInfo[]` | it.1 |
-| `getDiff` | `{ repoRoot, source, baseRef? }` | `DiffResult` | it.1 |
-| `setPref` | `{ viewMode?, source? }` | `{ ok: true }` (host persists + re-broadcasts `configChanged`) | it.2 |
+| `getState` | `{}` | `ReviewStatePayload` (repos + diff + viewed + config for the current selection) | it.1/it.2 |
+| `setViewed` | `{ filePath, viewed }` | `{ ok: true }` | it.2 |
 | `getThreads` | `{ repoRoot }` | `CommentThread[]` | it.4 |
 | `addComment` | `{ anchor, body }` | `CommentThread` | it.4 |
 | `editComment` | `{ threadId, commentId, body }` | `CommentThread` | it.4 |
@@ -204,13 +214,15 @@ The webview keeps `let seq = 0` and a `Map<number, {resolve, reject}>`. A reques
 
 | `type` | payload | Intro |
 |---|---|---|
-| `diffUpdated` | `{ result: DiffResult }` | it.1 (after refresh / source switch; live-refresh it.7) |
+| `stateChanged` | `ReviewStatePayload` | it.1/it.2 (after refresh / source / repo switch) |
+| `viewedUpdated` | `{ viewed: Record<string, boolean> }` | it.2 |
+| `revealFile` | `{ filePath }` | it.2 (scroll the panel to a file) |
 | `threadsUpdated` | `{ repoRoot, threads: CommentThread[] }` | it.4 (after any mutation or re-anchor) |
 | `savedReviewsUpdated` | `{ repoRoot, reviews: Review[] }` | it.5 |
 | `configChanged` | `{ viewMode?, source? }` | it.2 (echo of a persisted pref; host value wins) |
 | `showError` | `{ message }` | it.1 |
 
-Durable prefs are written via the acked `setPref` request (§7.1), **not** a fire-and-forget mirror; ephemeral UI state (scroll, collapsed/viewed, whitespace) never leaves the webview.
+Source / repo / base-branch selection is **host-side** (commands `localReview.selectSource` / `localReview.selectRepo`, backed by QuickPick) — not webview messages. "Viewed" is host-owned and persisted; the panel toggles it via `setViewed` and both surfaces converge via `viewedUpdated`. Scroll position stays webview-only.
 
 ## 8. Validation & versioning
 

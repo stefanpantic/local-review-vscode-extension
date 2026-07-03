@@ -18,6 +18,22 @@ export function normalize(
   };
 }
 
+/**
+ * Normalize a `git diff --no-index /dev/null <file>` diff (untracked files) into FileDiffs,
+ * forcing `added` status (the --no-index header lacks a "new file mode" marker). Pure.
+ */
+export function synthesizeUntracked(
+  raw: string,
+  meta: { repoRoot: string; source: DiffSource; headSha: string | null; baseRef?: string }
+): FileDiff[] {
+  return normalize(raw, meta).files.map((f) => ({
+    ...f,
+    status: 'added' as FileStatus,
+    oldPath: undefined,
+    isCommentable: true,
+  }));
+}
+
 /** Split into per-file blocks, keeping each `diff --git` header with its block. */
 function splitFileBlocks(raw: string): string[] {
   if (!raw || !raw.trim()) return [];
