@@ -8,7 +8,7 @@ const MESSAGES: Record<string, { title: string; detail: string }> = {
     title: 'No commits yet',
     detail: 'This repository has no commits, and there are no staged or tracked changes to review.',
   },
-  'no-changes': { title: 'No changes to review', detail: 'The working tree matches HEAD.' },
+  'no-changes': { title: 'No changes to review', detail: 'There are no changes for the selected source.' },
   error: { title: 'Something went wrong', detail: '' },
 };
 

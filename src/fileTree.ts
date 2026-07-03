@@ -59,3 +59,18 @@ function toNodes(dir: MutableDir, prefix: string, compact: boolean): TreeNode[] 
     .map((file) => ({ kind: 'file', file }) as TreeNode);
   return [...dirNodes, ...fileNodes];
 }
+
+/** Depth-first traversal of a built tree → files in the exact order the sidebar shows them. */
+export function flattenTree(nodes: TreeNode[]): FileDiff[] {
+  const out: FileDiff[] = [];
+  for (const node of nodes) {
+    if (node.kind === 'file') out.push(node.file);
+    else out.push(...flattenTree(node.children));
+  }
+  return out;
+}
+
+/** Reorder a flat file list to match the sidebar tree (folders-first, alphabetical). */
+export function orderByTree(files: FileDiff[]): FileDiff[] {
+  return flattenTree(buildFileTree(files));
+}

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { ReviewState } from './reviewState';
 import { getRepositories, getDiff } from './git/git';
+import { orderByTree } from './fileTree';
 import type { DiffResult, DiffSource, FileDiff, RepoInfo } from './model/ReviewDiff';
 import type { Events, EventType, ReviewStatePayload } from './protocol/messages';
 
@@ -33,6 +34,9 @@ export class ReviewController {
   }
   get repoRoot(): string | undefined {
     return this.state.getPref().repoRoot;
+  }
+  get source(): DiffSource {
+    return this.state.getPref().source;
   }
   files(): FileDiff[] {
     return this.current.state === 'ok' && this.current.diff ? this.current.diff.files : [];
@@ -74,7 +78,12 @@ export class ReviewController {
         .getConfiguration('localReview')
         .get<boolean>('includeUntracked', false);
       this.current = await getDiff({ repoRoot, source: pref.source, baseRef: pref.baseRef, includeUntracked });
+      if (this.current.state === 'ok' && this.current.diff) {
+        this.current.diff.files = orderByTree(this.current.diff.files);
+      }
     }
+    void vscode.commands.executeCommand('setContext', 'localReview.emptyReason', this.current.state);
+    void vscode.commands.executeCommand('setContext', 'localReview.source', this.state.getPref().source);
     this._onDidChange.fire();
     this.panelPost?.('stateChanged', this.buildState());
   }

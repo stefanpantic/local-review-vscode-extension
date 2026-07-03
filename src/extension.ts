@@ -52,17 +52,22 @@ export function deactivate(): void {
   // context.subscriptions handles cleanup
 }
 
-const SOURCES: { label: string; source: DiffSource }[] = [
-  { label: 'Working tree vs HEAD', source: 'worktree-vs-head' },
-  { label: 'Unstaged', source: 'unstaged' },
-  { label: 'Staged', source: 'staged' },
-  { label: 'vs base branch…', source: 'vs-base' },
+const SOURCES: { label: string; description: string; source: DiffSource }[] = [
+  { label: 'Working tree vs HEAD', description: 'all uncommitted changes', source: 'worktree-vs-head' },
+  { label: 'Unstaged', description: 'working tree vs index', source: 'unstaged' },
+  { label: 'Staged', description: 'index vs HEAD', source: 'staged' },
+  { label: 'Base branch…', description: 'compare against another branch', source: 'vs-base' },
 ];
 
 async function pickSource(controller: ReviewController): Promise<void> {
+  const current = controller.source;
   const picked = await vscode.window.showQuickPick(
-    SOURCES.map((s) => ({ label: s.label, source: s.source })),
-    { placeHolder: 'Diff source' }
+    SOURCES.map((s) => ({
+      label: s.label,
+      description: s.source === current ? `${s.description} · current` : s.description,
+      source: s.source,
+    })),
+    { placeHolder: 'Select the diff source to review' }
   );
   if (!picked) return;
   if (picked.source === 'vs-base') {
@@ -71,7 +76,7 @@ async function pickSource(controller: ReviewController): Promise<void> {
       void vscode.window.showWarningMessage('Local Review: no local branches to compare against.');
       return;
     }
-    const base = await vscode.window.showQuickPick(branches, { placeHolder: 'Base branch' });
+    const base = await vscode.window.showQuickPick(branches, { placeHolder: 'Select the base branch' });
     if (!base) return;
     await controller.setSource('vs-base', base);
   } else {

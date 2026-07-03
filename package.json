@@ -36,7 +36,38 @@
     "viewsWelcome": [
       {
         "view": "localReview.files",
-        "contents": "Review your local changes as a pull request.\n[Start a Review](command:localReview.startReview)"
+        "when": "localReview.emptyReason == no-repo",
+        "contents": "No Git repository in this workspace.\nOpen a folder that is a Git repository to review its changes."
+      },
+      {
+        "view": "localReview.files",
+        "when": "localReview.emptyReason == unborn-head",
+        "contents": "This repository has no commits yet — nothing staged or tracked to review."
+      },
+      {
+        "view": "localReview.files",
+        "when": "localReview.emptyReason == error",
+        "contents": "Couldn't read the diff.\n[Retry](command:localReview.refresh)"
+      },
+      {
+        "view": "localReview.files",
+        "when": "localReview.emptyReason == no-changes && localReview.source == staged",
+        "contents": "No staged changes.\n[Change source](command:localReview.selectSource)"
+      },
+      {
+        "view": "localReview.files",
+        "when": "localReview.emptyReason == no-changes && localReview.source == unstaged",
+        "contents": "No unstaged changes.\n[Change source](command:localReview.selectSource)"
+      },
+      {
+        "view": "localReview.files",
+        "when": "localReview.emptyReason == no-changes && localReview.source == worktree-vs-head",
+        "contents": "No changes vs HEAD.\n[Change source](command:localReview.selectSource)"
+      },
+      {
+        "view": "localReview.files",
+        "when": "localReview.emptyReason == no-changes && localReview.source == vs-base",
+        "contents": "No changes vs the base branch.\n[Change source](command:localReview.selectSource)"
       }
     ],
     "commands": [

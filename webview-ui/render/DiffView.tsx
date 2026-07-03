@@ -1,12 +1,25 @@
 import { Fragment, useState } from 'react';
 import type { ReviewStatePayload } from '../../src/protocol/messages';
-import type { FileDiff } from '../../src/model/ReviewDiff';
+import type { FileDiff, DiffSource } from '../../src/model/ReviewDiff';
 import { CodeLine, HunkHeaderRow } from './UnifiedRows';
 import { FileHeader } from '../components/FileHeader';
 import { SummaryBar } from '../components/SummaryBar';
 import { EmptyState } from '../components/EmptyState';
 
 type OverrideMap = Record<string, 'expanded' | 'collapsed'>;
+
+function noChangesDetail(source: DiffSource, baseRef?: string): string {
+  switch (source) {
+    case 'staged':
+      return 'No staged changes.';
+    case 'unstaged':
+      return 'No unstaged changes.';
+    case 'vs-base':
+      return `No changes vs ${baseRef ?? 'the base branch'}.`;
+    default:
+      return 'No changes vs HEAD.';
+  }
+}
 
 export function DiffView({
   state,
@@ -20,7 +33,8 @@ export function DiffView({
   if (!state) return <EmptyState state="loading" />;
   const { result } = state;
   if (result.state !== 'ok' || !result.diff) {
-    return <EmptyState state={result.state} message={result.message} />;
+    const message = result.state === 'no-changes' ? noChangesDetail(state.source, state.baseRef) : result.message;
+    return <EmptyState state={result.state} message={message} />;
   }
   const diff = result.diff;
 

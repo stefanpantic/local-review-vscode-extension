@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildFileTree } from '../src/fileTree';
+import { buildFileTree, orderByTree } from '../src/fileTree';
 import type { FileDiff } from '../src/model/ReviewDiff';
 
 const f = (path: string): FileDiff => ({
@@ -30,6 +30,11 @@ test('compacts single-child directory chains', () => {
   assert.equal(dir.label, 'a/b/c');
   assert.equal(dir.children.length, 1);
   assert.equal(dir.children[0].kind, 'file');
+});
+
+test('orderByTree lists files in sidebar order (folders-first, depth-first)', () => {
+  const ordered = orderByTree([f('README.md'), f('src/a.ts'), f('src/webview/b.ts')]).map((x) => x.path);
+  assert.deepEqual(ordered, ['src/webview/b.ts', 'src/a.ts', 'README.md']);
 });
 
 test('does not compact a directory with multiple children', () => {
