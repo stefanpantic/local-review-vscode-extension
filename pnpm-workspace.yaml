@@ -1,0 +1,7 @@
+# Allow build scripts only for the deps that genuinely need them (pnpm blocks
+# postinstall scripts by default). esbuild links its native binary; keytar and
+# @vscode/vsce-sign are used by `vsce` when packaging.
+allowBuilds:
+  '@vscode/vsce-sign': true
+  esbuild: true
+  keytar: true

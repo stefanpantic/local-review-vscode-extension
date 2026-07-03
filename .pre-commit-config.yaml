@@ -1,0 +1,23 @@
+# https://pre-commit.com  —  activate once with:  pre-commit install
+# Installs both the pre-commit hook (gitleaks + eslint on staged files) and the
+# commit-msg hook (Conventional Commits enforcement).
+default_install_hook_types: [pre-commit, commit-msg]
+repos:
+  - repo: local
+    hooks:
+      - id: gitleaks
+        name: gitleaks (staged secret scan)
+        entry: gitleaks git --pre-commit --staged --redact
+        language: system
+        pass_filenames: false
+      - id: eslint
+        name: eslint (--fix on staged TS/JS)
+        entry: pnpm exec eslint --fix --no-warn-ignored
+        language: system
+        files: \.(ts|tsx|mjs)$
+        exclude: \.d\.ts$
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]

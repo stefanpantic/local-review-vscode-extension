@@ -1,0 +1,94 @@
+{
+  "name": "local-review",
+  "displayName": "Local Review",
+  "description": "PR-style review of your local git diff, exported for a coding agent.",
+  "version": "0.0.1",
+  "publisher": "local",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "main": "./dist/extension.js",
+  "categories": [
+    "SCM Providers",
+    "Other"
+  ],
+  "activationEvents": [],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "localReview",
+          "title": "Local Review",
+          "icon": "media/local-review.svg"
+        }
+      ]
+    },
+    "views": {
+      "localReview": [
+        {
+          "id": "localReview.launcher",
+          "name": "Review"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "localReview.launcher",
+        "contents": "Review your local changes as a pull request.\n[Start a Review](command:localReview.startReview)"
+      }
+    ],
+    "commands": [
+      {
+        "command": "localReview.startReview",
+        "title": "Start a Review",
+        "category": "Local Review"
+      },
+      {
+        "command": "localReview.refresh",
+        "title": "Refresh",
+        "category": "Local Review",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "localReview.refresh",
+          "when": "view == localReview.launcher",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "package": "vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "parse-diff": "^0.11.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^2.31.0",
+    "esbuild": "^0.23.0",
+    "eslint": "^10.6.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.7.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.62.1"
+  }
+}

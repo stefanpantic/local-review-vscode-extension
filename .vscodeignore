@@ -1,0 +1,15 @@
+.vscode/**
+.git/**
+src/**
+webview-ui/**
+test/**
+docs/**
+node_modules/**
+**/*.ts
+**/*.tsx
+**/*.map
+esbuild.mjs
+tsconfig.json
+pnpm-lock.yaml
+.gitignore
+.vscodeignore
