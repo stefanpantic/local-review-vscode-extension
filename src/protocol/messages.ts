@@ -1,8 +1,7 @@
 // Shared, DEPENDENCY-FREE message contract (imported by both the node host and the browser webview).
 // Lean bridge: `id`-correlated request/response for calls needing a reply; id-less events for pushes.
-// See docs/protocol.md §6–7. Iteration 2 subset (source/repo selection is host-side via commands).
 
-import type { DiffSource, RepoInfo, DiffResult } from '../model/ReviewDiff';
+import type { DiffSource, RepoInfo, DiffResult, ViewMode } from '../model/ReviewDiff';
 
 export interface Message {
   id?: number; // present → request or its matching response; absent → a broadcast event
@@ -19,13 +18,23 @@ export interface ReviewStatePayload {
   baseRef?: string;
   repos: RepoInfo[];
   viewed: Record<string, boolean>; // filePath -> viewed, for the current repo+source
+  viewMode: ViewMode;
+  whitespace: boolean; // hide whitespace
   config: { largeFileThreshold: number };
+}
+
+/** Full old/new text of a file, for whole-file syntax highlighting (tokenize the file, then clip to the diff). */
+export interface FileTexts {
+  texts: Record<string, { old: string; new: string }>;
 }
 
 /** Request name → { payload, response }. */
 export interface Requests {
   getState: { payload: Record<string, never>; response: ReviewStatePayload };
   setViewed: { payload: { filePath: string; viewed: boolean }; response: { ok: true } };
+  setViewPref: { payload: { viewMode?: ViewMode; whitespace?: boolean }; response: { ok: true } };
+  // Host already knows the current repo/source/baseRef; the webview just names the files.
+  getFileTexts: { payload: { files: { path: string; oldPath?: string }[] }; response: FileTexts };
 }
 export type RequestType = keyof Requests;
 

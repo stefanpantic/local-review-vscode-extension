@@ -112,7 +112,7 @@ ADRs cover only the contestable, re-litigable calls. Fixed givens (webview surfa
 | [0003](./decisions/0003-anchoring-model.md) | Content-match comment anchoring; outdated ≠ deleted |
 | [0004](./decisions/0004-state-ownership.md) | Host owns durable state; lean typed message bridge |
 | [0005](./decisions/0005-ui-placement-editor-tab.md) | Editor-tab diff; sidebar list added in it.2 |
-| [0008](./decisions/0008-whitespace-visual-only.md) | Whitespace hiding is visual-first |
+| [0008](./decisions/0008-whitespace-visual-only.md) | Whitespace hiding via `git diff -w` |
 | [0009](./decisions/0009-review-sessions-vs-export.md) | Saved reviews (resume-later) distinct from export |
 
 ## 11. Glossary

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { buildHtml } from './html';
 import { RpcHost } from './rpcHost';
+import { log } from '../log';
 import type { ReviewController } from '../reviewController';
 
 /**
@@ -47,8 +48,14 @@ export class ReviewPanel {
           await this.controller.setViewed(p.filePath, p.viewed);
           return { ok: true as const };
         },
+        setViewPref: async (p) => {
+          await this.controller.setViewPref(p);
+          return { ok: true as const };
+        },
+        getFileTexts: (p) => this.controller.getFileTexts(p.files),
       },
-      this.disposables
+      this.disposables,
+      (parts) => log('[webview]', ...parts)
     );
     this.controller.bindPanel((type, payload) => this.rpc.emit(type, payload));
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);

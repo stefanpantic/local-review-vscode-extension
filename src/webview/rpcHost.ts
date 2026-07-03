@@ -15,13 +15,18 @@ export class RpcHost {
   constructor(
     private readonly webview: vscode.Webview,
     private readonly handlers: RequestHandlers,
-    disposables: vscode.Disposable[]
+    disposables: vscode.Disposable[],
+    private readonly onLog?: (parts: unknown[]) => void
   ) {
     disposables.push(this.webview.onDidReceiveMessage((msg: Message) => void this.dispatch(msg)));
   }
 
   private async dispatch(msg: Message): Promise<void> {
-    if (!msg || typeof msg.type !== 'string' || typeof msg.id !== 'number') return;
+    if (!msg || typeof msg.type !== 'string') return;
+    if (typeof msg.id !== 'number') {
+      if (msg.type === 'log' && this.onLog) this.onLog(Array.isArray(msg.payload) ? msg.payload : [msg.payload]);
+      return;
+    }
     const handler = (this.handlers as Record<string, ((p: unknown) => unknown) | undefined>)[msg.type];
     if (!handler) {
       void this.webview.postMessage({ id: msg.id, type: msg.type, error: `Unknown request: ${msg.type}` });

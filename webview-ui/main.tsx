@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import './styles/diff.css';
 import { request, on } from './rpcClient';
 import type { ReviewStatePayload } from '../src/protocol/messages';
+import type { ViewMode } from '../src/model/ReviewDiff';
 import { DiffView } from './render/DiffView';
 
 function revealFile(filePath: string): void {
@@ -27,6 +28,8 @@ function App() {
             source: 'worktree-vs-head',
             repos: [],
             viewed: {},
+            viewMode: 'unified',
+            whitespace: false,
             config: { largeFileThreshold: 1000 },
           });
         }
@@ -46,8 +49,11 @@ function App() {
   const setViewed = (filePath: string, viewed: boolean): void => {
     void request('setViewed', { filePath, viewed });
   };
+  const setViewPref = (patch: { viewMode?: ViewMode; whitespace?: boolean }): void => {
+    void request('setViewPref', patch);
+  };
 
-  return <DiffView state={state} setViewed={setViewed} />;
+  return <DiffView state={state} setViewed={setViewed} setViewPref={setViewPref} />;
 }
 
 const container = document.getElementById('root');

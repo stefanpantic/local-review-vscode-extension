@@ -1,16 +1,15 @@
 import * as vscode from 'vscode';
 import { ReviewState } from './reviewState';
-import { getRepositories, getDiff } from './git/git';
+import { getRepositories, getDiff, getFileTexts } from './git/git';
 import { orderByTree } from './fileTree';
-import type { DiffResult, DiffSource, FileDiff, RepoInfo } from './model/ReviewDiff';
+import type { DiffResult, DiffSource, FileDiff, RepoInfo, ViewMode } from './model/ReviewDiff';
 import type { Events, EventType, ReviewStatePayload } from './protocol/messages';
 
 type PanelPost = <K extends EventType>(type: K, payload: Events[K]) => void;
 
 /**
- * The single coordination hub between the sidebar TreeView and the editor panel
- * (docs/decisions/0004-state-ownership.md). Both surfaces read from here and mutate through here;
- * they never talk to each other directly.
+ * The single coordination hub between the sidebar tree and the editor panel: both surfaces read
+ * their state from here and mutate through here; they never talk to each other directly.
  */
 export class ReviewController {
   private repos: RepoInfo[] = [];
@@ -38,6 +37,12 @@ export class ReviewController {
   get source(): DiffSource {
     return this.state.getPref().source;
   }
+  get viewMode(): ViewMode {
+    return this.state.getPref().viewMode;
+  }
+  get whitespace(): boolean {
+    return this.state.getPref().whitespace;
+  }
   files(): FileDiff[] {
     return this.current.state === 'ok' && this.current.diff ? this.current.diff.files : [];
   }
@@ -59,6 +64,8 @@ export class ReviewController {
       baseRef: pref.baseRef,
       repos: this.repos,
       viewed: pref.repoRoot ? this.state.viewedFor(pref.repoRoot, pref.source, paths) : {},
+      viewMode: pref.viewMode,
+      whitespace: pref.whitespace,
       config: { largeFileThreshold },
     };
   }
@@ -77,7 +84,13 @@ export class ReviewController {
       const includeUntracked = vscode.workspace
         .getConfiguration('localReview')
         .get<boolean>('includeUntracked', false);
-      this.current = await getDiff({ repoRoot, source: pref.source, baseRef: pref.baseRef, includeUntracked });
+      this.current = await getDiff({
+        repoRoot,
+        source: pref.source,
+        baseRef: pref.baseRef,
+        includeUntracked,
+        whitespace: pref.whitespace,
+      });
       if (this.current.state === 'ok' && this.current.diff) {
         this.current.diff.files = orderByTree(this.current.diff.files);
       }
@@ -98,6 +111,17 @@ export class ReviewController {
     await this.refresh();
   }
 
+  async setViewPref(patch: { viewMode?: ViewMode; whitespace?: boolean }): Promise<void> {
+    const before = this.state.getPref();
+    await this.state.setPref(patch);
+    if (patch.whitespace !== undefined && patch.whitespace !== before.whitespace) {
+      await this.refresh(); // whitespace changes the diff itself → re-fetch
+    } else {
+      this._onDidChange.fire();
+      this.panelPost?.('stateChanged', this.buildState()); // view mode is render-only
+    }
+  }
+
   async setViewed(filePath: string, viewed: boolean): Promise<void> {
     const pref = this.state.getPref();
     if (!pref.repoRoot) return;
@@ -109,5 +133,20 @@ export class ReviewController {
 
   reveal(filePath: string): void {
     this.panelPost?.('revealFile', { filePath });
+  }
+
+  /** Full old/new file text for whole-file syntax highlighting, for the current repo + source. */
+  async getFileTexts(
+    files: { path: string; oldPath?: string }[]
+  ): Promise<{ texts: Record<string, { old: string; new: string }> }> {
+    const pref = this.state.getPref();
+    if (!pref.repoRoot) return { texts: {} };
+    const texts = await getFileTexts({
+      repoRoot: pref.repoRoot,
+      source: pref.source,
+      baseRef: pref.baseRef,
+      files,
+    });
+    return { texts };
   }
 }

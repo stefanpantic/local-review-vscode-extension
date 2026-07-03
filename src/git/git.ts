@@ -1,8 +1,9 @@
 // The one git access module (CLI via child_process). Plain functions — a thin, testable seam.
-// The vscode.git API could augment discovery later; the CLI is the guaranteed path. See docs/spec.md §6.
+// The vscode.git API could augment discovery later; the CLI is the guaranteed path.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as path from 'node:path';
+import * as fs from 'node:fs/promises';
 import * as vscode from 'vscode';
 import type { DiffSource, RepoInfo, DiffResult } from '../model/ReviewDiff';
 import { diffArgs } from './diffSources';
@@ -77,11 +78,12 @@ export async function getDiff(req: {
   source: DiffSource;
   baseRef?: string;
   includeUntracked?: boolean;
+  whitespace?: boolean;
 }): Promise<DiffResult> {
-  const { repoRoot, source, baseRef, includeUntracked } = req;
+  const { repoRoot, source, baseRef, includeUntracked, whitespace } = req;
   try {
     const unbornHead = await isUnbornHead(repoRoot);
-    const raw = await git(repoRoot, diffArgs(source, { unbornHead, baseRef }));
+    const raw = await git(repoRoot, diffArgs(source, { unbornHead, baseRef, whitespace }));
     const headSha = unbornHead ? null : (await git(repoRoot, ['rev-parse', 'HEAD'])).trim();
     const diff = normalize(raw, { repoRoot, source, headSha, baseRef });
 
@@ -97,4 +99,53 @@ export async function getDiff(req: {
   } catch (err) {
     return { state: 'error', repoRoot, message: err instanceof Error ? err.message : String(err) };
   }
+}
+
+// --- Whole-file text (for syntax highlighting: tokenize the file, then clip to the diff) ---
+
+type SideSpec = { worktree: true } | { rev: string }; // rev '' means the index (`git show :path`)
+
+/** The (old, new) content sources for a diff source. */
+function sidesFor(source: DiffSource, baseRef?: string): { old: SideSpec; new: SideSpec } {
+  switch (source) {
+    case 'unstaged':
+      return { old: { rev: '' }, new: { worktree: true } }; // index → working tree
+    case 'staged':
+      return { old: { rev: 'HEAD' }, new: { rev: '' } }; // HEAD → index
+    case 'vs-base':
+      return { old: { rev: baseRef ?? 'HEAD' }, new: { rev: 'HEAD' } };
+    case 'worktree-vs-head':
+    default:
+      return { old: { rev: 'HEAD' }, new: { worktree: true } };
+  }
+}
+
+async function readSide(repoRoot: string, spec: SideSpec, filePath: string): Promise<string> {
+  try {
+    if ('worktree' in spec) return await fs.readFile(path.join(repoRoot, filePath), 'utf8');
+    return await git(repoRoot, ['show', `${spec.rev}:${filePath}`]); // rev '' → `:path` (the index)
+  } catch {
+    return ''; // absent on this side (added/deleted), binary, or unreadable — highlighter falls back
+  }
+}
+
+/** Full old/new text for each requested file, resolved per side from fs (working tree) or `git show` (rev/index). */
+export async function getFileTexts(req: {
+  repoRoot: string;
+  source: DiffSource;
+  baseRef?: string;
+  files: { path: string; oldPath?: string }[];
+}): Promise<Record<string, { old: string; new: string }>> {
+  const sides = sidesFor(req.source, req.baseRef);
+  const out: Record<string, { old: string; new: string }> = {};
+  await Promise.all(
+    req.files.map(async (f) => {
+      const [oldText, newText] = await Promise.all([
+        readSide(req.repoRoot, sides.old, f.oldPath ?? f.path),
+        readSide(req.repoRoot, sides.new, f.path),
+      ]);
+      out[f.path] = { old: oldText, new: newText };
+    })
+  );
+  return out;
 }

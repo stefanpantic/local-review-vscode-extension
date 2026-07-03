@@ -99,17 +99,46 @@
         "command": "localReview.revealFile",
         "title": "Reveal File",
         "category": "Local Review"
+      },
+      {
+        "command": "localReview.toggleViewMode",
+        "title": "Toggle Split / Unified View",
+        "category": "Local Review"
+      },
+      {
+        "command": "localReview.toggleWhitespace",
+        "title": "Toggle Hide Whitespace",
+        "category": "Local Review"
       }
     ],
     "menus": {
       "view/title": [
-        { "command": "localReview.startReview", "when": "view == localReview.files", "group": "navigation@1" },
-        { "command": "localReview.selectSource", "when": "view == localReview.files", "group": "navigation@2" },
-        { "command": "localReview.selectRepo", "when": "view == localReview.files", "group": "navigation@3" },
-        { "command": "localReview.refresh", "when": "view == localReview.files", "group": "navigation@4" }
+        {
+          "command": "localReview.startReview",
+          "when": "view == localReview.files",
+          "group": "navigation@1"
+        },
+        {
+          "command": "localReview.selectSource",
+          "when": "view == localReview.files",
+          "group": "navigation@2"
+        },
+        {
+          "command": "localReview.selectRepo",
+          "when": "view == localReview.files",
+          "group": "navigation@3"
+        },
+        {
+          "command": "localReview.refresh",
+          "when": "view == localReview.files",
+          "group": "navigation@4"
+        }
       ],
       "commandPalette": [
-        { "command": "localReview.revealFile", "when": "false" }
+        {
+          "command": "localReview.revealFile",
+          "when": "false"
+        }
       ]
     },
     "configuration": {
@@ -117,9 +146,33 @@
       "properties": {
         "localReview.defaultSource": {
           "type": "string",
-          "enum": ["worktree-vs-head", "unstaged", "staged", "vs-base"],
+          "enum": [
+            "worktree-vs-head",
+            "unstaged",
+            "staged",
+            "vs-base"
+          ],
           "default": "worktree-vs-head",
           "description": "Default diff source when a review is first opened."
+        },
+        "localReview.defaultViewMode": {
+          "type": "string",
+          "enum": [
+            "unified",
+            "split"
+          ],
+          "default": "unified",
+          "description": "Default diff rendering mode."
+        },
+        "localReview.defaultHideWhitespace": {
+          "type": "boolean",
+          "default": false,
+          "description": "Hide whitespace-only changes by default (git diff -w)."
+        },
+        "localReview.log": {
+          "type": "boolean",
+          "default": false,
+          "description": "Write diagnostic logs to the 'Local Review' output channel."
         },
         "localReview.includeUntracked": {
           "type": "boolean",
@@ -149,7 +202,8 @@
     "package": "vsce package --no-dependencies"
   },
   "dependencies": {
-    "parse-diff": "^0.11.1"
+    "parse-diff": "^0.11.1",
+    "shiki": "^4.3.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

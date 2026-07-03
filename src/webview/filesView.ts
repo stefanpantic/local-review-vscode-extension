@@ -28,9 +28,8 @@ function baseName(p: string): string {
 }
 
 /**
- * The sidebar changed-file list: a hierarchical native TreeView (folders → files, GitHub-style;
- * see docs/decisions/0005-ui-placement-editor-tab.md). Native checkboxes carry per-file "viewed"
- * state; clicking a file reveals it in the panel.
+ * The sidebar changed-file list: a hierarchical native TreeView (folders → files, GitHub-style).
+ * Native checkboxes carry per-file "viewed" state; clicking a file reveals it in the panel.
  */
 export class FilesView implements vscode.TreeDataProvider<TreeNode> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();

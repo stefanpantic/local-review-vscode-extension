@@ -1,7 +1,8 @@
-// Core, dependency-free data model. See docs/protocol.md §2 & §5.
+// Core, dependency-free data model shared by the extension host and the webview.
 
 export type DiffSource = 'worktree-vs-head' | 'unstaged' | 'staged' | 'vs-base';
 export type Side = 'old' | 'new';
+export type ViewMode = 'unified' | 'split';
 
 export type FileStatus =
   | 'added'

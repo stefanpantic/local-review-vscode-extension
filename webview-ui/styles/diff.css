@@ -139,7 +139,7 @@ body {
   color: var(--vscode-foreground);
 }
 
-/* Iteration 2: summary bar, per-file sections, collapse chevron, viewed control */
+/* summary bar, per-file sections, collapse chevron, viewed control */
 .lr-summary {
   display: flex;
   align-items: center;
@@ -150,7 +150,6 @@ body {
   color: var(--vscode-foreground);
 }
 .lr-source {
-  margin-left: auto;
   color: var(--vscode-descriptionForeground);
 }
 
@@ -194,3 +193,69 @@ body {
 .lr-noncommentable {
   margin-left: 0;
 }
+
+/* view toggles, split view, syntax tokens */
+.lr-toggles {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--vscode-font-family);
+}
+.lr-segmented {
+  display: inline-flex;
+  border: 1px solid var(--lr-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.lr-segmented button {
+  padding: 1px 8px;
+  border: none;
+  background: transparent;
+  color: var(--vscode-foreground);
+  font-size: 11px;
+  cursor: pointer;
+}
+.lr-segmented button.lr-seg-active {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+.lr-ws {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  user-select: none;
+}
+.lr-ws input {
+  margin: 0;
+}
+
+/* Split view */
+.lr-srow {
+  display: flex;
+  align-items: stretch;
+}
+.lr-scell {
+  flex: 1 1 50%;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  white-space: pre;
+}
+.lr-scell:first-child {
+  border-right: 1px solid var(--lr-border);
+}
+.lr-scell.lr-add {
+  background: var(--lr-add-bg);
+}
+.lr-scell.lr-del {
+  background: var(--lr-del-bg);
+}
+.lr-scell-empty {
+  background: var(--vscode-diffEditor-unchangedRegionBackground, rgba(128, 128, 128, 0.05));
+}
+
+/* Syntax token color is applied inline from the active theme (see highlight.ts). */

@@ -1,5 +1,4 @@
 // Turn a raw unified diff into a normalized ReviewDiff. Pure & synchronous — unit-tested with fixtures.
-// See docs/protocol.md §2 and docs/decisions/0003-anchoring-model.md.
 import parse from 'parse-diff';
 import type { DiffRow, DiffSource, FileDiff, FileStatus, Hunk, ReviewDiff } from '../model/ReviewDiff';
 

@@ -1,13 +1,14 @@
-# ADR-0008: Whitespace hiding is visual-first
+# ADR-0008: Whitespace hiding via `git diff -w`
 
-- **Status:** Accepted · **Date:** 2026-07-03 · **Scope:** established pre-Iteration 1 (implemented Iteration 3)
+- **Status:** Accepted (updated in Iteration 3) · **Date:** 2026-07-03
 
 ## Context
-A "hide whitespace" toggle can be implemented two ways: (a) re-run the diff with `git diff -w`, which **changes which lines appear and their numbers**, or (b) visually de-emphasize/collapse whitespace-only changes in the existing diff. Option (a) shifts the coordinate system that comments anchor to, and mixing it with anchoring is a drift-bug factory.
+A "hide whitespace" toggle can (a) re-run the diff with `git diff -w` (ignore-all-space), which changes which lines appear and their numbers, or (b) visually de-emphasize whitespace-only rows without changing line numbers. This ADR originally leaned toward (b), out of concern that (a) would destabilize the coordinates comments anchor to.
 
 ## Decision
-Default to **visual-first** whitespace handling: de-emphasize (dim) or collapse whitespace-only rows without changing the underlying diff or its line numbers, so anchoring coordinates stay stable. If a true `-w` re-diff is later offered as an option, treat it as a **distinct `DiffSource`** so anchors made against it remain coherent.
+Use **(a) `git diff -w`**. "Hide whitespace" is understood to mean *ignore whitespace-only changes* — exactly what `-w` produces, in one flag. The original anchoring concern no longer applies: comments use **content-match anchoring** ([ADR-0003](./0003-anchoring-model.md)) that re-anchors against whatever diff is currently loaded, so a whitespace-ignored diff is just another view and comments re-match by content. Whitespace is a per-view flag threaded into the `git diff` invocation, not a separate `DiffSource`.
 
 ## Consequences
-- The whitespace toggle never destabilizes existing comment anchors.
-- Visual de-emphasis may not perfectly match `git -w` semantics in every edge case; acceptable for a review aid.
+- "Hide whitespace" matches user expectations and git semantics exactly.
+- Toggling whitespace **re-fetches** the diff (a git call), not merely a re-render.
+- When comments arrive (it.4), they must re-match after a whitespace toggle — the content-match design handles this; verify then.

@@ -1,4 +1,4 @@
-// Webview side of the lean message bridge. See docs/protocol.md §6.
+// Webview side of the lean message bridge.
 import type { Message, Requests, RequestType, Events, EventType } from '../src/protocol/messages';
 
 interface VsCodeApi {
@@ -53,4 +53,9 @@ export function on<K extends EventType>(type: K, cb: (payload: Events[K]) => voi
   return () => {
     set?.delete(listener);
   };
+}
+
+/** Fire-and-forget diagnostic log to the host (shown in the 'Local Review' output channel when logging is on). */
+export function dlog(...parts: unknown[]): void {
+  vscode.postMessage({ type: 'log', payload: parts } as Message);
 }

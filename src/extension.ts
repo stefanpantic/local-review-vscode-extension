@@ -40,6 +40,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     vscode.commands.registerCommand('localReview.selectSource', () => pickSource(controller)),
     vscode.commands.registerCommand('localReview.selectRepo', () => pickRepo(controller)),
+    vscode.commands.registerCommand('localReview.toggleViewMode', () =>
+      controller.setViewPref({ viewMode: controller.viewMode === 'split' ? 'unified' : 'split' })
+    ),
+    vscode.commands.registerCommand('localReview.toggleWhitespace', () =>
+      controller.setViewPref({ whitespace: !controller.whitespace })
+    ),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('localReview')) void controller.refresh();
     })

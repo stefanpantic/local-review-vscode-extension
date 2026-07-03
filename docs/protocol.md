@@ -18,6 +18,9 @@ type DiffSource =
 
 // Which version of the file a row / comment belongs to.
 type Side = 'old' | 'new';   // old = base/left, new = head/right
+
+// Diff rendering mode.  [it.3]
+type ViewMode = 'unified' | 'split';
 ```
 
 ## 2. Normalized diff model  `[it.1]`
@@ -83,6 +86,8 @@ interface ReviewStatePayload {
   baseRef?: string;
   repos: RepoInfo[];
   viewed: Record<string, boolean>;   // filePath -> viewed, for the current repo+source
+  viewMode: ViewMode;                // [it.3]
+  whitespace: boolean;               // [it.3] hide whitespace (git diff -w)
   config: { largeFileThreshold: number };
 }
 ```
@@ -104,6 +109,8 @@ type RenderRow =
 ```
 
 *(Any windowing helpers — e.g. spacer/placeholder rows — are an internal detail of the it.7 virtualizer and are intentionally NOT part of this cross-boundary contract until then.)*
+
+**Syntax highlighting `[it.3]`** runs webview-side with Shiki (`shiki/core` + the JS regex engine — no WASM, so no CSP relaxation) and Shiki's bundled `one-dark-pro` (dark) / `light-plus` (light) theme, selected from the webview `body` class (no theme JSON crosses the bridge). To give every row real file context (multi-line comments, template strings, enclosing scope) the webview tokenizes each **whole file** and clips the tokens to the diff by line number; it fetches that text via `getFileTexts` (§7.1) and falls back to per-hunk tokenization when a file's text is unavailable.
 
 ## 4. Comments & anchoring  `[it.4]`
 
@@ -195,6 +202,8 @@ The webview keeps `let seq = 0` and a `Map<number, {resolve, reject}>`. A reques
 |---|---|---|---|
 | `getState` | `{}` | `ReviewStatePayload` (repos + diff + viewed + config for the current selection) | it.1/it.2 |
 | `setViewed` | `{ filePath, viewed }` | `{ ok: true }` | it.2 |
+| `setViewPref` | `{ viewMode?, whitespace? }` | `{ ok: true }` | it.3 |
+| `getFileTexts` | `{ files: {path, oldPath?}[] }` | `{ texts }` — full old/new text per file (host resolves repo/source/base) for whole-file highlighting | it.3 |
 | `getThreads` | `{ repoRoot }` | `CommentThread[]` | it.4 |
 | `addComment` | `{ anchor, body }` | `CommentThread` | it.4 |
 | `editComment` | `{ threadId, commentId, body }` | `CommentThread` | it.4 |
