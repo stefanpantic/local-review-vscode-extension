@@ -104,7 +104,7 @@ function candidateRows(file: FileDiff, side: Side): { lineNo: number; text: stri
 function bestMatch(
   candidates: { lineNo: number; text: string }[],
   line: string,
-  target: number
+  target: number,
 ): { lineNo: number } | undefined {
   let best: { lineNo: number } | undefined;
   let bestDist = Infinity;

@@ -3,18 +3,22 @@
 - **Status:** Accepted · **Date:** 2026-07-03 · **Scope:** established pre-Iteration 1 (saved reviews Iteration 5, export Iteration 6)
 
 ## Context
+
 Two related-but-different needs: **save** a review to resume later, and **export** it for a coding agent. Conflating them muddies both. Separately, a distinct `SavedReview` type nearly duplicated the active review, and a JSON export sidecar had no consumer in v1.
 
 ## Decision
+
 - **One `Review` type** serves both roles. The active review is the unnamed current working set (keyed by `repoRoot`). **Saving** freezes a named, dated copy (optional `id`/`name`/`createdAt`/`headSha`) into a saved-reviews list. **Loading** copies one back as the active set, re-anchored, **replacing** the current active review (warn if it has unsaved threads).
 - **Export is separate and Markdown-only:** well-structured Markdown (headings per file, fenced hunks, explicit line ranges, comment text, stable ids) so it's already agent-parseable. **No JSON sidecar** until a concrete machine consumer exists. Export can run on the active review or a saved review.
 
 ## Consequences
+
 - Saved reviews and export have clear, non-overlapping semantics and share no duplicated type.
 - "Save then clear" ships as one coherent unit in Iteration 5; clearing is never destructive-without-recourse.
 - One serialization to keep stable (Markdown), not two.
 
 ## Iteration 5 addendum — branch-tied sessions (supersedes the active-vs-saved framing)
+
 The active-vs-saved snapshot model above is **superseded** by uniform **review sessions**, because storing the active review as raw `CommentThread[]` while saved reviews were `Review` objects was gratuitous special-casing.
 
 - **One uniform `Review`** `{ id, name, branch, createdAt, updatedAt, headSha, threads }` — no active-vs-saved split. There is no separate "active" shape; the review you're editing is just the **current** one.

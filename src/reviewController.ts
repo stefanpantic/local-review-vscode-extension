@@ -26,7 +26,7 @@ export class ReviewController {
 
   constructor(
     private readonly state: ReviewState,
-    private readonly reviewStore: ReviewStore
+    private readonly reviewStore: ReviewStore,
   ) {}
 
   bindPanel(post: PanelPost): void {
@@ -62,9 +62,7 @@ export class ReviewController {
   buildState(): ReviewStatePayload {
     const pref = this.state.getPref();
     const paths = this.files().map((f) => f.path);
-    const largeFileThreshold = vscode.workspace
-      .getConfiguration('localReview')
-      .get<number>('largeFileThreshold', 1000);
+    const largeFileThreshold = vscode.workspace.getConfiguration('localReview').get<number>('largeFileThreshold', 1000);
     return {
       result: this.current,
       repoRoot: pref.repoRoot,
@@ -231,9 +229,7 @@ export class ReviewController {
     } else {
       this.branches = await listBranches(repoRoot);
       await this.reviewStore.migrateLegacy(repoRoot, this.branchKey(repoRoot), this.headShaFor(repoRoot));
-      const includeUntracked = vscode.workspace
-        .getConfiguration('localReview')
-        .get<boolean>('includeUntracked', true);
+      const includeUntracked = vscode.workspace.getConfiguration('localReview').get<boolean>('includeUntracked', true);
       this.current = await getDiff({
         repoRoot,
         source: pref.source,
@@ -319,7 +315,12 @@ export class ReviewController {
       const original = rangeText(diff, loc.filePath, loc.side, loc.startLine, loc.endLine ?? loc.startLine);
       comment.suggestion = { original, replacement: loc.suggestion };
     }
-    const thread: CommentThread = { id: randomUUID(), anchor: createAnchor(diff, loc), comments: [comment], resolved: false };
+    const thread: CommentThread = {
+      id: randomUUID(),
+      anchor: createAnchor(diff, loc),
+      comments: [comment],
+      resolved: false,
+    };
     const review = await this.reviewStore.ensureCurrent(repoRoot, branch, headSha);
     await this.reviewStore.updateThreads(repoRoot, review.id, [...review.threads, thread]);
     this.afterThreadChange();
@@ -340,7 +341,12 @@ export class ReviewController {
     return reanchorOne(thread, diff);
   }
 
-  async editComment(threadId: string, commentId: string, body: string, suggestion?: string | null): Promise<CommentThread> {
+  async editComment(
+    threadId: string,
+    commentId: string,
+    body: string,
+    suggestion?: string | null,
+  ): Promise<CommentThread> {
     const { repoRoot, branch, diff } = this.ctx();
     const review = this.reviewStore.current(repoRoot, branch);
     const thread = review?.threads.find((t) => t.id === threadId);
@@ -348,7 +354,8 @@ export class ReviewController {
     if (!review || !thread || !comment) throw new Error('Comment not found.');
     comment.body = body;
     comment.updatedAt = new Date().toISOString();
-    if (suggestion === null) delete comment.suggestion; // explicitly cleared
+    if (suggestion === null)
+      delete comment.suggestion; // explicitly cleared
     else if (suggestion != null) comment.suggestion = this.suggestionFor(thread, diff, suggestion);
     await this.reviewStore.updateThreads(repoRoot, review.id, review.threads);
     this.afterThreadChange();
@@ -381,7 +388,7 @@ export class ReviewController {
 
   /** Full old/new file text for whole-file syntax highlighting, for the current repo + source. */
   async getFileTexts(
-    files: { path: string; oldPath?: string }[]
+    files: { path: string; oldPath?: string }[],
   ): Promise<{ texts: Record<string, { old: string; new: string }> }> {
     const pref = this.state.getPref();
     if (!pref.repoRoot) return { texts: {} };

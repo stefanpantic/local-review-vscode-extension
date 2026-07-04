@@ -27,7 +27,7 @@ export function exportReviewMarkdown(meta: ExportMeta, threads: CommentThread[],
 
   // Sort by file then start line so same-file comments stay adjacent (each heading is its own `path:line`).
   const sorted = [...selected].sort(
-    (a, b) => a.anchor.filePath.localeCompare(b.anchor.filePath) || startLine(a) - startLine(b)
+    (a, b) => a.anchor.filePath.localeCompare(b.anchor.filePath) || startLine(a) - startLine(b),
   );
   const fileCount = new Set(selected.map((t) => t.anchor.filePath)).size;
   const unresolved = selected.filter((t) => !t.resolved).length;

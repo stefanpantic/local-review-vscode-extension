@@ -6,7 +6,7 @@ export const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 export function diffArgs(
   source: DiffSource,
-  opts: { unbornHead: boolean; baseRef?: string; whitespace?: boolean }
+  opts: { unbornHead: boolean; baseRef?: string; whitespace?: boolean },
 ): string[] {
   const base = ['diff', '--no-color', '--find-renames'];
   if (opts.whitespace) base.push('--ignore-all-space');

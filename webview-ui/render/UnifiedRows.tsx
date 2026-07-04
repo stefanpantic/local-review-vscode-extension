@@ -114,7 +114,7 @@ export function TokenText({
             style={t.color ? { color: t.color } : undefined}
           >
             {t.content.slice(seg.from - off, seg.to - off)}
-          </span>
+          </span>,
         );
       }
       off += t.content.length;
@@ -219,7 +219,9 @@ export function UnifiedHunk({
           onCollapse={expand.onCollapseUp}
         />
       )}
-      {expand?.up.map((u, k) => <CodeLine key={`u${k}`} row={u.row} tokens={u.tokens} />)}
+      {expand?.up.map((u, k) => (
+        <CodeLine key={`u${k}`} row={u.row} tokens={u.tokens} />
+      ))}
       {hunk.rows.map((row, ri) => (
         <Fragment key={ri}>
           <CodeLine
@@ -232,7 +234,9 @@ export function UnifiedHunk({
           {below?.(row)}
         </Fragment>
       ))}
-      {expand?.down.map((d, k) => <CodeLine key={`d${k}`} row={d.row} tokens={d.tokens} />)}
+      {expand?.down.map((d, k) => (
+        <CodeLine key={`d${k}`} row={d.row} tokens={d.tokens} />
+      ))}
       {expand && (expand.canDown || expand.hasDown) && (
         <ExpandBar
           dir="down"

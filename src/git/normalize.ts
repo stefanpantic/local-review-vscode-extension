@@ -4,7 +4,7 @@ import type { DiffRow, DiffSource, FileDiff, FileStatus, Hunk, ReviewDiff } from
 
 export function normalize(
   raw: string,
-  meta: { repoRoot: string; source: DiffSource; headSha: string | null; baseRef?: string }
+  meta: { repoRoot: string; source: DiffSource; headSha: string | null; baseRef?: string },
 ): ReviewDiff {
   const files = splitFileBlocks(raw).map(parseFileBlock);
   return {
@@ -23,7 +23,7 @@ export function normalize(
  */
 export function synthesizeUntracked(
   raw: string,
-  meta: { repoRoot: string; source: DiffSource; headSha: string | null; baseRef?: string }
+  meta: { repoRoot: string; source: DiffSource; headSha: string | null; baseRef?: string },
 ): FileDiff[] {
   return normalize(raw, meta).files.map((f) => ({
     ...f,
@@ -155,8 +155,14 @@ function countType(hunks: Hunk[], t: 'add' | 'del'): number {
 }
 
 function submoduleNote(lines: string[]): string | undefined {
-  const oldc = lines.find((l) => /^-Subproject commit /.test(l))?.replace('-Subproject commit ', '').trim();
-  const newc = lines.find((l) => /^\+Subproject commit /.test(l))?.replace('+Subproject commit ', '').trim();
+  const oldc = lines
+    .find((l) => /^-Subproject commit /.test(l))
+    ?.replace('-Subproject commit ', '')
+    .trim();
+  const newc = lines
+    .find((l) => /^\+Subproject commit /.test(l))
+    ?.replace('+Subproject commit ', '')
+    .trim();
   if (oldc || newc) return `Submodule ${short(oldc)}→${short(newc)}`;
   return undefined;
 }

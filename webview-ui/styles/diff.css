@@ -77,8 +77,12 @@ body {
   gap: 6px;
   font-family: var(--vscode-editor-font-family, monospace);
 }
-.lr-add-count { color: var(--vscode-gitDecoration-addedResourceForeground, #2ea043); }
-.lr-del-count { color: var(--vscode-gitDecoration-deletedResourceForeground, #f85149); }
+.lr-add-count {
+  color: var(--vscode-gitDecoration-addedResourceForeground, #2ea043);
+}
+.lr-del-count {
+  color: var(--vscode-gitDecoration-deletedResourceForeground, #f85149);
+}
 
 .lr-note {
   color: var(--vscode-descriptionForeground);
@@ -133,8 +137,12 @@ body {
   align-items: baseline;
   white-space: pre;
 }
-.lr-row.lr-add { background: var(--lr-add-bg); }
-.lr-row.lr-del { background: var(--lr-del-bg); }
+.lr-row.lr-add {
+  background: var(--lr-add-bg);
+}
+.lr-row.lr-del {
+  background: var(--lr-del-bg);
+}
 
 .lr-gutter {
   flex: none;

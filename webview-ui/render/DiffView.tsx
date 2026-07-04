@@ -224,7 +224,9 @@ export function DiffView({
   const rangeCurrentText = (filePath: string, side: Side, start: number, end: number): string =>
     diff && side === 'new' ? rangeText(diff, filePath, side, start, end) : '';
   const suggestBaseFor = (t: CommentThread): string =>
-    t.resolvedLine != null ? rangeCurrentText(t.anchor.filePath, t.anchor.side, t.resolvedLine, t.resolvedEndLine ?? t.resolvedLine) : '';
+    t.resolvedLine != null
+      ? rangeCurrentText(t.anchor.filePath, t.anchor.side, t.resolvedLine, t.resolvedEndLine ?? t.resolvedLine)
+      : '';
 
   // Tokenize suggestion code in the anchored file's language (plain fallback until the highlighter loads).
   const tokenizeCode =
@@ -246,7 +248,7 @@ export function DiffView({
         endLine: c.endLine,
         body,
         suggestion: suggestion ?? undefined,
-      })
+      }),
     );
   };
 
@@ -270,7 +272,12 @@ export function DiffView({
           <CommentForm
             submitLabel="Comment"
             canSuggest={composer.side === 'new'}
-            suggestBase={rangeCurrentText(composer.filePath, composer.side, composer.startLine, composer.endLine ?? composer.startLine)}
+            suggestBase={rangeCurrentText(
+              composer.filePath,
+              composer.side,
+              composer.startLine,
+              composer.endLine ?? composer.startLine,
+            )}
             onSubmit={submitAdd}
             onCancel={() => setComposer(null)}
           />
@@ -386,7 +393,9 @@ export function DiffView({
           ? {
               onDown: (side, line) => setDrag({ filePath: file.path, side, from: line, to: line }),
               onEnter: (side, line) =>
-                setDrag((prev) => (prev && prev.filePath === file.path && prev.side === side ? { ...prev, to: line } : prev)),
+                setDrag((prev) =>
+                  prev && prev.filePath === file.path && prev.side === side ? { ...prev, to: line } : prev,
+                ),
               selected: (side, line) =>
                 !!drag &&
                 drag.filePath === file.path &&
@@ -438,7 +447,7 @@ export function DiffView({
                       changes={changesByRow}
                       expand={hunkExpand(file, hi, hunk)}
                     />
-                  )
+                  ),
                 )}
               </div>
             )}
@@ -461,28 +470,28 @@ export function DiffView({
           </div>
           {outdatedOpen &&
             outdated.map((t) => {
-            const hunk = parseHunk(t.anchor.originalDiffHunk);
-            return (
-              <div className="lr-outdated-item" key={t.id}>
-                <div className="lr-outdated-path">{t.anchor.filePath}</div>
-                {hunk ? (
-                  <div className="lr-outdated-diff">
-                    <UnifiedHunk hunk={hunk} tokens={NO_TOKENS} />
+              const hunk = parseHunk(t.anchor.originalDiffHunk);
+              return (
+                <div className="lr-outdated-item" key={t.id}>
+                  <div className="lr-outdated-path">{t.anchor.filePath}</div>
+                  {hunk ? (
+                    <div className="lr-outdated-diff">
+                      <UnifiedHunk hunk={hunk} tokens={NO_TOKENS} />
+                    </div>
+                  ) : (
+                    t.anchor.originalDiffHunk && <pre className="lr-outdated-hunk">{t.anchor.originalDiffHunk}</pre>
+                  )}
+                  <div className="lr-below">
+                    <CommentThreadView
+                      thread={t}
+                      ops={ops(t.id)}
+                      suggestBase={suggestBaseFor(t)}
+                      tokenize={tokenizeCode(t.anchor.filePath)}
+                    />
                   </div>
-                ) : (
-                  t.anchor.originalDiffHunk && <pre className="lr-outdated-hunk">{t.anchor.originalDiffHunk}</pre>
-                )}
-                <div className="lr-below">
-                  <CommentThreadView
-                    thread={t}
-                    ops={ops(t.id)}
-                    suggestBase={suggestBaseFor(t)}
-                    tokenize={tokenizeCode(t.anchor.filePath)}
-                  />
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
         </section>
       )}
     </div>

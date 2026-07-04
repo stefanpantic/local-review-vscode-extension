@@ -21,10 +21,7 @@ export class ReviewPanel {
     }
     const panel = vscode.window.createWebviewPanel('localReview.panel', 'Local Review', vscode.ViewColumn.Active, {
       enableScripts: true,
-      localResourceRoots: [
-        vscode.Uri.joinPath(extensionUri, 'dist'),
-        vscode.Uri.joinPath(extensionUri, 'media'),
-      ],
+      localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'dist'), vscode.Uri.joinPath(extensionUri, 'media')],
     });
     ReviewPanel.current = new ReviewPanel(panel, extensionUri, controller);
   }
@@ -36,7 +33,7 @@ export class ReviewPanel {
   private constructor(
     panel: vscode.WebviewPanel,
     extensionUri: vscode.Uri,
-    private readonly controller: ReviewController
+    private readonly controller: ReviewController,
   ) {
     this.panel = panel;
     this.panel.webview.html = buildHtml(panel.webview, extensionUri);
@@ -60,7 +57,7 @@ export class ReviewPanel {
         resolveThread: (p) => this.controller.resolveThread(p.threadId, p.resolved),
       },
       this.disposables,
-      (parts) => log('[webview]', ...parts)
+      (parts) => log('[webview]', ...parts),
     );
     this.controller.bindPanel((type, payload) => this.rpc.emit(type, payload));
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);

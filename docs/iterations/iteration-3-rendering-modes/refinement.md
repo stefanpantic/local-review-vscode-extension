@@ -6,7 +6,7 @@
 
 ## Decisions (locked)
 
-- **D1 — Whitespace hiding via `git diff -w` re-diff** (**accepted**), superseding the visual-dim lean of [ADR-0008](../../decisions/0008-whitespace-visual-only.md). `-w` (ignore-all-space) is exactly what "hide whitespace" means and is one git flag; it's safe because comments (it.4) use *content-match* anchoring ([ADR-0003](../../decisions/0003-anchoring-model.md)) that re-anchors against whatever diff is loaded. ADR-0008 will be updated to reflect this.
+- **D1 — Whitespace hiding via `git diff -w` re-diff** (**accepted**), superseding the visual-dim lean of [ADR-0008](../../decisions/0008-whitespace-visual-only.md). `-w` (ignore-all-space) is exactly what "hide whitespace" means and is one git flag; it's safe because comments (it.4) use _content-match_ anchoring ([ADR-0003](../../decisions/0003-anchoring-model.md)) that re-anchors against whatever diff is loaded. ADR-0008 will be updated to reflect this.
 - **D2 — Syntax highlighting with Shiki** (**accepted — production-grade, not an MVP shortcut**). Shiki uses real TextMate grammars, so highlighting reaches editor fidelity. Implemented with the fine-grained `shiki/core` (curated language set, tree-shaken) + the **JavaScript regex engine** (no WASM → the strict webview CSP is unchanged, no `'wasm-unsafe-eval'`). Theme: Shiki's **bundled `one-dark-pro` (dark) / `light-plus` (light)**, selected from the webview `body` class — entirely webview-side, no host theme round-trip. Tokenization is **whole-file, clipped to the diff by line number**: the webview fetches each file's full old/new text (`getFileTexts`) and tokenizes it whole so tokens carry real file context (multi-line comments, enclosing scope); per-hunk tokenization is the fallback when text is unavailable.
 
 ## Goal
@@ -26,6 +26,7 @@ In the review panel: toggle **Unified / Split**, toggle **Hide whitespace**, and
 ## Scope
 
 ### In scope
+
 - **Split renderer**: a pure `alignHunk(rows) → SplitRow[]` (`{ left?, right? }`) pairing del/add and spanning context; a `SplitRows` React view; Unified stays the it.1 renderer.
 - **View controls** in the summary bar: a Unified/Split segmented control + a "Hide whitespace" checkbox, sending `setViewPref` to the host (persisted, broadcast via `stateChanged`); mirrored title-bar commands `localReview.toggleViewMode` / `localReview.toggleWhitespace`.
 - **Whitespace** (per D1): a `whitespace` flag threaded into `getDiff` → `diffArgs` adds `--ignore-all-space`.
@@ -33,6 +34,7 @@ In the review panel: toggle **Unified / Split**, toggle **Hide whitespace**, and
 - **Config**: `localReview.defaultViewMode` (`unified|split`), `localReview.defaultHideWhitespace` (bool).
 
 ### Out of scope (deferred)
+
 - Comments / anchoring → **it.4**. Saved reviews → **it.5**. Export → **it.6**. Virtualization, on-scroll lazy highlighting → **it.7** (it.3 highlights eagerly; fine at current sizes). Word-level intra-line highlighting → backlog.
 
 ## Technical design
@@ -44,6 +46,7 @@ In the review panel: toggle **Unified / Split**, toggle **Hide whitespace**, and
 - **Protocol additions** (`it.3`): request `setViewPref { viewMode?, whitespace? } → { ok }`; `ReviewStatePayload` gains `viewMode` + `whitespace`. No new events (the existing `stateChanged` carries them).
 
 ## Deliverables
+
 ```
 src/reviewState.ts            # Pref += viewMode, whitespace
 src/reviewController.ts       # thread whitespace into getDiff; setViewPref; payload fields
@@ -60,16 +63,19 @@ test/splitRows.test.ts        # alignment cases
 ```
 
 ## Suggested build order
+
 1. Pref + `setViewPref` + summary-bar toggles (view mode only) → Unified/Split switch working.
 2. `splitRows` + `SplitRows` renderer (the alignment core).
 3. Whitespace flag → `getDiff`.
 4. Syntax highlighting.
 
 ## Testing
+
 - **Unit:** `alignHunk` (context-only, pure adds, pure dels, mixed del→add pairing, uneven runs).
 - **Manual E2E (`F5`):** toggle Unified/Split (alignment looks right); Hide whitespace on a whitespace-only change (it disappears / returns); highlighting in a few languages; both modes with binary/rename/collapsed files; reload persists the toggles.
 
 ## Risks / open questions
+
 - **Whole-file highlighting** needs the file's full text from the host (`getFileTexts`: fs for the working tree, `git show <rev>:path` otherwise); falls back to per-hunk when text is unavailable or the file is very large (>400 KB). CRLF keeps a cosmetic `\r` per line.
 - **`-w` line-number shift** (D1) is harmless now (no comments yet); when it.4 lands, content-match anchoring re-matches — verify then.
 - **Split alignment** for large adjacent add/del runs is heuristic (index pairing), not a full LCS; good enough for review. Note if it looks off on big rewrites.

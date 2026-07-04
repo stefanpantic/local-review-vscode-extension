@@ -60,9 +60,7 @@ function App() {
 
     const offState = on('stateChanged', (s) => setState(s));
     const offViewed = on('viewedUpdated', ({ viewed }) => setState((prev) => (prev ? { ...prev, viewed } : prev)));
-    const offThreads = on('threadsUpdated', ({ threads }) =>
-      setState((prev) => (prev ? { ...prev, threads } : prev))
-    );
+    const offThreads = on('threadsUpdated', ({ threads }) => setState((prev) => (prev ? { ...prev, threads } : prev)));
     const offReveal = on('revealFile', ({ filePath }) => revealFile(filePath));
     const offNav = on('navigate', ({ target, dir }) => navigateTo(target, dir));
     return () => {

@@ -37,7 +37,7 @@ test('header, counts, file:line headings, and stable id', () => {
   const md = exportReviewMarkdown(
     META,
     [thread(), thread({ id: 't2', anchor: { ...thread().anchor, filePath: 'src/b.ts' } })],
-    { scope: 'all' }
+    { scope: 'all' },
   );
   assert.match(md, /^# Local Review — Review 1/);
   assert.match(md, /\*\*branch\*\* feature\/x/);
@@ -55,7 +55,9 @@ test('single-line location, diff context, and body', () => {
 });
 
 test('replies render with a Reply prefix', () => {
-  const md = exportReviewMarkdown(META, [thread({ comments: [comment('root'), comment('a reply')] })], { scope: 'all' });
+  const md = exportReviewMarkdown(META, [thread({ comments: [comment('root'), comment('a reply')] })], {
+    scope: 'all',
+  });
   assert.match(md, /root/);
   assert.match(md, /\*\*Reply:\*\* a reply/);
 });
@@ -73,11 +75,9 @@ test('a suggestion emits a ```suggestion block', () => {
 });
 
 test('unresolved scope excludes resolved threads', () => {
-  const md = exportReviewMarkdown(
-    META,
-    [thread({ id: 't1', resolved: true }), thread({ id: 't2', resolved: false })],
-    { scope: 'unresolved' }
-  );
+  const md = exportReviewMarkdown(META, [thread({ id: 't1', resolved: true }), thread({ id: 't2', resolved: false })], {
+    scope: 'unresolved',
+  });
   assert.doesNotMatch(md, /<!-- thread t1 -->/);
   assert.match(md, /<!-- thread t2 -->/);
   assert.match(md, /1 comment thread across 1 file · 1 unresolved/);
@@ -87,7 +87,7 @@ test('file scope keeps only the chosen file', () => {
   const md = exportReviewMarkdown(
     META,
     [thread({ id: 't1' }), thread({ id: 't2', anchor: { ...thread().anchor, filePath: 'src/b.ts' } })],
-    { scope: 'file', file: 'src/b.ts' }
+    { scope: 'file', file: 'src/b.ts' },
   );
   assert.doesNotMatch(md, /a\.ts/);
   assert.match(md, /## `src\/b\.ts:42`/);
@@ -101,7 +101,7 @@ test('as-reviewed uses anchor.lineNumber; re-anchored uses resolvedLine + status
   const reanchored = exportReviewMarkdown(
     META,
     [{ ...base, status: 'moved' as AnchorStatus, resolvedLine: 55, resolvedEndLine: 55 }],
-    { scope: 'all' }
+    { scope: 'all' },
   );
   assert.match(reanchored, /## `src\/a\.ts:55` · moved/);
 });

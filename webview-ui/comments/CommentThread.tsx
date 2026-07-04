@@ -22,7 +22,15 @@ function lineLabel(t: CommentThread): string {
 }
 
 /** A proposed change, rendered as a syntax-highlighted before→after diff (original removed, replacement added). */
-function Suggestion({ original, replacement, tokenize }: { original: string; replacement: string; tokenize: Tokenize }) {
+function Suggestion({
+  original,
+  replacement,
+  tokenize,
+}: {
+  original: string;
+  replacement: string;
+  tokenize: Tokenize;
+}) {
   const oToks = tokenize(original);
   const rToks = tokenize(replacement);
   return (

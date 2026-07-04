@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import type { ReviewController } from '../reviewController';
 import type { CommentThread } from '../model/Comment';
 
-type CommentsNode = { kind: 'file'; filePath: string; threads: CommentThread[] } | { kind: 'thread'; thread: CommentThread };
+type CommentsNode =
+  { kind: 'file'; filePath: string; threads: CommentThread[] } | { kind: 'thread'; thread: CommentThread };
 
 function preview(t: CommentThread): string {
   const firstLine = (t.comments[0]?.body ?? '').split('\n', 1)[0].trim();
@@ -47,7 +48,7 @@ export class CommentsView implements vscode.TreeDataProvider<CommentsNode> {
     item.description = replies > 0 ? `${lineLabel} · ${replies} ${replies === 1 ? 'reply' : 'replies'}` : lineLabel;
     const tag = statusTag(t);
     item.tooltip = new vscode.MarkdownString(
-      `**${lineLabel}**${tag ? ` · _${tag}_` : ''}\n\n${t.comments.map((c) => c.body).join('\n\n---\n\n')}`
+      `**${lineLabel}**${tag ? ` · _${tag}_` : ''}\n\n${t.comments.map((c) => c.body).join('\n\n---\n\n')}`,
     );
     item.iconPath = new vscode.ThemeIcon(t.resolved ? 'check' : t.status === 'outdated' ? 'warning' : 'comment');
     item.command = { command: 'localReview.revealFile', title: 'Reveal', arguments: [t.anchor.filePath] };

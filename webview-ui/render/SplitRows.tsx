@@ -90,7 +90,9 @@ export function SplitHunk({
           onCollapse={expand.onCollapseUp}
         />
       )}
-      {expand?.up.map((u, k) => <ExpandedSplitRow key={`u${k}`} row={u.row} tokens={u.tokens} />)}
+      {expand?.up.map((u, k) => (
+        <ExpandedSplitRow key={`u${k}`} row={u.row} tokens={u.tokens} />
+      ))}
       {alignHunk(hunk.rows).map((sr, i) => (
         <Fragment key={i}>
           <div className="lr-srow">
@@ -115,7 +117,9 @@ export function SplitHunk({
           {sr.right && sr.right !== sr.left && below?.(sr.right)}
         </Fragment>
       ))}
-      {expand?.down.map((d, k) => <ExpandedSplitRow key={`d${k}`} row={d.row} tokens={d.tokens} />)}
+      {expand?.down.map((d, k) => (
+        <ExpandedSplitRow key={`d${k}`} row={d.row} tokens={d.tokens} />
+      ))}
       {expand && (expand.canDown || expand.hasDown) && (
         <ExpandBar
           dir="down"

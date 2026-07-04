@@ -17,7 +17,14 @@ class FakeStore implements KeyValueStore {
 function thread(id: string): CommentThread {
   return {
     id,
-    anchor: { filePath: 'a.ts', side: 'new', lineNumber: 1, line: 'x', source: 'worktree-vs-head', originalDiffHunk: '' },
+    anchor: {
+      filePath: 'a.ts',
+      side: 'new',
+      lineNumber: 1,
+      line: 'x',
+      source: 'worktree-vs-head',
+      originalDiffHunk: '',
+    },
     comments: [{ id: `c${id}`, body: 'hi', createdAt: '', updatedAt: '' }],
     resolved: false,
   };
@@ -29,7 +36,10 @@ test('create makes the review current on its branch', async () => {
   assert.equal(r.name, 'Review 1');
   assert.equal(r.branch, 'main');
   assert.equal(store.current('/r', 'main')?.id, r.id);
-  assert.deepEqual(store.forBranch('/r', 'main').map((x) => x.id), [r.id]);
+  assert.deepEqual(
+    store.forBranch('/r', 'main').map((x) => x.id),
+    [r.id],
+  );
 });
 
 test('ensureCurrent creates once, then returns the same review', async () => {

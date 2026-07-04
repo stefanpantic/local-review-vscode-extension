@@ -50,15 +50,42 @@ export function activeTheme(): string {
 }
 
 const EXT_LANG: Record<string, string> = {
-  ts: 'typescript', mts: 'typescript', cts: 'typescript', tsx: 'tsx',
-  js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'jsx',
-  json: 'json', jsonc: 'json',
-  py: 'python', go: 'go', rs: 'rust', java: 'java',
-  c: 'c', h: 'c', cc: 'cpp', cpp: 'cpp', cxx: 'cpp', hpp: 'cpp', hh: 'cpp',
-  cs: 'csharp', rb: 'ruby', php: 'php',
-  html: 'html', htm: 'html', css: 'css', scss: 'scss',
-  sh: 'shellscript', bash: 'shellscript', zsh: 'shellscript',
-  yml: 'yaml', yaml: 'yaml', md: 'markdown', markdown: 'markdown', sql: 'sql',
+  ts: 'typescript',
+  mts: 'typescript',
+  cts: 'typescript',
+  tsx: 'tsx',
+  js: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  jsx: 'jsx',
+  json: 'json',
+  jsonc: 'json',
+  py: 'python',
+  go: 'go',
+  rs: 'rust',
+  java: 'java',
+  c: 'c',
+  h: 'c',
+  cc: 'cpp',
+  cpp: 'cpp',
+  cxx: 'cpp',
+  hpp: 'cpp',
+  hh: 'cpp',
+  cs: 'csharp',
+  rb: 'ruby',
+  php: 'php',
+  html: 'html',
+  htm: 'html',
+  css: 'css',
+  scss: 'scss',
+  sh: 'shellscript',
+  bash: 'shellscript',
+  zsh: 'shellscript',
+  yml: 'yaml',
+  yaml: 'yaml',
+  md: 'markdown',
+  markdown: 'markdown',
+  sql: 'sql',
 };
 
 export function langForPath(path: string): string | undefined {
@@ -90,7 +117,7 @@ export function tokenizeFullFiles(
   hl: HighlighterCore,
   theme: string,
   file: FileDiff,
-  texts: { old: string; new: string }
+  texts: { old: string; new: string },
 ): Map<DiffRow, Tok[] | null> {
   const map = new Map<DiffRow, Tok[] | null>();
   const lang = langForPath(file.path);
@@ -114,8 +141,18 @@ export function tokenizeFile(hl: HighlighterCore, theme: string, file: FileDiff)
   const lang = langForPath(file.path);
   if (!lang) return map;
   for (const hunk of file.hunks) {
-    const newToks = toksFor(hl, lang, theme, hunk.rows.filter((r) => r.type !== 'del').map((r) => r.text));
-    const oldToks = toksFor(hl, lang, theme, hunk.rows.filter((r) => r.type !== 'add').map((r) => r.text));
+    const newToks = toksFor(
+      hl,
+      lang,
+      theme,
+      hunk.rows.filter((r) => r.type !== 'del').map((r) => r.text),
+    );
+    const oldToks = toksFor(
+      hl,
+      lang,
+      theme,
+      hunk.rows.filter((r) => r.type !== 'add').map((r) => r.text),
+    );
     let ni = 0;
     let oi = 0;
     for (const row of hunk.rows) {

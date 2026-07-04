@@ -2,9 +2,7 @@ import type * as vscode from 'vscode';
 import type { Message, Requests, RequestType, Events, EventType } from '../protocol/messages';
 
 type RequestHandlers = {
-  [K in RequestType]: (
-    payload: Requests[K]['payload']
-  ) => Promise<Requests[K]['response']> | Requests[K]['response'];
+  [K in RequestType]: (payload: Requests[K]['payload']) => Promise<Requests[K]['response']> | Requests[K]['response'];
 };
 
 /**
@@ -16,7 +14,7 @@ export class RpcHost {
     private readonly webview: vscode.Webview,
     private readonly handlers: RequestHandlers,
     disposables: vscode.Disposable[],
-    private readonly onLog?: (parts: unknown[]) => void
+    private readonly onLog?: (parts: unknown[]) => void,
   ) {
     disposables.push(this.webview.onDidReceiveMessage((msg: Message) => void this.dispatch(msg)));
   }

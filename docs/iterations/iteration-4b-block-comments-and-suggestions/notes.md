@@ -1,6 +1,7 @@
 # Iteration 4b — notes (deviations & E2E)
 
 ## Deviations / decisions during build
+
 - **Block comments render against their LAST line** (GitHub-style), header shows the full range ("Lines a–b"); single-line comments render at their line and read "Line n". The thread keys off `resolvedEndLine`.
 - **Only multi-line blocks get a range highlight.** A single-line comment shows just its thread (no persistent line highlight) — matches GitHub and avoids every commented line lighting up. The highlight covers `resolvedLine … resolvedEndLine` only when the range spans >1 line.
 - **The range highlight is a solid left rail + a translucent wash over the whole row** (`box-shadow: inset 3px focusBorder, inset …999px rangeHighlightBackground`) — the wash layers over the diff add/del tints rather than overpainting them, so a block spanning changed lines stays legible and keeps its green/red.
@@ -12,9 +13,11 @@
 - **A no-op suggestion can't be posted**: when the replacement equals the original code the submit is disabled with a red hint ("Suggestion matches the original. Edit it to post.").
 
 ## Automated verification (PASS)
+
 - build, typecheck, `pnpm test` (38/38 — new: `resolvedEndLine` range-follow, `rangeText` capture), lint.
 
 ## Manual E2E — completes AC1–AC7 (tick in refinement.md)
+
 1. `pnpm run build`, reload the Extension Dev Host (⌘R).
 2. Drag across several lines → **+** → comment: the whole block is highlighted (rail + wash), the composer/thread sits under the **last** line, and the header reads "Lines a–b"; reload → persists (AC1).
 3. Insert lines above the block → **Local Review: Refresh** → the whole block moves together, badge "moved" (AC2).
@@ -24,4 +27,5 @@
 7. Comment on a removed (`-`) line → no **Suggest change** button (AC7).
 
 ## Follow-ups (deferred)
+
 - Multiple suggestions per comment (v1 is one). Applying a suggestion to the working tree (excluded by design). ` ```suggestion ` **export serialization** → it.6 (data is captured now: range + original + replacement).

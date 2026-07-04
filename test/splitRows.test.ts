@@ -39,6 +39,6 @@ test('pure additions occupy the right side only', () => {
     [
       [undefined, 'add'],
       [undefined, 'add'],
-    ]
+    ],
   );
 });

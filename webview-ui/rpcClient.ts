@@ -33,7 +33,7 @@ window.addEventListener('message', (ev: MessageEvent<Message>) => {
 
 export function request<K extends RequestType>(
   type: K,
-  payload: Requests[K]['payload']
+  payload: Requests[K]['payload'],
 ): Promise<Requests[K]['response']> {
   const id = ++seq;
   return new Promise<Requests[K]['response']>((resolve, reject) => {

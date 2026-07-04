@@ -156,7 +156,7 @@ export async function getFileTexts(req: {
         readSide(req.repoRoot, sides.new, f.path),
       ]);
       out[f.path] = { old: oldText, new: newText };
-    })
+    }),
   );
   return out;
 }

@@ -3,8 +3,7 @@
 import type { FileDiff } from './model/ReviewDiff';
 
 export type TreeNode =
-  | { kind: 'dir'; label: string; path: string; children: TreeNode[] }
-  | { kind: 'file'; file: FileDiff };
+  { kind: 'dir'; label: string; path: string; children: TreeNode[] } | { kind: 'file'; file: FileDiff };
 
 interface MutableDir {
   dirs: Map<string, MutableDir>;

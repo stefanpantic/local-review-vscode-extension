@@ -45,7 +45,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     },
     null,
-    context.subscriptions
+    context.subscriptions,
   );
 
   context.subscriptions.push(
@@ -58,10 +58,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (rev) void controller.switchReview(rev.id);
     }),
     vscode.commands.registerCommand('localReview.renameReview', (r) =>
-      renameReview(controller, asReview(r) ?? asReview(reviewsTree.selection[0]))
+      renameReview(controller, asReview(r) ?? asReview(reviewsTree.selection[0])),
     ),
     vscode.commands.registerCommand('localReview.deleteReview', (r) =>
-      deleteReview(controller, asReview(r) ?? asReview(reviewsTree.selection[0]))
+      deleteReview(controller, asReview(r) ?? asReview(reviewsTree.selection[0])),
     ),
     vscode.commands.registerCommand('localReview.moveReviewToCurrentBranch', (r) => {
       const rev = asReview(r) ?? asReview(reviewsTree.selection[0]);
@@ -85,14 +85,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('localReview.selectSource', () => pickSource(controller)),
     vscode.commands.registerCommand('localReview.selectRepo', () => pickRepo(controller)),
     vscode.commands.registerCommand('localReview.toggleViewMode', () =>
-      controller.setViewPref({ viewMode: controller.viewMode === 'split' ? 'unified' : 'split' })
+      controller.setViewPref({ viewMode: controller.viewMode === 'split' ? 'unified' : 'split' }),
     ),
     vscode.commands.registerCommand('localReview.toggleWhitespace', () =>
-      controller.setViewPref({ whitespace: !controller.whitespace })
+      controller.setViewPref({ whitespace: !controller.whitespace }),
     ),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('localReview')) void controller.refresh();
-    })
+    }),
   );
 
   await controller.refresh();
@@ -117,7 +117,7 @@ async function pickSource(controller: ReviewController): Promise<void> {
       description: s.source === current ? `${s.description} · current` : s.description,
       source: s.source,
     })),
-    { placeHolder: 'Select the diff source to review' }
+    { placeHolder: 'Select the diff source to review' },
   );
   if (!picked) return;
   if (picked.source === 'vs-base') {
@@ -147,7 +147,7 @@ async function exportReview(controller: ReviewController, arg?: Review): Promise
       { label: 'Unresolved only', scope: 'unresolved' as const },
       { label: 'One file…', scope: 'file' as const },
     ],
-    { placeHolder: 'Export scope' }
+    { placeHolder: 'Export scope' },
   );
   if (!scopePick) return;
 
@@ -169,7 +169,7 @@ async function exportReview(controller: ReviewController, arg?: Review): Promise
         { label: 'Current positions', description: 're-anchored to the working tree (recommended)', live: true },
         { label: 'As reviewed', description: 'line numbers as captured when commented', live: false },
       ],
-      { placeHolder: 'Line references' }
+      { placeHolder: 'Line references' },
     );
     if (!modePick) return;
     live = modePick.live;
@@ -194,7 +194,7 @@ async function exportReview(controller: ReviewController, arg?: Review): Promise
       { label: 'Open in editor', action: 'editor' as const },
       { label: 'Save to file…', action: 'file' as const },
     ],
-    { placeHolder: 'Export to' }
+    { placeHolder: 'Export to' },
   );
   if (!target) return;
   await deliverExport(target.action, md, review.name);
@@ -244,7 +244,7 @@ async function pickRepo(controller: ReviewController): Promise<void> {
   }
   const picked = await vscode.window.showQuickPick(
     repos.map((r) => ({ label: r.name, description: r.repoRoot, repoRoot: r.repoRoot })),
-    { placeHolder: 'Repository' }
+    { placeHolder: 'Repository' },
   );
   if (picked) await controller.setRepo(picked.repoRoot);
 }

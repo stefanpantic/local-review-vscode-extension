@@ -36,7 +36,7 @@ export function watchRepoChanges(onChange: () => void, debounceMs = 300): vscode
       api.onDidOpenRepository((r) => {
         wire(r);
         trigger();
-      })
+      }),
     );
   });
 
