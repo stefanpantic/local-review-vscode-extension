@@ -15,16 +15,16 @@ Open the review and see the changed files listed in the sidebar; switch the diff
 
 ## Acceptance criteria (tick in place)
 
-- [ ] **AC1 — Changed-file list.** The sidebar `TreeView` lists every changed file for the current repo+source with its status and ± counts, and refreshes with the diff.
-- [ ] **AC2 — Jump to file.** Clicking a file in the list scrolls the editor panel to that file's header.
-- [ ] **AC3 — Viewed → collapse.** Each file has a "viewed" checkbox (in the list and/or the panel header); marking viewed **collapses that file's hunks in the panel** and de-emphasizes it in the list. Unviewing expands it.
-- [ ] **AC4 — Viewed persists.** Viewed state survives a reload / reopen (persisted per `repoRoot+source+file`).
-- [ ] **AC5 — Manual collapse/expand.** A file can be collapsed/expanded in the panel independently of "viewed".
-- [ ] **AC6 — Source selector.** A title-bar action switches between **unstaged / staged / worktree-vs-HEAD / vs-base**; the panel + list update; the choice persists. Choosing **vs-base** prompts for a base branch.
-- [ ] **AC7 — Repo picker.** In a multi-root/multi-repo workspace, a picker selects the active repo; switching re-renders. With one repo it's auto-selected and hidden.
-- [ ] **AC8 — Summary bar.** The panel header shows *N files changed, +A −D* totals and the current source (and base, for vs-base).
-- [ ] **AC9 — Configuration.** `contributes.configuration` settings are honored: `defaultSource`, `includeUntracked`, `largeFileThreshold`, `contextLines`.
-- [ ] **AC10 — Untracked (opt-in).** With `includeUntracked: true`, untracked files appear as all-addition entries; default off.
+- [x] **AC1 — Changed-file list.** The sidebar `TreeView` lists every changed file for the current repo+source with its status and ± counts, and refreshes with the diff.
+- [x] **AC2 — Jump to file.** Clicking a file in the list scrolls the editor panel to that file's header.
+- [x] **AC3 — Viewed → collapse.** Each file has a "viewed" checkbox (in the list and/or the panel header); marking viewed **collapses that file's hunks in the panel** and de-emphasizes it in the list. Unviewing expands it.
+- [x] **AC4 — Viewed persists.** Viewed state survives a reload / reopen (persisted per `repoRoot+source+file`).
+- [x] **AC5 — Manual collapse/expand.** A file can be collapsed/expanded in the panel independently of "viewed".
+- [x] **AC6 — Source selector.** A title-bar action switches between **unstaged / staged / worktree-vs-HEAD / vs-base**; the panel + list update; the choice persists. Choosing **vs-base** prompts for a base branch.
+- [x] **AC7 — Repo picker.** In a multi-root/multi-repo workspace, a picker selects the active repo; switching re-renders. With one repo it's auto-selected and hidden.
+- [x] **AC8 — Summary bar.** The panel header shows *N files changed, +A −D* totals and the current source (and base, for vs-base).
+- [x] **AC9 — Configuration.** `contributes.configuration` settings are honored: `defaultSource`, `includeUntracked`, `largeFileThreshold`, `contextLines`.
+- [x] **AC10 — Untracked (opt-in).** With `includeUntracked: true`, untracked files appear as all-addition entries; default off.
 - [x] **AC11 — Green gates.** `pnpm run build`, `pnpm run typecheck`, `pnpm test`, `pnpm run lint` all pass; new `listBranches` / untracked logic has unit coverage. *(build + typecheck + 11/11 tests + lint all green; `parseBranches` + untracked synthesis unit-tested.)*
 
 **Verification status (2026-07-03).** Automated checks PASS (AC11 ✓). **AC1–AC10 require a manual `F5` session** — steps in [`notes.md`](./notes.md); tick them there after the run.

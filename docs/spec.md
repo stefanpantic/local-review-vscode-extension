@@ -18,7 +18,8 @@ Reviewing your own changes before you hand them off is most effective when it ha
 - **Unified** and **side-by-side** diff rendering, toggleable.
 - **Whitespace-hiding** toggle.
 - **Syntax highlighting**.
-- **Inline comments** on single lines and **line ranges**, on **added and removed** lines, with **edit / delete / reply / resolve**.
+- **Inline comments** on single lines and **line ranges** (block), on **added and removed** lines, with **edit / delete / reply / resolve**.
+- **Suggestions**: propose replacement code inside a comment (rendered as a before→after diff), captured for the export — never written to disk.
 - Comments **persist across reloads** and exhibit GitHub-style **line drift** (they follow their lines as code changes; they become *outdated* rather than being lost when they can't be matched).
 - **Review sessions**: save the current review as a named snapshot, clear it, and load a saved review back later.
 - **Agent-ready structured export** as well-structured **Markdown**.
@@ -83,6 +84,7 @@ Work proceeds **one iteration at a time**: refine → implement → verify. The 
 | 2 | **Diff sources & navigation** | Sidebar **WebviewView** (changed-file list, navigation); source selector (unstaged/staged/vs-HEAD/vs base branch); multi-root repo picker; collapse/expand; "viewed" checkboxes; sticky headers; summary bar; `contributes.configuration`. |
 | 3 | **Rendering modes & fidelity** | Unified ↔ side-by-side toggle; whitespace-hiding toggle (visual-first); syntax highlighting (on-demand). |
 | 4 | **Commenting & line drift** | Active review; gutter "+" on line/range, old/new side incl. deleted lines; threads-as-rows; add/edit/delete/reply/resolve; persistence (guarded reads); the content-match anchor / **outdated** engine; `id`-correlated mutations if a caller must await its own result. |
+| 4b | **Block comments & suggestions** | Multi-line (block) comments with range highlight; GitHub-style **suggestions** — propose replacement code inside a comment, rendered as a before→after diff — captured for export, never written to disk. |
 | 5 | **Review sessions** | Save (named snapshot) / clear (confirm) / load (re-anchored, replace semantics) / list / delete from the sidebar. One `Review` type. |
 | 6 | **Structured export** | "Generate review" → well-structured **Markdown** (headings per file, fenced hunks, explicit line ranges) with comment text and stable ids; granularity (all/unresolved/current-file); clipboard + file; export active or saved review. |
 | 7 | **Performance & polish** | Windowed virtualization *if measured necessary*; live refresh (debounced watcher); keyboard nav + jump-to-file; polished states; large-file guards. |

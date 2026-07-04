@@ -284,7 +284,7 @@ body {
 
 /* Syntax token color is applied inline from the active theme (see highlight.ts). */
 
-/* --- Comments (it.4) --- */
+/* --- Comments --- */
 
 /* Gutter "+" affordance: hidden until the row is hovered. */
 .lr-row,
@@ -316,6 +316,13 @@ body {
 }
 .lr-selected {
   background: var(--vscode-editor-selectionBackground, rgba(88, 166, 255, 0.25)) !important;
+}
+/* Rows within a multi-line comment's range: a solid left rail + a translucent wash over the whole row
+   (the wash layers over the diff add/del tints rather than replacing them). */
+.lr-commented {
+  box-shadow:
+    inset 3px 0 0 var(--vscode-focusBorder),
+    inset 0 0 0 999px var(--vscode-editor-rangeHighlightBackground, rgba(88, 166, 255, 0.09));
 }
 
 /* Thread + composer rows sit beneath their code line; the card itself provides the surface. */
@@ -409,9 +416,11 @@ body {
 .lr-comment-editing {
   display: block;
 }
-.lr-comment-body {
+.lr-comment-main {
   flex: 1 1 auto;
   min-width: 0;
+}
+.lr-comment-body {
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--vscode-foreground);
@@ -473,6 +482,61 @@ body {
   margin-top: 6px;
   display: flex;
   gap: 8px;
+}
+.lr-form-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--vscode-errorForeground, #f85149);
+}
+
+/* Suggestion editor (monospace code area in the form) */
+.lr-suggest-input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 48px;
+  margin-top: 6px;
+  padding: 6px 8px;
+  resize: vertical;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--lr-border));
+  border-radius: 4px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  white-space: pre;
+}
+.lr-suggest-input:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder);
+}
+
+/* Rendered suggestion: a before→after mini-diff inside a comment */
+.lr-suggestion {
+  margin-top: 6px;
+  border: 1px solid var(--lr-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.lr-suggestion-head {
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  border-bottom: 1px solid var(--lr-border);
+}
+.lr-suggestion-diff {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  white-space: pre;
+  overflow-x: auto;
+}
+.lr-sugg-line {
+  padding: 0 8px;
+}
+.lr-sugg-del {
+  background: var(--lr-del-bg);
+}
+.lr-sugg-add {
+  background: var(--lr-add-bg);
 }
 
 /* Buttons: primary/secondary pill, small variant, and a subtle ghost for per-comment actions. */

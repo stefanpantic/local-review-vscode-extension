@@ -4,7 +4,19 @@ import type { Tok } from './highlight';
 import { alignHunk } from './splitAlign';
 import { HunkHeaderRow, TokenText, type AddCtl } from './UnifiedRows';
 
-function SplitCell({ row, side, tokens, add }: { row?: DiffRow; side: Side; tokens?: Tok[] | null; add?: AddCtl }) {
+function SplitCell({
+  row,
+  side,
+  tokens,
+  add,
+  commented,
+}: {
+  row?: DiffRow;
+  side: Side;
+  tokens?: Tok[] | null;
+  add?: AddCtl;
+  commented?: boolean;
+}) {
   if (!row) return <div className="lr-scell lr-scell-empty" />;
   const lineNo = side === 'old' ? row.oldLineNo : row.newLineNo;
   const change = side === 'old' ? (row.type === 'del' ? 'lr-del' : '') : row.type === 'add' ? 'lr-add' : '';
@@ -12,7 +24,7 @@ function SplitCell({ row, side, tokens, add }: { row?: DiffRow; side: Side; toke
   const selected = canAdd ? add!.selected(side, lineNo) : false;
   return (
     <div
-      className={`lr-scell ${change}${selected ? ' lr-selected' : ''}`}
+      className={`lr-scell ${change}${selected ? ' lr-selected' : ''}${commented ? ' lr-commented' : ''}`}
       onMouseEnter={canAdd ? () => add!.onEnter(side, lineNo) : undefined}
     >
       {canAdd && (
@@ -40,11 +52,13 @@ export function SplitHunk({
   tokens,
   add,
   below,
+  commented,
 }: {
   hunk: Hunk;
   tokens: Map<DiffRow, Tok[] | null>;
   add?: AddCtl;
   below?: (row: DiffRow) => ReactNode;
+  commented?: Set<DiffRow>;
 }) {
   return (
     <>
@@ -52,8 +66,20 @@ export function SplitHunk({
       {alignHunk(hunk.rows).map((sr, i) => (
         <Fragment key={i}>
           <div className="lr-srow">
-            <SplitCell row={sr.left} side="old" tokens={sr.left ? tokens.get(sr.left) : null} add={add} />
-            <SplitCell row={sr.right} side="new" tokens={sr.right ? tokens.get(sr.right) : null} add={add} />
+            <SplitCell
+              row={sr.left}
+              side="old"
+              tokens={sr.left ? tokens.get(sr.left) : null}
+              add={add}
+              commented={sr.left ? commented?.has(sr.left) : false}
+            />
+            <SplitCell
+              row={sr.right}
+              side="new"
+              tokens={sr.right ? tokens.get(sr.right) : null}
+              add={add}
+              commented={sr.right ? commented?.has(sr.right) : false}
+            />
           </div>
           {sr.left && below?.(sr.left)}
           {sr.right && sr.right !== sr.left && below?.(sr.right)}

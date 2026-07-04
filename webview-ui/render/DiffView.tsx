@@ -6,8 +6,17 @@ import type { Anchor, CommentThread } from '../../src/model/Comment';
 import { request, dlog } from '../rpcClient';
 import { UnifiedHunk, type AddCtl } from './UnifiedRows';
 import { SplitHunk } from './SplitRows';
-import { getHighlighter, activeTheme, langForPath, tokenizeFile, tokenizeFullFiles, type Tok } from './highlight';
+import {
+  getHighlighter,
+  activeTheme,
+  langForPath,
+  tokenizeFile,
+  tokenizeFullFiles,
+  highlightLines,
+  type Tok,
+} from './highlight';
 import { parseHunk } from './parseHunk';
+import { rangeText } from '../../src/comments/anchoring';
 import { CommentThreadView, type ThreadOps } from '../comments/CommentThread';
 import { CommentForm } from '../comments/CommentForm';
 import { FileHeader } from '../components/FileHeader';
@@ -125,23 +134,41 @@ export function DiffView({
     return map;
   }, [hl, diff, fileTexts]);
 
-  // Split anchored/moved threads (render inline against their row) from outdated ones (render at the end).
-  const { threadsByRow, outdated } = useMemo(() => {
+  // Anchored/moved threads render inline against their row; outdated ones render at the end.
+  // A multi-line (block) comment also highlights every row in its resolved range.
+  const { threadsByRow, outdated, commentedRows } = useMemo(() => {
     const byRow = new Map<DiffRow, CommentThread[]>();
+    const commented = new Set<DiffRow>();
     const stale: CommentThread[] = [];
     if (diff) {
       for (const t of threadList ?? []) {
-        const row = t.resolvedLine != null ? findRowFor(diff, t.anchor, t.resolvedLine) : undefined;
-        if (row) (byRow.get(row) ?? byRow.set(row, []).get(row)!).push(t);
-        else stale.push(t);
+        if (t.resolvedLine == null) {
+          stale.push(t);
+          continue;
+        }
+        const start = t.resolvedLine;
+        const end = t.resolvedEndLine ?? start;
+        // A block comment renders against its LAST line (GitHub-style); fall back to the start line.
+        const row = findRowFor(diff, t.anchor, end) ?? findRowFor(diff, t.anchor, start);
+        if (!row) {
+          stale.push(t);
+          continue;
+        }
+        (byRow.get(row) ?? byRow.set(row, []).get(row)!).push(t);
+        if (end > start) {
+          for (let ln = start; ln <= end; ln++) {
+            const rr = findRowFor(diff, t.anchor, ln);
+            if (rr) commented.add(rr);
+          }
+        }
       }
     }
-    return { threadsByRow: byRow, outdated: stale };
+    return { threadsByRow: byRow, outdated: stale, commentedRows: commented };
   }, [threadList, diff]);
 
   const ops = (threadId: string): ThreadOps => ({
-    onReply: (body) => mutate(request('replyComment', { threadId, body })),
-    onEdit: (commentId, body) => mutate(request('editComment', { threadId, commentId, body })),
+    onReply: (body, suggestion) => mutate(request('replyComment', { threadId, body, suggestion })),
+    onEdit: (commentId, body, suggestion) => mutate(request('editComment', { threadId, commentId, body, suggestion })),
     onDelete: (commentId) => mutate(request('deleteComment', { threadId, commentId })),
     onResolve: (resolved) => mutate(request('resolveThread', { threadId, resolved })),
   });
@@ -150,11 +177,34 @@ export function DiffView({
     void p.catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }
 
-  const submitAdd = (body: string): void => {
+  // Current new-side text of a range, to pre-fill the suggestion editor (new-side only).
+  const rangeCurrentText = (filePath: string, side: Side, start: number, end: number): string =>
+    diff && side === 'new' ? rangeText(diff, filePath, side, start, end) : '';
+  const suggestBaseFor = (t: CommentThread): string =>
+    t.resolvedLine != null ? rangeCurrentText(t.anchor.filePath, t.anchor.side, t.resolvedLine, t.resolvedEndLine ?? t.resolvedLine) : '';
+
+  // Tokenize suggestion code in the anchored file's language (plain fallback until the highlighter loads).
+  const tokenizeCode =
+    (filePath: string) =>
+    (text: string): Tok[][] => {
+      const lang = hl ? langForPath(filePath) : undefined;
+      return hl && lang ? highlightLines(hl, lang, activeTheme(), text) : text.split('\n').map((l) => [{ content: l }]);
+    };
+
+  const submitAdd = (body: string, suggestion: string | null | undefined): void => {
     if (!composer) return;
     const c = composer;
     setComposer(null);
-    mutate(request('addComment', { filePath: c.filePath, side: c.side, startLine: c.startLine, endLine: c.endLine, body }));
+    mutate(
+      request('addComment', {
+        filePath: c.filePath,
+        side: c.side,
+        startLine: c.startLine,
+        endLine: c.endLine,
+        body,
+        suggestion: suggestion ?? undefined,
+      })
+    );
   };
 
   const renderBelow = (filePath: string, row: DiffRow): ReactNode => {
@@ -165,9 +215,23 @@ export function DiffView({
     return (
       <div className="lr-below">
         {rowThreads.map((t) => (
-          <CommentThreadView key={t.id} thread={t} ops={ops(t.id)} />
+          <CommentThreadView
+            key={t.id}
+            thread={t}
+            ops={ops(t.id)}
+            suggestBase={suggestBaseFor(t)}
+            tokenize={tokenizeCode(t.anchor.filePath)}
+          />
         ))}
-        {showComposer && <CommentForm submitLabel="Comment" onSubmit={submitAdd} onCancel={() => setComposer(null)} />}
+        {showComposer && composer && (
+          <CommentForm
+            submitLabel="Comment"
+            canSuggest={composer.side === 'new'}
+            suggestBase={rangeCurrentText(composer.filePath, composer.side, composer.startLine, composer.endLine ?? composer.startLine)}
+            onSubmit={submitAdd}
+            onCancel={() => setComposer(null)}
+          />
+        )}
       </div>
     );
   };
@@ -246,9 +310,9 @@ export function DiffView({
               <div className="lr-file-body">
                 {file.hunks.map((hunk, hi) =>
                   state.viewMode === 'split' ? (
-                    <SplitHunk key={hi} hunk={hunk} tokens={tokens} add={add} below={below} />
+                    <SplitHunk key={hi} hunk={hunk} tokens={tokens} add={add} below={below} commented={commentedRows} />
                   ) : (
-                    <UnifiedHunk key={hi} hunk={hunk} tokens={tokens} add={add} below={below} />
+                    <UnifiedHunk key={hi} hunk={hunk} tokens={tokens} add={add} below={below} commented={commentedRows} />
                   )
                 )}
               </div>
@@ -284,7 +348,12 @@ export function DiffView({
                   t.anchor.originalDiffHunk && <pre className="lr-outdated-hunk">{t.anchor.originalDiffHunk}</pre>
                 )}
                 <div className="lr-below">
-                  <CommentThreadView thread={t} ops={ops(t.id)} />
+                  <CommentThreadView
+                    thread={t}
+                    ops={ops(t.id)}
+                    suggestBase={suggestBaseFor(t)}
+                    tokenize={tokenizeCode(t.anchor.filePath)}
+                  />
                 </div>
               </div>
             );

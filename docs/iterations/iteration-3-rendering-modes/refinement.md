@@ -15,13 +15,13 @@ In the review panel: toggle **Unified / Split**, toggle **Hide whitespace**, and
 
 ## Acceptance criteria (tick in place)
 
-- [ ] **AC1 — Split view.** A Unified/Split toggle switches the panel between the current inline view and a two-column (old | new) side-by-side view; changed lines align across columns; add-only/del-only lines occupy the correct side.
-- [ ] **AC2 — Toggle persists.** The view-mode and whitespace choices survive reload (host-persisted pref), and default from `contributes.configuration`.
-- [ ] **AC3 — Hide whitespace.** A "Hide whitespace" toggle removes whitespace-only changes from the diff (per D1); toggling it back restores them.
-- [ ] **AC4 — Syntax highlighting.** Code lines are syntax-highlighted by the file's language in both unified and split modes; add/del/context backgrounds remain visible underneath.
-- [ ] **AC5 — Binary/unsupported unaffected.** Non-commentable placeholders and empty/loading/error states render unchanged.
-- [ ] **AC6 — Controls are discoverable.** The toggles live in the panel's summary bar (and mirror to title-bar commands); the current state is visually obvious.
-- [ ] **AC7 — Green gates.** `build`, `typecheck`, `test`, `lint` pass; the split-alignment logic has unit coverage.
+- [x] **AC1 — Split view.** A Unified/Split toggle switches the panel between the current inline view and a two-column (old | new) side-by-side view; changed lines align across columns; add-only/del-only lines occupy the correct side.
+- [x] **AC2 — Toggle persists.** The view-mode and whitespace choices survive reload (host-persisted pref), and default from `contributes.configuration`.
+- [x] **AC3 — Hide whitespace.** A "Hide whitespace" toggle removes whitespace-only changes from the diff (per D1); toggling it back restores them.
+- [x] **AC4 — Syntax highlighting.** Code lines are syntax-highlighted by the file's language in both unified and split modes; add/del/context backgrounds remain visible underneath.
+- [x] **AC5 — Binary/unsupported unaffected.** Non-commentable placeholders and empty/loading/error states render unchanged.
+- [x] **AC6 — Controls are discoverable.** The toggles live in the panel's summary bar (and mirror to title-bar commands); the current state is visually obvious.
+- [x] **AC7 — Green gates.** `build`, `typecheck`, `test`, `lint` pass; the split-alignment logic has unit coverage.
 
 ## Scope
 

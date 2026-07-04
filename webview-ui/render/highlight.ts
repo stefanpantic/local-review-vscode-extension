@@ -66,6 +66,11 @@ export function langForPath(path: string): string | undefined {
   return EXT_LANG[ext];
 }
 
+/** Tokenize free text (e.g. a suggestion body) into per-line tokens. */
+export function highlightLines(hl: HighlighterCore, lang: string, theme: string, text: string): Tok[][] {
+  return toksFor(hl, lang, theme, text.split('\n'));
+}
+
 function toksFor(hl: HighlighterCore, lang: string, theme: string, lines: string[]): Tok[][] {
   if (lines.length === 0) return [];
   try {

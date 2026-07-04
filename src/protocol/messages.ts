@@ -37,13 +37,17 @@ export interface Requests {
   setViewPref: { payload: { viewMode?: ViewMode; whitespace?: boolean }; response: { ok: true } };
   // Host already knows the current repo/source/baseRef; the webview just names the files.
   getFileTexts: { payload: { files: { path: string; oldPath?: string }[] }; response: FileTexts };
-  // Comment mutations (active review). The host authors the durable Anchor from its own diff (D2).
+  // Comment mutations (active review). The host authors the durable Anchor from its own diff.
+  // `suggestion` is a proposed replacement (string); the host captures the original from its diff.
   addComment: {
-    payload: { filePath: string; side: Side; startLine: number; endLine?: number; body: string };
+    payload: { filePath: string; side: Side; startLine: number; endLine?: number; body: string; suggestion?: string };
     response: CommentThread;
   };
-  replyComment: { payload: { threadId: string; body: string }; response: CommentThread };
-  editComment: { payload: { threadId: string; commentId: string; body: string }; response: CommentThread };
+  replyComment: { payload: { threadId: string; body: string; suggestion?: string }; response: CommentThread };
+  editComment: {
+    payload: { threadId: string; commentId: string; body: string; suggestion?: string | null };
+    response: CommentThread;
+  };
   deleteComment: {
     payload: { threadId: string; commentId: string };
     response: { threadId: string; threadDeleted: boolean };

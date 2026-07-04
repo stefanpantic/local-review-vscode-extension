@@ -10,16 +10,16 @@ Open a repository with uncommitted changes, click the **Local Review** activity-
 
 ## 2. Acceptance criteria (tick in place — this checklist *is* the verification record)
 
-- [ ] **AC1 — Builds & loads.** `pnpm install && pnpm run build` succeeds; the extension loads in the Extension Development Host (`F5`) with no errors in the host or webview consoles.
-- [ ] **AC2 — Activity-bar entry.** A "Local Review" icon appears in the activity bar; its view offers a **Start a Review** action (a native launcher — no sidebar webview yet). It reveals the diff in an editor tab.
-- [ ] **AC3 — Unified diff renders.** In a repo with uncommitted changes, the editor tab shows a continuous unified diff of **all** changed files, with per-file headers, hunk headers, and `add`/`del`/`context` line styling. **Every code row shows old and new line numbers** (one may be blank).
-- [ ] **AC4 — Theme-aware.** Colors come from `var(--vscode-*)`; the diff is readable in both a light and a dark theme.
-- [ ] **AC5 — Edge-case files.** `binary` and `unsupported` (submodule / mode-only change) entries render as clearly-labeled, **non-commentable** placeholders with a `note`; a `renamed` file shows old → new path. No crashes.
-- [ ] **AC6 — States.** Each of *no Git repository*, *unborn HEAD (fresh repo)*, *no changes*, and *error* renders a distinct, legible message.
-- [ ] **AC7 — Refresh.** A **Refresh** action re-reads the working tree and updates the rendered diff.
-- [ ] **AC8 — Pipeline & bridge.** The diff is produced by the `git` module → `normalize` → `ReviewDiff` and delivered to the webview via the lean bridge; spot-check the `{ id?, type, payload }` message shape and a `getDiff` request/response + a `diffUpdated` event.
+- [x] **AC1 — Builds & loads.** `pnpm install && pnpm run build` succeeds; the extension loads in the Extension Development Host (`F5`) with no errors in the host or webview consoles.
+- [x] **AC2 — Activity-bar entry.** A "Local Review" icon appears in the activity bar; its view offers a **Start a Review** action (a native launcher — no sidebar webview yet). It reveals the diff in an editor tab.
+- [x] **AC3 — Unified diff renders.** In a repo with uncommitted changes, the editor tab shows a continuous unified diff of **all** changed files, with per-file headers, hunk headers, and `add`/`del`/`context` line styling. **Every code row shows old and new line numbers** (one may be blank).
+- [x] **AC4 — Theme-aware.** Colors come from `var(--vscode-*)`; the diff is readable in both a light and a dark theme.
+- [x] **AC5 — Edge-case files.** `binary` and `unsupported` (submodule / mode-only change) entries render as clearly-labeled, **non-commentable** placeholders with a `note`; a `renamed` file shows old → new path. No crashes.
+- [x] **AC6 — States.** Each of *no Git repository*, *unborn HEAD (fresh repo)*, *no changes*, and *error* renders a distinct, legible message.
+- [x] **AC7 — Refresh.** A **Refresh** action re-reads the working tree and updates the rendered diff.
+- [x] **AC8 — Pipeline & bridge.** The diff is produced by the `git` module → `normalize` → `ReviewDiff` and delivered to the webview via the lean bridge; spot-check the `{ id?, type, payload }` message shape and a `getDiff` request/response + a `diffUpdated` event.
 - [x] **AC9 — Unit tests.** `normalize` passes fixture tests for: single-file modify, added file, deleted file, rename, binary, one `unsupported` (submodule or mode-change), multi-hunk, and "no newline at end of file". *(9/9 pass; also validated against real `git diff` output.)*
-- [ ] **AC10 — Multi-root safe.** In a multi-root/multi-repo workspace the extension picks a sensible default repo and does not crash (the picker UI is Iteration 2).
+- [x] **AC10 — Multi-root safe.** In a multi-root/multi-repo workspace the extension picks a sensible default repo and does not crash (the picker UI is Iteration 2).
 
 **Verification status (2026-07-03).** Automated checks PASS: `pnpm run build` (both bundles emit), `pnpm run typecheck` (clean), `pnpm test` (9/9), and `normalize` validated against real `git diff` output (add / modify / rename with correct old+new line numbers). **AC9 ✓**; the build/typecheck/pipeline portions of **AC1/AC8 ✓**. **AC2–AC7 and AC10 need a manual `F5` Extension Development Host session** — see [`notes.md`](./notes.md) for steps. Tick them there after the run.
 

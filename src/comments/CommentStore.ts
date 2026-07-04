@@ -5,8 +5,8 @@ import { durableThread } from '../model/Comment';
 const THREADS_KEY = 'localReview.threads';
 
 /**
- * Active-review comment threads, host-owned in workspaceState, keyed by `repoRoot` ONLY (never by source —
- * spec §7). Reads are GUARDED: stale/corrupt persisted state degrades to empty, never crashes (ADR-0004 §8).
+ * Active-review comment threads, host-owned in workspaceState, keyed by `repoRoot` ONLY (never by source).
+ * Reads are GUARDED: stale/corrupt persisted state degrades to empty, never crashes.
  */
 export class CommentStore {
   constructor(private readonly ctx: vscode.ExtensionContext) {}

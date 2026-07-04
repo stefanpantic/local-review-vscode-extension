@@ -2,11 +2,11 @@ import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import { ReviewState } from './reviewState';
 import { CommentStore } from './comments/CommentStore';
-import { reanchor, reanchorOne, createAnchor, type AnchorLocator } from './comments/anchoring';
+import { reanchor, reanchorOne, createAnchor, rangeText, type AnchorLocator } from './comments/anchoring';
 import { getRepositories, getDiff, getFileTexts } from './git/git';
 import { orderByTree } from './fileTree';
 import type { DiffResult, DiffSource, FileDiff, RepoInfo, ReviewDiff, ViewMode } from './model/ReviewDiff';
-import type { CommentThread } from './model/Comment';
+import type { Comment, CommentThread } from './model/Comment';
 import type { Events, EventType, ReviewStatePayload } from './protocol/messages';
 
 type PanelPost = <K extends EventType>(type: K, payload: Events[K]) => void;
@@ -175,15 +175,22 @@ export class ReviewController {
     this.panelPost?.('threadsUpdated', { threads: this.threads() });
   }
 
-  async addComment(loc: AnchorLocator & { body: string }): Promise<CommentThread> {
+  /** Build a suggestion for a thread's current (re-anchored) range, capturing the original from the diff. */
+  private suggestionFor(thread: CommentThread, diff: ReviewDiff, replacement: string): Comment['suggestion'] {
+    const start = reanchorOne(thread, diff).resolvedLine ?? thread.anchor.lineNumber;
+    const span = thread.anchor.endLineNumber != null ? thread.anchor.endLineNumber - thread.anchor.lineNumber : 0;
+    return { original: rangeText(diff, thread.anchor.filePath, thread.anchor.side, start, start + span), replacement };
+  }
+
+  async addComment(loc: AnchorLocator & { body: string; suggestion?: string }): Promise<CommentThread> {
     const { repoRoot, diff } = this.requireContext();
     const now = new Date().toISOString();
-    const thread: CommentThread = {
-      id: randomUUID(),
-      anchor: createAnchor(diff, loc),
-      comments: [{ id: randomUUID(), body: loc.body, createdAt: now, updatedAt: now }],
-      resolved: false,
-    };
+    const comment: Comment = { id: randomUUID(), body: loc.body, createdAt: now, updatedAt: now };
+    if (loc.suggestion != null) {
+      const original = rangeText(diff, loc.filePath, loc.side, loc.startLine, loc.endLine ?? loc.startLine);
+      comment.suggestion = { original, replacement: loc.suggestion };
+    }
+    const thread: CommentThread = { id: randomUUID(), anchor: createAnchor(diff, loc), comments: [comment], resolved: false };
     const threads = this.store.get(repoRoot);
     threads.push(thread);
     await this.store.save(repoRoot, threads);
@@ -191,19 +198,21 @@ export class ReviewController {
     return reanchorOne(thread, diff);
   }
 
-  async replyComment(threadId: string, body: string): Promise<CommentThread> {
+  async replyComment(threadId: string, body: string, suggestion?: string): Promise<CommentThread> {
     const { repoRoot, diff } = this.requireContext();
     const threads = this.store.get(repoRoot);
     const thread = threads.find((t) => t.id === threadId);
     if (!thread) throw new Error('Thread not found.');
     const now = new Date().toISOString();
-    thread.comments.push({ id: randomUUID(), body, createdAt: now, updatedAt: now });
+    const reply: Comment = { id: randomUUID(), body, createdAt: now, updatedAt: now };
+    if (suggestion != null) reply.suggestion = this.suggestionFor(thread, diff, suggestion);
+    thread.comments.push(reply);
     await this.store.save(repoRoot, threads);
     this.afterThreadChange();
     return reanchorOne(thread, diff);
   }
 
-  async editComment(threadId: string, commentId: string, body: string): Promise<CommentThread> {
+  async editComment(threadId: string, commentId: string, body: string, suggestion?: string | null): Promise<CommentThread> {
     const { repoRoot, diff } = this.requireContext();
     const threads = this.store.get(repoRoot);
     const thread = threads.find((t) => t.id === threadId);
@@ -211,6 +220,8 @@ export class ReviewController {
     if (!thread || !comment) throw new Error('Comment not found.');
     comment.body = body;
     comment.updatedAt = new Date().toISOString();
+    if (suggestion === null) delete comment.suggestion; // explicitly cleared
+    else if (suggestion != null) comment.suggestion = this.suggestionFor(thread, diff, suggestion);
     await this.store.save(repoRoot, threads);
     this.afterThreadChange();
     return reanchorOne(thread, diff);

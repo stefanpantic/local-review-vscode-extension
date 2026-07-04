@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { reanchor, reanchorOne, createAnchor, reconstructHunk } from '../src/comments/anchoring';
+import { reanchor, reanchorOne, createAnchor, reconstructHunk, rangeText } from '../src/comments/anchoring';
 import type { CommentThread, Anchor } from '../src/model/Comment';
 import type { DiffRow, DiffSource, FileDiff, Hunk, ReviewDiff, Side } from '../src/model/ReviewDiff';
 
@@ -88,7 +88,31 @@ test('range: start-anchored, endLineNumber preserved', () => {
   const t = reanchorOne(thread({ lineNumber: 2, endLineNumber: 4, line: 'B' }), d);
   assert.equal(t.status, 'anchored');
   assert.equal(t.resolvedLine, 2);
+  assert.equal(t.resolvedEndLine, 4);
   assert.equal(t.anchor.endLineNumber, 4);
+});
+
+test('block range follows its start line, keeping its span', () => {
+  // 'B' (a 2→4 block, span 2) now sits on new line 3.
+  const d = diff([file('a.ts', [hunk([ctx(1, 1, 'A'), add(2, 'X'), ctx(2, 3, 'B'), ctx(3, 4, 'C'), ctx(4, 5, 'D')])])]);
+  const t = reanchorOne(thread({ lineNumber: 2, endLineNumber: 4, line: 'B' }), d);
+  assert.equal(t.status, 'moved');
+  assert.equal(t.resolvedLine, 3);
+  assert.equal(t.resolvedEndLine, 5); // 3 + span(2)
+});
+
+test('single-line thread resolves end === start', () => {
+  const d = diff([file('a.ts', [hunk([ctx(1, 1, 'A'), ctx(2, 2, 'B')])])]);
+  const t = reanchorOne(thread({ lineNumber: 2, line: 'B' }), d);
+  assert.equal(t.resolvedLine, 2);
+  assert.equal(t.resolvedEndLine, 2);
+});
+
+test('rangeText joins the new-side rows in [start, end]', () => {
+  const d = diff([file('a.ts', [hunk([ctx(1, 1, 'a'), add(2, 'b'), ctx(2, 3, 'c'), ctx(3, 4, 'd')])])]);
+  assert.equal(rangeText(d, 'a.ts', 'new', 2, 3), 'b\nc');
+  assert.equal(rangeText(d, 'a.ts', 'new', 4, 4), 'd');
+  assert.equal(rangeText(d, 'missing.ts', 'new', 1, 9), '');
 });
 
 test('reanchor decorates every thread', () => {

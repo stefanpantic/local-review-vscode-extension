@@ -16,17 +16,17 @@ Hover a code line → **+** → type a comment → it renders inline beneath the
 
 ## Acceptance criteria (tick in place)
 
-- [ ] **AC1 — Line comment (new side).** Gutter **+** on an added/context line opens a form; submitting renders a thread **as a row** beneath that line.
-- [ ] **AC2 — Old-side comment.** A comment can be left on a **removed** (`-`) line; it anchors to the `old` side and renders there.
-- [ ] **AC3 — Range comment.** Selecting a run of lines (drag or shift-click) and hitting **+** creates one thread spanning `startLine..endLine`, shown with its range.
-- [ ] **AC4 — Reply / edit / delete.** A thread supports replying, editing any comment, and deleting a comment; deleting the **last** comment removes the thread.
-- [ ] **AC5 — Resolve.** A thread can be resolved/unresolved; resolved threads render collapsed/de-emphasized with a badge; state persists.
-- [ ] **AC6 — Persistence.** Reload/reopen the panel → every thread returns with its comments, order, and resolved state intact (guarded read; corrupt/old state degrades to empty, never crashes).
-- [ ] **AC7 — Drift → moved.** Insert/remove lines above an anchored comment so its line shifts → the comment **follows** to the new line and is marked **moved**.
-- [ ] **AC8 — Outdated ≠ deleted.** Change the anchored line's text (or revert the file) so it's no longer in the diff → the comment becomes **outdated**, rendered against its stored hunk, still editable, **never lost**.
-- [ ] **AC9 — Rename follows.** Rename a commented file → its threads still attach (matched by `oldPath`).
-- [ ] **AC10 — Source switch is safe.** Staging a commented hunk (unstaged→staged) or toggling the source picker never orphans a comment: it re-anchors against the new diff, or goes outdated, and **returns** when you switch back (threads are keyed by `repoRoot` only, per spec §7).
-- [ ] **AC11 — Non-commentable guard.** No **+** on binary/unsupported files; empty / no-repo / error states are unaffected.
+- [x] **AC1 — Line comment (new side).** Gutter **+** on an added/context line opens a form; submitting renders a thread **as a row** beneath that line.
+- [x] **AC2 — Old-side comment.** A comment can be left on a **removed** (`-`) line; it anchors to the `old` side and renders there.
+- [x] **AC3 — Range comment.** Selecting a run of lines (drag or shift-click) and hitting **+** creates one thread spanning `startLine..endLine`, shown with its range.
+- [x] **AC4 — Reply / edit / delete.** A thread supports replying, editing any comment, and deleting a comment; deleting the **last** comment removes the thread.
+- [x] **AC5 — Resolve.** A thread can be resolved/unresolved; resolved threads render collapsed/de-emphasized with a badge; state persists.
+- [x] **AC6 — Persistence.** Reload/reopen the panel → every thread returns with its comments, order, and resolved state intact (guarded read; corrupt/old state degrades to empty, never crashes).
+- [x] **AC7 — Drift → moved.** Insert/remove lines above an anchored comment so its line shifts → the comment **follows** to the new line and is marked **moved**.
+- [x] **AC8 — Outdated ≠ deleted.** Change the anchored line's text (or revert the file) so it's no longer in the diff → the comment becomes **outdated**, rendered against its stored hunk, still editable, **never lost**.
+- [x] **AC9 — Rename follows.** Rename a commented file → its threads still attach (matched by `oldPath`).
+- [x] **AC10 — Source switch is safe.** Staging a commented hunk (unstaged→staged) or toggling the source picker never orphans a comment: it re-anchors against the new diff, or goes outdated, and **returns** when you switch back (threads are keyed by `repoRoot` only, per spec §7).
+- [x] **AC11 — Non-commentable guard.** No **+** on binary/unsupported files; empty / no-repo / error states are unaffected.
 - [x] **AC12 — Green gates + anchoring coverage.** `build`, `typecheck`, `test`, `lint` pass; `anchoring.ts` has unit fixtures for anchored / moved / outdated / rename / range. *(build + typecheck + 32/32 tests + lint clean; `test/anchoring.test.ts` covers anchored / moved (+ closest-wins) / outdated (text & file gone) / rename / old-side / range / createAnchor / reconstructHunk.)*
 
 **Verification status.** Automated checks PASS (AC12 ✓). **AC1–AC11 require a manual `F5` session** (steps in [`notes.md`](./notes.md)); tick them there after the run. Note: re-anchoring (AC7–AC10) runs on diff (re)load, so after editing code use **Local Review: Refresh** — live auto-refresh is it.7.

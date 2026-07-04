@@ -1,28 +1,68 @@
 import { useEffect, useState } from 'react';
 import type { CommentThread } from '../../src/model/Comment';
+import { TokenText } from '../render/UnifiedRows';
+import type { Tok } from '../render/highlight';
 import { CommentForm } from './CommentForm';
 
 export interface ThreadOps {
-  onReply: (body: string) => void;
-  onEdit: (commentId: string, body: string) => void;
+  onReply: (body: string, suggestion?: string) => void;
+  onEdit: (commentId: string, body: string, suggestion: string | null | undefined) => void;
   onDelete: (commentId: string) => void;
   onResolve: (resolved: boolean) => void;
 }
 
-/** The line a thread corresponds to — its current (resolved) line, or the remembered one when outdated. */
+/** Tokenize code in the anchored file's language (falls back to plain lines when unavailable). */
+export type Tokenize = (text: string) => Tok[][];
+
+/** The line(s) a thread corresponds to — a range for block comments, a single line otherwise. */
 function lineLabel(t: CommentThread): string {
-  return `Line ${t.resolvedLine ?? t.anchor.lineNumber}`;
+  const start = t.resolvedLine ?? t.anchor.lineNumber;
+  const end = t.resolvedEndLine ?? t.anchor.endLineNumber ?? start;
+  return end > start ? `Lines ${start}–${end}` : `Line ${start}`;
+}
+
+/** A proposed change, rendered as a syntax-highlighted before→after diff (original removed, replacement added). */
+function Suggestion({ original, replacement, tokenize }: { original: string; replacement: string; tokenize: Tokenize }) {
+  const oToks = tokenize(original);
+  const rToks = tokenize(replacement);
+  return (
+    <div className="lr-suggestion">
+      <div className="lr-suggestion-head">Suggested change</div>
+      <div className="lr-suggestion-diff">
+        {original.split('\n').map((l, i) => (
+          <div key={`o${i}`} className="lr-sugg-line lr-sugg-del">
+            <TokenText tokens={oToks[i]} text={l} />
+          </div>
+        ))}
+        {replacement.split('\n').map((l, i) => (
+          <div key={`r${i}`} className="lr-sugg-line lr-sugg-add">
+            <TokenText tokens={rToks[i]} text={l} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 /** One comment thread rendered as a card. A chevron collapses it to its header row (resolved starts collapsed). */
-export function CommentThreadView({ thread, ops }: { thread: CommentThread; ops: ThreadOps }) {
+export function CommentThreadView({
+  thread,
+  ops,
+  suggestBase,
+  tokenize,
+}: {
+  thread: CommentThread;
+  ops: ThreadOps;
+  suggestBase: string;
+  tokenize: Tokenize;
+}) {
   const [replying, setReplying] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(!thread.resolved);
-  // Resolving collapses the thread, reopening expands it; manual toggles persist until resolved next flips.
   useEffect(() => setExpanded(!thread.resolved), [thread.resolved]);
 
-  // Header layout is IDENTICAL collapsed vs expanded (chevron · line · badges), so nothing shifts.
+  const canSuggest = thread.anchor.side === 'new';
+
   const head = (
     <div
       className={`lr-thread-head${expanded ? '' : ' lr-thread-head-clickable'}`}
@@ -62,9 +102,12 @@ export function CommentThreadView({ thread, ops }: { thread: CommentThread; ops:
             <div className={`${cls} lr-comment-editing`} key={c.id}>
               <CommentForm
                 initial={c.body}
+                initialSuggestion={c.suggestion?.replacement}
+                suggestBase={suggestBase}
+                canSuggest={canSuggest}
                 submitLabel="Save"
-                onSubmit={(b) => {
-                  ops.onEdit(c.id, b);
+                onSubmit={(b, s) => {
+                  ops.onEdit(c.id, b, s);
                   setEditingId(null);
                 }}
                 onCancel={() => setEditingId(null)}
@@ -72,7 +115,16 @@ export function CommentThreadView({ thread, ops }: { thread: CommentThread; ops:
             </div>
           ) : (
             <div className={cls} key={c.id}>
-              <div className="lr-comment-body">{c.body}</div>
+              <div className="lr-comment-main">
+                {c.body && <div className="lr-comment-body">{c.body}</div>}
+                {c.suggestion && (
+                  <Suggestion
+                    original={c.suggestion.original}
+                    replacement={c.suggestion.replacement}
+                    tokenize={tokenize}
+                  />
+                )}
+              </div>
               <div className="lr-comment-tools">
                 <button className="lr-ghost-btn" onClick={() => setEditingId(c.id)}>
                   Edit
@@ -90,8 +142,10 @@ export function CommentThreadView({ thread, ops }: { thread: CommentThread; ops:
         {replying ? (
           <CommentForm
             submitLabel="Reply"
-            onSubmit={(b) => {
-              ops.onReply(b);
+            suggestBase={suggestBase}
+            canSuggest={canSuggest}
+            onSubmit={(b, s) => {
+              ops.onReply(b, s ?? undefined);
               setReplying(false);
             }}
             onCancel={() => setReplying(false)}

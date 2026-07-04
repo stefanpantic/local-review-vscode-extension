@@ -1,5 +1,5 @@
 // Comment & review data model (dependency-free; shared by host and webview).
-// Shapes are pinned in docs/protocol.md §4–§5. `status`/`resolvedLine` are runtime-only (never persisted).
+// `status`/`resolvedLine`/`resolvedEndLine` are runtime-only (never persisted).
 import type { DiffSource, Side } from './ReviewDiff';
 
 export type AnchorStatus = 'anchored' | 'moved' | 'outdated';
@@ -20,6 +20,8 @@ export interface Comment {
   body: string;
   createdAt: string; // ISO
   updatedAt: string; // ISO
+  // A proposed replacement for the anchored range (capture-and-export only; never written to disk).
+  suggestion?: { original: string; replacement: string };
 }
 
 export interface CommentThread {
@@ -31,11 +33,12 @@ export interface CommentThread {
   // Resolved against the currently loaded diff on every read — NOT persisted:
   status?: AnchorStatus;
   resolvedLine?: number | null; // where it currently renders (null when outdated)
+  resolvedEndLine?: number | null; // end of the range block (= resolvedLine for single-line; null when outdated)
 }
 
 /**
- * One type for the active review and (it.5) saved snapshots. The active review is the unnamed
- * working set for a repoRoot; saving freezes a named, dated copy. See docs/decisions/0009.
+ * One type for the active review and saved snapshots. The active review is the unnamed
+ * working set for a repoRoot; saving freezes a named, dated copy.
  */
 export interface Review {
   repoRoot: string;

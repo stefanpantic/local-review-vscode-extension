@@ -1,4 +1,4 @@
-// Content-match comment anchoring (docs/decisions/0003). Pure & synchronous — unit-tested with fixtures.
+// Content-match comment anchoring. Pure & synchronous — unit-tested with fixtures.
 // Re-anchoring is scoped to lines present in the CURRENT diff: exact text match → anchored/moved; else outdated.
 import type { CommentThread, Anchor } from '../model/Comment';
 import type { DiffRow, FileDiff, Hunk, ReviewDiff, Side } from '../model/ReviewDiff';
@@ -10,14 +10,30 @@ export function reanchor(threads: CommentThread[], diff: ReviewDiff): CommentThr
 
 export function reanchorOne(thread: CommentThread, diff: ReviewDiff): CommentThread {
   const file = findFile(diff, thread.anchor);
-  if (!file) return { ...thread, status: 'outdated', resolvedLine: null };
+  if (!file) return { ...thread, status: 'outdated', resolvedLine: null, resolvedEndLine: null };
   const match = bestMatch(candidateRows(file, thread.anchor.side), thread.anchor.line, thread.anchor.lineNumber);
-  if (!match) return { ...thread, status: 'outdated', resolvedLine: null };
+  if (!match) return { ...thread, status: 'outdated', resolvedLine: null, resolvedEndLine: null };
   const status = match.lineNo === thread.anchor.lineNumber ? 'anchored' : 'moved';
-  return { ...thread, status, resolvedLine: match.lineNo };
+  // A range block follows its start line, keeping its original span.
+  const span = thread.anchor.endLineNumber != null ? thread.anchor.endLineNumber - thread.anchor.lineNumber : 0;
+  return { ...thread, status, resolvedLine: match.lineNo, resolvedEndLine: match.lineNo + span };
 }
 
-/** Where a comment is being created: a minimal locator the webview sends; the host builds the Anchor (D2). */
+/** Joined text of the rows on `side` whose line number falls in [start, endInclusive] — a suggestion's "original". */
+export function rangeText(diff: ReviewDiff, filePath: string, side: Side, start: number, endInclusive: number): string {
+  const file = diff.files.find((f) => f.path === filePath) ?? diff.files.find((f) => f.oldPath === filePath);
+  if (!file) return '';
+  const out: string[] = [];
+  for (const h of file.hunks) {
+    for (const r of h.rows) {
+      const ln = lineOn(r, side);
+      if (ln != null && ln >= start && ln <= endInclusive) out.push(r.text);
+    }
+  }
+  return out.join('\n');
+}
+
+/** Where a comment is being created: a minimal locator the webview sends; the host builds the Anchor. */
 export interface AnchorLocator {
   filePath: string;
   side: Side;
@@ -52,7 +68,7 @@ export function createAnchor(diff: ReviewDiff, loc: AnchorLocator): Anchor {
   };
 }
 
-/** Rebuild a hunk's raw text (header + signed rows) — for outdated rendering and (it.6) export context. */
+/** Rebuild a hunk's raw text (header + signed rows) — for outdated rendering and export context. */
 export function reconstructHunk(h: Hunk): string {
   const body = h.rows.map((r) => (r.type === 'add' ? '+' : r.type === 'del' ? '-' : ' ') + r.text);
   return [h.header, ...body].join('\n');

@@ -136,6 +136,10 @@ interface Comment {
   body: string;
   createdAt: string;        // ISO
   updatedAt: string;        // ISO
+  suggestion?: {            // [it.4b] proposed replacement for the anchored range (capture + export only)
+    original: string;       // the range's code at creation (captured by the host from its diff)
+    replacement: string;    // the proposed new code
+  };
 }
 
 interface CommentThread {
@@ -205,10 +209,10 @@ The webview keeps `let seq = 0` and a `Map<number, {resolve, reject}>`. A reques
 | `setViewed` | `{ filePath, viewed }` | `{ ok: true }` | it.2 |
 | `setViewPref` | `{ viewMode?, whitespace? }` | `{ ok: true }` | it.3 |
 | `getFileTexts` | `{ files: {path, oldPath?}[] }` | `{ texts }` — full old/new text per file (host resolves repo/source/base) for whole-file highlighting | it.3 |
-| `addComment` | `{ filePath, side, startLine, endLine?, body }` | `CommentThread` — host authors the `Anchor` from its own diff (D2) | it.4 |
-| `editComment` | `{ threadId, commentId, body }` | `CommentThread` | it.4 |
+| `addComment` | `{ filePath, side, startLine, endLine?, body, suggestion? }` | `CommentThread` — host authors the `Anchor` from its own diff (D2) | it.4 / suggestion it.4b |
+| `editComment` | `{ threadId, commentId, body, suggestion? }` | `CommentThread` — `suggestion` string sets, `null` clears, omit leaves | it.4 / suggestion it.4b |
 | `deleteComment` | `{ threadId, commentId }` | `{ threadId, threadDeleted: boolean }` | it.4 |
-| `replyComment` | `{ threadId, body }` | `CommentThread` | it.4 |
+| `replyComment` | `{ threadId, body, suggestion? }` | `CommentThread` | it.4 / suggestion it.4b |
 | `resolveThread` | `{ threadId, resolved }` | `CommentThread` | it.4 |
 | `saveReview` | `{ repoRoot, name }` | `Review` | it.5 |
 | `clearActiveReview` | `{ repoRoot }` | `{ ok: true }` | it.5 |
@@ -217,7 +221,7 @@ The webview keeps `let seq = 0` and a `Map<number, {resolve, reject}>`. A reques
 | `deleteSavedReview` | `{ savedReviewId }` | `{ ok: true }` | it.5 |
 | `generateExport` | `{ repoRoot, source, scope, target }` | `{ markdown, wrotePath? }` | it.6 |
 
-`scope: 'all' | 'unresolved' | 'file'` and `target: 'clipboard' | 'file'` (it.6). There is no `reanchorThread` — all re-anchoring is the host's automatic load-time computation (§4), surfaced via `threadsUpdated`. There is no `getThreads` — the (re-anchored) active review rides in `ReviewStatePayload.threads` and updates via `threadsUpdated`, mirroring how `viewed` works (D1). `addComment` sends only a line locator; the host authors the durable `Anchor` (exact line text, `originalDiffHunk`, source) from its own diff — the webview never constructs anchor internals (D2).
+`scope: 'all' | 'unresolved' | 'file'` and `target: 'clipboard' | 'file'` (it.6). There is no `reanchorThread` — all re-anchoring is the host's automatic load-time computation (§4), surfaced via `threadsUpdated`. There is no `getThreads` — the (re-anchored) active review rides in `ReviewStatePayload.threads` and updates via `threadsUpdated`, mirroring how `viewed` works (D1). `addComment` sends only a line locator; the host authors the durable `Anchor` (exact line text, `originalDiffHunk`, source) from its own diff — the webview never constructs anchor internals (D2). A comment may carry a **suggestion** `[it.4b]`: the payload's `suggestion` is the proposed replacement text; the host captures the range's current code as `original` and stores `{ original, replacement }`. Suggestions are capture-and-export only (rendered as a before→after diff; serialized by export) — never written to disk.
 
 ### 7.2 Events (host → webview, no `id`, no response)
 

@@ -36,13 +36,23 @@ export function addTargetFor(row: DiffRow): { side: Side; line: number } | null 
   return line == null ? null : { side, line };
 }
 
-export function CodeLine({ row, tokens, add }: { row: DiffRow; tokens?: Tok[] | null; add?: AddCtl }) {
+export function CodeLine({
+  row,
+  tokens,
+  add,
+  commented,
+}: {
+  row: DiffRow;
+  tokens?: Tok[] | null;
+  add?: AddCtl;
+  commented?: boolean;
+}) {
   const sign = row.type === 'add' ? '+' : row.type === 'del' ? '-' : ' ';
   const target = add ? addTargetFor(row) : null;
   const selected = target ? add!.selected(target.side, target.line) : false;
   return (
     <div
-      className={`lr-row lr-${row.type}${selected ? ' lr-selected' : ''}`}
+      className={`lr-row lr-${row.type}${selected ? ' lr-selected' : ''}${commented ? ' lr-commented' : ''}`}
       onMouseEnter={target ? () => add!.onEnter(target.side, target.line) : undefined}
     >
       {target && (
@@ -72,18 +82,20 @@ export function UnifiedHunk({
   tokens,
   add,
   below,
+  commented,
 }: {
   hunk: Hunk;
   tokens: Map<DiffRow, Tok[] | null>;
   add?: AddCtl;
   below?: (row: DiffRow) => ReactNode;
+  commented?: Set<DiffRow>;
 }) {
   return (
     <>
       <HunkHeaderRow header={hunk.header} />
       {hunk.rows.map((row, ri) => (
         <Fragment key={ri}>
-          <CodeLine row={row} tokens={tokens.get(row)} add={add} />
+          <CodeLine row={row} tokens={tokens.get(row)} add={add} commented={commented?.has(row)} />
           {below?.(row)}
         </Fragment>
       ))}
