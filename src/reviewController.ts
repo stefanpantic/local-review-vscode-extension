@@ -197,7 +197,27 @@ export class ReviewController {
     return this.repos.find((r) => r.repoRoot === repoRoot)?.name ?? 'repo';
   }
 
+  private refreshing = false;
+  private refreshPending = false;
+  /** Public entry: coalesces overlapping refreshes (watcher bursts, manual Refresh, config change). */
   async refresh(): Promise<void> {
+    if (this.refreshing) {
+      this.refreshPending = true;
+      return;
+    }
+    this.refreshing = true;
+    try {
+      await this.doRefresh();
+    } finally {
+      this.refreshing = false;
+      if (this.refreshPending) {
+        this.refreshPending = false;
+        void this.refresh();
+      }
+    }
+  }
+
+  private async doRefresh(): Promise<void> {
     this.repos = await getRepositories();
     const pref = this.state.getPref();
     let repoRoot = pref.repoRoot;
@@ -213,7 +233,7 @@ export class ReviewController {
       await this.reviewStore.migrateLegacy(repoRoot, this.branchKey(repoRoot), this.headShaFor(repoRoot));
       const includeUntracked = vscode.workspace
         .getConfiguration('localReview')
-        .get<boolean>('includeUntracked', false);
+        .get<boolean>('includeUntracked', true);
       this.current = await getDiff({
         repoRoot,
         source: pref.source,
@@ -263,6 +283,11 @@ export class ReviewController {
 
   reveal(filePath: string): void {
     this.panelPost?.('revealFile', { filePath });
+  }
+
+  /** Ask the panel to scroll to the next/previous changed file or comment. */
+  navigate(target: 'file' | 'comment', dir: 'next' | 'prev'): void {
+    this.panelPost?.('navigate', { target, dir });
   }
 
   // --- Comment mutations (autosave into the current review). Each returns the canonical thread. ---

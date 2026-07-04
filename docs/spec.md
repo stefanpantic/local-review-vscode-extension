@@ -87,7 +87,7 @@ Work proceeds **one iteration at a time**: refine → implement → verify. The 
 | 4b | **Block comments & suggestions** | Multi-line (block) comments with range highlight; GitHub-style **suggestions** — propose replacement code inside a comment, rendered as a before→after diff — captured for export, never written to disk. |
 | 5 | **Branch-tied review sessions** | Uniform `Review` per `(repoRoot, branch)`; the current one autosaves; new / switch / rename / delete; sidebar grouped by branch with an **archived** group; move-to-branch. Subsumes the it.4 active-thread store. |
 | 6 | **Structured export** | "Export review" → agent-ready **Markdown** grouped by file (location, diff context, comment text, stable ids, ` ```suggestion ` blocks); scope all / unresolved / one-file; context *current* (re-anchored) or *as-reviewed*; copy / editor / file; export the current review or any from the sidebar. |
-| 7 | **Performance & polish** | Windowed virtualization *if measured necessary*; **auto-refresh** on working-tree changes **and on branch switches** (debounced watcher, coalesced during checkout/rebase) so no manual Refresh is needed; keyboard nav + jump-to-file; polished states; large-file guards. |
+| 7 | **Performance & polish** | Auto-refresh on working-tree + branch changes (debounced, coalesced); **intra-line word highlighting**; **expand-context**; keyboard nav (next/prev change + comment); large-file "Load anyway" guard; windowed virtualization *if measured necessary*. |
 
 Each row links to its folder under [`iterations/`](./iterations/) once refined.
 

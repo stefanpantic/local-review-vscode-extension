@@ -100,6 +100,34 @@ body {
   overflow-x: auto;
 }
 
+/* "Expand context" bar (reveal/collapse unchanged lines above/below a hunk). */
+.lr-expand {
+  display: flex;
+  gap: 16px;
+  padding: 2px 12px;
+  background: var(--vscode-diffEditor-unchangedRegionBackground, rgba(128, 128, 128, 0.06));
+}
+.lr-expand-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--vscode-textLink-foreground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  cursor: pointer;
+}
+.lr-expand-btn:hover {
+  text-decoration: underline;
+}
+
+/* Large-file guard placeholder (collapsed by size). */
+.lr-large {
+  padding: 8px 12px;
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--vscode-font-family);
+  font-size: 12px;
+}
+
 .lr-row {
   display: flex;
   align-items: baseline;
@@ -323,6 +351,14 @@ body {
   box-shadow:
     inset 3px 0 0 var(--vscode-focusBorder),
     inset 0 0 0 999px var(--vscode-editor-rangeHighlightBackground, rgba(88, 166, 255, 0.09));
+}
+
+/* Intra-line word diff: the changed spans of a modified line, over the syntax color + line tint. */
+.lr-ch-add {
+  background: var(--vscode-diffEditor-insertedTextBackground, rgba(46, 160, 67, 0.4));
+}
+.lr-ch-del {
+  background: var(--vscode-diffEditor-removedTextBackground, rgba(248, 81, 73, 0.4));
 }
 
 /* Thread + composer rows sit beneath their code line; the card itself provides the surface. */

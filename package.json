@@ -160,6 +160,26 @@
         "title": "Export Review",
         "category": "Local Review",
         "icon": "$(export)"
+      },
+      {
+        "command": "localReview.nextChange",
+        "title": "Next Changed File",
+        "category": "Local Review"
+      },
+      {
+        "command": "localReview.prevChange",
+        "title": "Previous Changed File",
+        "category": "Local Review"
+      },
+      {
+        "command": "localReview.nextComment",
+        "title": "Next Comment",
+        "category": "Local Review"
+      },
+      {
+        "command": "localReview.prevComment",
+        "title": "Previous Comment",
+        "category": "Local Review"
       }
     ],
     "menus": {
@@ -257,6 +277,26 @@
         "command": "localReview.renameReview",
         "key": "f2",
         "when": "focusedView == localReview.reviews"
+      },
+      {
+        "command": "localReview.nextChange",
+        "key": "alt+down",
+        "when": "activeWebviewPanelId == localReview.panel"
+      },
+      {
+        "command": "localReview.prevChange",
+        "key": "alt+up",
+        "when": "activeWebviewPanelId == localReview.panel"
+      },
+      {
+        "command": "localReview.nextComment",
+        "key": "alt+shift+down",
+        "when": "activeWebviewPanelId == localReview.panel"
+      },
+      {
+        "command": "localReview.prevComment",
+        "key": "alt+shift+up",
+        "when": "activeWebviewPanelId == localReview.panel"
       }
     ],
     "configuration": {
@@ -294,8 +334,8 @@
         },
         "localReview.includeUntracked": {
           "type": "boolean",
-          "default": false,
-          "description": "Include untracked files (shown as all-addition entries)."
+          "default": true,
+          "description": "Include untracked files (shown as all-addition entries; .gitignored files are excluded)."
         },
         "localReview.largeFileThreshold": {
           "type": "number",

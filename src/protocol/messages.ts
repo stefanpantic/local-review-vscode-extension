@@ -62,6 +62,7 @@ export interface Events {
   viewedUpdated: { viewed: Record<string, boolean> }; // lightweight: only viewed flags changed
   threadsUpdated: { threads: CommentThread[] }; // lightweight: after a comment mutation (diff not re-sent)
   revealFile: { filePath: string }; // scroll the panel to a file
+  navigate: { target: 'file' | 'comment'; dir: 'next' | 'prev' }; // scroll to next/prev change or comment
   showError: { message: string };
 }
 export type EventType = keyof Events;

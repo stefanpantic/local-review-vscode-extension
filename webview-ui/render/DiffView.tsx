@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { HighlighterCore } from 'shiki/core';
 import type { ReviewStatePayload } from '../../src/protocol/messages';
-import type { FileDiff, DiffRow, DiffSource, ReviewDiff, Side, ViewMode } from '../../src/model/ReviewDiff';
+import type { FileDiff, DiffRow, DiffSource, Hunk, ReviewDiff, Side, ViewMode } from '../../src/model/ReviewDiff';
 import type { Anchor, CommentThread } from '../../src/model/Comment';
 import { request, dlog } from '../rpcClient';
-import { UnifiedHunk, type AddCtl } from './UnifiedRows';
+import { UnifiedHunk, type AddCtl, type HunkExpand } from './UnifiedRows';
 import { SplitHunk } from './SplitRows';
 import {
   getHighlighter,
@@ -16,6 +16,7 @@ import {
   type Tok,
 } from './highlight';
 import { parseHunk } from './parseHunk';
+import { wordDiff, type Range } from './wordDiff';
 import { rangeText } from '../../src/comments/anchoring';
 import { CommentThreadView, type ThreadOps } from '../comments/CommentThread';
 import { CommentForm } from '../comments/CommentForm';
@@ -74,6 +75,7 @@ export function DiffView({
   const [drag, setDrag] = useState<Drag | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [outdatedOpen, setOutdatedOpen] = useState(true);
+  const [expandState, setExpandState] = useState<Record<string, { up: number; down: number }>>({});
 
   useEffect(() => {
     let alive = true;
@@ -107,7 +109,7 @@ export function DiffView({
   useEffect(() => {
     let alive = true;
     const files = (diff?.files ?? [])
-      .filter((f) => f.isCommentable && f.hunks.length > 0 && langForPath(f.path))
+      .filter((f) => f.isCommentable && f.hunks.length > 0)
       .map((f) => ({ path: f.path, oldPath: f.oldPath }));
     if (files.length === 0) {
       setFileTexts({});
@@ -133,6 +135,47 @@ export function DiffView({
     }
     return map;
   }, [hl, diff, fileTexts]);
+
+  // Per-file new-side line tokens, for highlighting the context revealed by "expand".
+  const newLineToks = useMemo<Map<string, Tok[][]>>(() => {
+    const map = new Map<string, Tok[][]>();
+    if (!hl) return map;
+    const theme = activeTheme();
+    for (const [path, t] of Object.entries(fileTexts)) {
+      const lang = langForPath(path);
+      if (lang && t.new && t.new.length < 400_000) map.set(path, highlightLines(hl, lang, theme, t.new));
+    }
+    return map;
+  }, [hl, fileTexts]);
+
+  // Intra-line word diff: within each hunk, pair a run of removed lines with the following added lines
+  // and mark the changed spans on each side. Recomputes only when the diff changes.
+  const changesByRow = useMemo<Map<DiffRow, Range[]>>(() => {
+    const map = new Map<DiffRow, Range[]>();
+    if (!diff) return map;
+    for (const f of diff.files) {
+      for (const h of f.hunks) {
+        const rows = h.rows;
+        let i = 0;
+        while (i < rows.length) {
+          if (rows[i].type !== 'del') {
+            i++;
+            continue;
+          }
+          const dels: DiffRow[] = [];
+          const adds: DiffRow[] = [];
+          while (i < rows.length && rows[i].type === 'del') dels.push(rows[i++]);
+          while (i < rows.length && rows[i].type === 'add') adds.push(rows[i++]);
+          for (let k = 0; k < Math.min(dels.length, adds.length); k++) {
+            const wd = wordDiff(dels[k].text, adds[k].text);
+            if (wd.removed.length) map.set(dels[k], wd.removed);
+            if (wd.added.length) map.set(adds[k], wd.added);
+          }
+        }
+      }
+    }
+    return map;
+  }, [diff]);
 
   // Anchored/moved threads render inline against their row; outdated ones render at the end.
   // A multi-line (block) comment also highlights every row in its resolved range.
@@ -236,6 +279,62 @@ export function DiffView({
     );
   };
 
+  // Build the "expand context" data for a hunk from the full new-file text + how far it's been expanded.
+  const bumpExpand = (key: string, dir: 'up' | 'down', max: number): void =>
+    setExpandState((prev) => {
+      const cur = prev[key] ?? { up: 0, down: 0 };
+      const val = Math.min((dir === 'up' ? cur.up : cur.down) + 20, max);
+      return { ...prev, [key]: dir === 'up' ? { ...cur, up: val } : { ...cur, down: val } };
+    });
+  const collapseExpand = (key: string, dir: 'up' | 'down'): void =>
+    setExpandState((prev) => ({ ...prev, [key]: { ...(prev[key] ?? { up: 0, down: 0 }), [dir]: 0 } }));
+
+  const hunkExpand = (file: FileDiff, hi: number, hunk: Hunk): HunkExpand | undefined => {
+    const text = fileTexts[file.path]?.new;
+    if (!text) return undefined;
+    const lines = text.split('\n');
+    const lineCount = lines.length > 0 && lines[lines.length - 1] === '' ? lines.length - 1 : lines.length;
+    const toks = newLineToks.get(file.path);
+    const key = `${file.path}#${hi}`;
+    const exp = expandState[key] ?? { up: 0, down: 0 };
+    const mk = (n: number, oldOffset: number): { row: DiffRow; tokens: Tok[] | null } => ({
+      row: { type: 'context', oldLineNo: n + oldOffset, newLineNo: n, text: lines[n - 1] ?? '' },
+      tokens: toks?.[n - 1] ?? null,
+    });
+
+    const prevNewEnd = hi > 0 ? file.hunks[hi - 1].newStart + file.hunks[hi - 1].newLines - 1 : 0;
+    const maxUp = Math.max(0, hunk.newStart - 1 - prevNewEnd);
+    const upCount = Math.min(exp.up, maxUp);
+    const up: { row: DiffRow; tokens: Tok[] | null }[] = [];
+    for (let n = hunk.newStart - upCount; n < hunk.newStart; n++) up.push(mk(n, hunk.oldStart - hunk.newStart));
+
+    const isLast = hi === file.hunks.length - 1;
+    const newEnd = hunk.newStart + hunk.newLines - 1;
+    const oldEnd = hunk.oldStart + hunk.oldLines - 1;
+    const maxDown = isLast ? Math.max(0, lineCount - newEnd) : 0;
+    const downCount = Math.min(exp.down, maxDown);
+    const down: { row: DiffRow; tokens: Tok[] | null }[] = [];
+    for (let n = newEnd + 1; n <= newEnd + downCount; n++) down.push(mk(n, oldEnd - newEnd));
+
+    const canUp = upCount < maxUp;
+    const canDown = downCount < maxDown;
+    const hasUp = upCount > 0;
+    const hasDown = downCount > 0;
+    if (!canUp && !canDown && !hasUp && !hasDown) return undefined;
+    return {
+      up,
+      down,
+      canUp,
+      canDown,
+      hasUp,
+      hasDown,
+      onUp: () => bumpExpand(key, 'up', maxUp),
+      onDown: () => bumpExpand(key, 'down', maxDown),
+      onCollapseUp: () => collapseExpand(key, 'up'),
+      onCollapseDown: () => collapseExpand(key, 'down'),
+    };
+  };
+
   if (!state) return <EmptyState state="loading" />;
   const { result } = state;
   if (result.state !== 'ok' || !result.diff) {
@@ -306,13 +405,39 @@ export function DiffView({
               onToggleCollapse={() => toggleCollapse(file)}
               onToggleViewed={() => toggleViewed(file)}
             />
+            {collapsed && isLarge(file) && !state.viewed[file.path] && file.hunks.length > 0 && (
+              <div className="lr-large">
+                Large file — {file.additions + file.deletions} changes.{' '}
+                <button className="lr-link" onClick={() => toggleCollapse(file)}>
+                  Load anyway
+                </button>
+              </div>
+            )}
             {!collapsed && (
               <div className="lr-file-body">
                 {file.hunks.map((hunk, hi) =>
                   state.viewMode === 'split' ? (
-                    <SplitHunk key={hi} hunk={hunk} tokens={tokens} add={add} below={below} commented={commentedRows} />
+                    <SplitHunk
+                      key={hi}
+                      hunk={hunk}
+                      tokens={tokens}
+                      add={add}
+                      below={below}
+                      commented={commentedRows}
+                      changes={changesByRow}
+                      expand={hunkExpand(file, hi, hunk)}
+                    />
                   ) : (
-                    <UnifiedHunk key={hi} hunk={hunk} tokens={tokens} add={add} below={below} commented={commentedRows} />
+                    <UnifiedHunk
+                      key={hi}
+                      hunk={hunk}
+                      tokens={tokens}
+                      add={add}
+                      below={below}
+                      commented={commentedRows}
+                      changes={changesByRow}
+                      expand={hunkExpand(file, hi, hunk)}
+                    />
                   )
                 )}
               </div>

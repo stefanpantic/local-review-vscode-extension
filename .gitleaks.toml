@@ -1,0 +1,12 @@
+title = "Local Review gitleaks config"
+
+# Start from gitleaks' built-in rules, then narrow with the allowlist below.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "VS Code keybinding strings (e.g. alt+shift+down) look high-entropy but are not secrets"
+regexTarget = "secret"
+regexes = [
+  '''^(cmd|ctrl|alt|shift|meta|win)\+[a-z0-9+]+$''',
+]

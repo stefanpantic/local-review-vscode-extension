@@ -7,6 +7,7 @@ import { CommentsView } from './webview/commentsView';
 import { ReviewsView } from './webview/reviewsView';
 import { ReviewPanel } from './webview/ReviewPanel';
 import { listBranches } from './git/git';
+import { watchRepoChanges } from './git/watch';
 import { exportReviewMarkdown, type ExportMeta } from './export/exportMarkdown';
 import type { DiffSource } from './model/ReviewDiff';
 import type { Review } from './model/Comment';
@@ -67,13 +68,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (rev) void controller.moveReviewToCurrentBranch(rev.id);
     }),
     vscode.commands.registerCommand('localReview.exportReview', (r) => exportReview(controller, asReview(r))),
+    vscode.commands.registerCommand('localReview.nextChange', () => controller.navigate('file', 'next')),
+    vscode.commands.registerCommand('localReview.prevChange', () => controller.navigate('file', 'prev')),
+    vscode.commands.registerCommand('localReview.nextComment', () => controller.navigate('comment', 'next')),
+    vscode.commands.registerCommand('localReview.prevComment', () => controller.navigate('comment', 'prev')),
+    watchRepoChanges(() => void controller.refresh()),
     vscode.commands.registerCommand('localReview.startReview', async () => {
       await controller.refresh();
       ReviewPanel.show(context.extensionUri, controller);
     }),
     vscode.commands.registerCommand('localReview.refresh', () => controller.refresh()),
     vscode.commands.registerCommand('localReview.revealFile', (filePath?: string) => {
-      if (!ReviewPanel.isOpen) ReviewPanel.show(context.extensionUri, controller);
+      ReviewPanel.show(context.extensionUri, controller); // create or reveal (focuses the tab)
       if (typeof filePath === 'string') controller.reveal(filePath);
     }),
     vscode.commands.registerCommand('localReview.selectSource', () => pickSource(controller)),

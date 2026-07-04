@@ -95,7 +95,7 @@ test('reviews are scoped per repo', async () => {
   assert.equal(store.allForRepo('/r2').length, 1);
 });
 
-test('migrateLegacy wraps it.4 active threads into a review, once', async () => {
+test('migrateLegacy wraps legacy active threads into a review, once', async () => {
   const fake = new FakeStore();
   fake.data.set('localReview.threads', { '/r': [thread('t1'), thread('t2')] });
   const store = new ReviewStore(fake);
