@@ -1,12 +1,17 @@
 # Local Review
 
+[![CI](https://github.com/stefanpantic/local-review-vscode-extension/actions/workflows/ci.yml/badge.svg)](https://github.com/stefanpantic/local-review-vscode-extension/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-fe5196.svg)](https://www.conventionalcommits.org)
+[![code style: Prettier](https://img.shields.io/badge/code_style-Prettier-ff69b4.svg)](https://prettier.io)
+
 **Review your local changes like a GitHub pull request — without opening one.**
 
 Local Review renders your working-tree diff as a continuous, PR-style review surface right inside VS Code: side-by-side or unified, syntax-highlighted, with inline comments on any line or range. When you're done, it exports a structured Markdown work list you can hand to a coding agent (e.g. Claude Code) to action.
 
 > **Everything stays on your machine.** No remote, no PR, no account, no telemetry. Local Review never sends your code anywhere — it's a private review loop for your own changes.
 
-<!-- TODO: screenshot of the review panel (split view with an inline comment) -->
+![Local Review — a unified diff with an inline comment, a suggested change, and the sidebar showing changed files, active comments, and saved reviews](docs/images/review-panel.png)
 
 ## Why
 
