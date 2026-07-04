@@ -4,7 +4,7 @@ Thanks for helping improve Local Review! This guide covers local development, th
 
 ## Prerequisites
 
-- **Node.js 20+**
+- **Node.js 22.13+** — required by the pinned pnpm.
 - **pnpm** — the repo pins its version via the `packageManager` field; enable it with `corepack enable` (or install pnpm directly).
 - **[pre-commit](https://pre-commit.com)** — for the git hooks (`pipx install pre-commit`, `brew install pre-commit`, or `pip install pre-commit`).
 
