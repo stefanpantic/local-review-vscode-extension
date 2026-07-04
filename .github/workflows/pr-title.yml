@@ -1,0 +1,18 @@
+name: PR Title
+
+# Squash-merge uses the PR title as the commit subject on main, and release-please
+# derives versions from those subjects — so the PR title must be a Conventional Commit.
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  conventional-title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

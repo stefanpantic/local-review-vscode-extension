@@ -1,5 +1,7 @@
 .vscode/**
 .git/**
+.github/**
+.claude/**
 src/**
 webview-ui/**
 test/**
@@ -9,7 +11,17 @@ node_modules/**
 **/*.tsx
 **/*.map
 esbuild.mjs
+eslint.config.mjs
 tsconfig.json
 pnpm-lock.yaml
+pnpm-workspace.yaml
 .gitignore
 .vscodeignore
+.pre-commit-config.yaml
+.prettierrc
+.prettierignore
+.gitleaks.toml
+release-please-config.json
+.release-please-manifest.json
+CONTRIBUTING.md
+CHANGELOG.md

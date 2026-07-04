@@ -1,0 +1,6 @@
+dist/
+node_modules/
+media/
+pnpm-lock.yaml
+CHANGELOG.md
+*.vsix

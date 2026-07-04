@@ -1,6 +1,6 @@
 # https://pre-commit.com  —  activate once with:  pre-commit install
-# Installs both the pre-commit hook (gitleaks + eslint on staged files) and the
-# commit-msg hook (Conventional Commits enforcement).
+# Installs both the pre-commit hook (gitleaks + prettier + eslint on staged files)
+# and the commit-msg hook (Conventional Commits enforcement).
 default_install_hook_types: [pre-commit, commit-msg]
 repos:
   - repo: local
@@ -10,6 +10,12 @@ repos:
         entry: gitleaks git --pre-commit --staged --redact
         language: system
         pass_filenames: false
+      - id: prettier
+        name: prettier (--write on staged files)
+        entry: pnpm exec prettier --write --ignore-unknown
+        language: system
+        files: \.(ts|tsx|mjs|json|md|ya?ml|css)$
+        exclude: pnpm-lock\.yaml
       - id: eslint
         name: eslint (--fix on staged TS/JS)
         entry: pnpm exec eslint --fix --no-warn-ignored

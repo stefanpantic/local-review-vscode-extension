@@ -6,6 +6,15 @@
   "publisher": "local",
   "private": true,
   "license": "MIT",
+  "packageManager": "pnpm@11.9.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/stefanpantic/local-review-vscode-extension.git"
+  },
+  "bugs": {
+    "url": "https://github.com/stefanpantic/local-review-vscode-extension/issues"
+  },
+  "homepage": "https://github.com/stefanpantic/local-review-vscode-extension#readme",
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -351,12 +360,15 @@
     }
   },
   "scripts": {
+    "vscode:prepublish": "pnpm run build",
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "package": "vsce package --no-dependencies"
   },
   "dependencies": {
@@ -372,8 +384,10 @@
     "@vscode/vsce": "^2.31.0",
     "esbuild": "^0.23.0",
     "eslint": "^10.6.0",
+    "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.7.0",
+    "prettier": "^3.9.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tsx": "^4.16.0",
