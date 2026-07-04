@@ -165,6 +165,38 @@ export class ReviewController {
     this.afterThreadChange();
   }
 
+  // --- Export ---
+
+  get baseRef(): string | undefined {
+    return this.state.getPref().baseRef;
+  }
+
+  /** The review to export: the one named by id, else the current review for the branch. */
+  reviewToExport(id?: string): Review | undefined {
+    const repoRoot = this.state.getPref().repoRoot;
+    if (!repoRoot) return undefined;
+    return id ? this.reviewStore.get(repoRoot, id) : this.reviewStore.current(repoRoot, this.branchKey(repoRoot));
+  }
+
+  /** "Current positions" export is only meaningful for the current review with a diff loaded. */
+  canExportLive(review: Review): boolean {
+    const repoRoot = this.state.getPref().repoRoot;
+    if (!repoRoot || !this.currentDiff()) return false;
+    const branch = this.branchKey(repoRoot);
+    return review.branch === branch && review.id === this.reviewStore.currentId(repoRoot, branch);
+  }
+
+  /** The threads to export: re-anchored against the current diff (live) or as stored (as-reviewed). */
+  exportThreads(review: Review, live: boolean): CommentThread[] {
+    const diff = this.currentDiff();
+    return live && diff ? reanchor(review.threads, diff) : review.threads;
+  }
+
+  repoName(): string {
+    const repoRoot = this.state.getPref().repoRoot;
+    return this.repos.find((r) => r.repoRoot === repoRoot)?.name ?? 'repo';
+  }
+
   async refresh(): Promise<void> {
     this.repos = await getRepositories();
     const pref = this.state.getPref();

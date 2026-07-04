@@ -238,7 +238,7 @@ The webview keeps `let seq = 0` and a `Map<number, {resolve, reject}>`. A reques
 | `configChanged` | `{ viewMode?, source? }` | it.2 (echo of a persisted pref; host value wins) |
 | `showError` | `{ message }` | it.1 |
 
-Source / repo / base-branch selection is **host-side** (commands `localReview.selectSource` / `localReview.selectRepo`, backed by QuickPick) — not webview messages. "Viewed" is host-owned and persisted; the panel toggles it via `setViewed` and both surfaces converge via `viewedUpdated`. Scroll position stays webview-only.
+Export (it.6) is host-side too — a `localReview.exportReview` command with QuickPicks (scope / context mode / target), rendering via a pure formatter; no messages. Source / repo / base-branch selection is **host-side** (commands `localReview.selectSource` / `localReview.selectRepo`, backed by QuickPick) — not webview messages. "Viewed" is host-owned and persisted; the panel toggles it via `setViewed` and both surfaces converge via `viewedUpdated`. Scroll position stays webview-only.
 
 ## 8. Validation & versioning
 

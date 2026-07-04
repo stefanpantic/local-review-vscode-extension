@@ -154,6 +154,12 @@
         "title": "Move to Current Branch",
         "category": "Local Review",
         "icon": "$(arrow-right)"
+      },
+      {
+        "command": "localReview.exportReview",
+        "title": "Export Review",
+        "category": "Local Review",
+        "icon": "$(export)"
       }
     ],
     "menus": {
@@ -182,9 +188,19 @@
           "command": "localReview.newReview",
           "when": "view == localReview.reviews",
           "group": "navigation@1"
+        },
+        {
+          "command": "localReview.exportReview",
+          "when": "view == localReview.comments",
+          "group": "navigation@1"
         }
       ],
       "view/item/context": [
+        {
+          "command": "localReview.exportReview",
+          "when": "view == localReview.reviews && viewItem =~ /^localReview.review/",
+          "group": "export@1"
+        },
         {
           "command": "localReview.moveReviewToCurrentBranch",
           "when": "view == localReview.reviews && viewItem == localReview.review.other",
@@ -199,6 +215,18 @@
           "command": "localReview.deleteReview",
           "when": "view == localReview.reviews && viewItem =~ /^localReview.review/",
           "group": "inline@3"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "localReview.exportReview",
+          "when": "activeWebviewPanelId == localReview.panel",
+          "group": "navigation@1"
+        },
+        {
+          "command": "localReview.refresh",
+          "when": "activeWebviewPanelId == localReview.panel",
+          "group": "navigation@2"
         }
       ],
       "commandPalette": [

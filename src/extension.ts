@@ -7,6 +7,7 @@ import { CommentsView } from './webview/commentsView';
 import { ReviewsView } from './webview/reviewsView';
 import { ReviewPanel } from './webview/ReviewPanel';
 import { listBranches } from './git/git';
+import { exportReviewMarkdown, type ExportMeta } from './export/exportMarkdown';
 import type { DiffSource } from './model/ReviewDiff';
 import type { Review } from './model/Comment';
 
@@ -65,6 +66,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const rev = asReview(r) ?? asReview(reviewsTree.selection[0]);
       if (rev) void controller.moveReviewToCurrentBranch(rev.id);
     }),
+    vscode.commands.registerCommand('localReview.exportReview', (r) => exportReview(controller, asReview(r))),
     vscode.commands.registerCommand('localReview.startReview', async () => {
       await controller.refresh();
       ReviewPanel.show(context.extensionUri, controller);
@@ -123,6 +125,96 @@ async function pickSource(controller: ReviewController): Promise<void> {
     await controller.setSource('vs-base', base);
   } else {
     await controller.setSource(picked.source);
+  }
+}
+
+async function exportReview(controller: ReviewController, arg?: Review): Promise<void> {
+  const review = arg ?? controller.reviewToExport();
+  if (!review) {
+    void vscode.window.showInformationMessage('Local Review: no review to export.');
+    return;
+  }
+
+  const scopePick = await vscode.window.showQuickPick(
+    [
+      { label: 'All comments', scope: 'all' as const },
+      { label: 'Unresolved only', scope: 'unresolved' as const },
+      { label: 'One file…', scope: 'file' as const },
+    ],
+    { placeHolder: 'Export scope' }
+  );
+  if (!scopePick) return;
+
+  let file: string | undefined;
+  if (scopePick.scope === 'file') {
+    const files = [...new Set(review.threads.map((t) => t.anchor.filePath))].sort();
+    if (files.length === 0) {
+      void vscode.window.showInformationMessage('Local Review: this review has no comments.');
+      return;
+    }
+    file = await vscode.window.showQuickPick(files, { placeHolder: 'File to export' });
+    if (!file) return;
+  }
+
+  let live = false;
+  if (controller.canExportLive(review)) {
+    const modePick = await vscode.window.showQuickPick(
+      [
+        { label: 'Current positions', description: 're-anchored to the working tree (recommended)', live: true },
+        { label: 'As reviewed', description: 'line numbers as captured when commented', live: false },
+      ],
+      { placeHolder: 'Line references' }
+    );
+    if (!modePick) return;
+    live = modePick.live;
+  }
+
+  const meta: ExportMeta = {
+    name: review.name,
+    branch: review.branch,
+    source: sourceLabel(controller.source, controller.baseRef),
+    repoName: controller.repoName(),
+    generatedAt: new Date().toISOString(),
+  };
+  const md = exportReviewMarkdown(meta, controller.exportThreads(review, live), { scope: scopePick.scope, file });
+  if (!md) {
+    void vscode.window.showInformationMessage('Local Review: no comments match that scope.');
+    return;
+  }
+
+  const target = await vscode.window.showQuickPick(
+    [
+      { label: 'Copy to clipboard', action: 'clipboard' as const },
+      { label: 'Open in editor', action: 'editor' as const },
+      { label: 'Save to file…', action: 'file' as const },
+    ],
+    { placeHolder: 'Export to' }
+  );
+  if (!target) return;
+  await deliverExport(target.action, md, review.name);
+}
+
+function sourceLabel(source: DiffSource, baseRef?: string): string {
+  if (source === 'vs-base') return `Compared with ${baseRef ?? 'base branch'}`;
+  return SOURCES.find((s) => s.source === source)?.label ?? source;
+}
+
+async function deliverExport(action: 'clipboard' | 'editor' | 'file', md: string, name: string): Promise<void> {
+  if (action === 'clipboard') {
+    await vscode.env.clipboard.writeText(md);
+    void vscode.window.showInformationMessage('Local Review: export copied to clipboard.');
+  } else if (action === 'editor') {
+    const doc = await vscode.workspace.openTextDocument({ content: md, language: 'markdown' });
+    await vscode.window.showTextDocument(doc);
+  } else {
+    const safe = name.replace(/[^\w.-]+/g, '-') || 'review';
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    const uri = await vscode.window.showSaveDialog({
+      saveLabel: 'Export review',
+      filters: { Markdown: ['md'] },
+      defaultUri: folder ? vscode.Uri.joinPath(folder.uri, `${safe}.md`) : undefined,
+    });
+    if (uri) await vscode.workspace.fs.writeFile(uri, Buffer.from(md, 'utf8'));
   }
 }
 
