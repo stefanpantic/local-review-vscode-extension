@@ -33,7 +33,11 @@
         },
         {
           "id": "localReview.comments",
-          "name": "Comments"
+          "name": "Active review comments"
+        },
+        {
+          "id": "localReview.reviews",
+          "name": "Saved reviews"
         }
       ]
     },
@@ -75,7 +79,11 @@
       },
       {
         "view": "localReview.comments",
-        "contents": "No comments in this review yet.\nHover a line in the diff and click + to start one."
+        "contents": "No comments in the active review yet.\nHover a line in the diff and click + to add one."
+      },
+      {
+        "view": "localReview.reviews",
+        "contents": "No reviews yet.\nComment on the diff (a review is created automatically), or use New Review to start one."
       }
     ],
     "commands": [
@@ -117,6 +125,35 @@
         "command": "localReview.toggleWhitespace",
         "title": "Toggle Hide Whitespace",
         "category": "Local Review"
+      },
+      {
+        "command": "localReview.newReview",
+        "title": "New Review",
+        "category": "Local Review",
+        "icon": "$(add)"
+      },
+      {
+        "command": "localReview.switchReview",
+        "title": "Switch to Review",
+        "category": "Local Review"
+      },
+      {
+        "command": "localReview.renameReview",
+        "title": "Rename Review",
+        "category": "Local Review",
+        "icon": "$(pencil)"
+      },
+      {
+        "command": "localReview.deleteReview",
+        "title": "Delete Review",
+        "category": "Local Review",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "localReview.moveReviewToCurrentBranch",
+        "title": "Move to Current Branch",
+        "category": "Local Review",
+        "icon": "$(arrow-right)"
       }
     ],
     "menus": {
@@ -140,15 +177,60 @@
           "command": "localReview.refresh",
           "when": "view == localReview.files",
           "group": "navigation@4"
+        },
+        {
+          "command": "localReview.newReview",
+          "when": "view == localReview.reviews",
+          "group": "navigation@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "localReview.moveReviewToCurrentBranch",
+          "when": "view == localReview.reviews && viewItem == localReview.review.other",
+          "group": "inline@1"
+        },
+        {
+          "command": "localReview.renameReview",
+          "when": "view == localReview.reviews && viewItem =~ /^localReview.review/",
+          "group": "inline@2"
+        },
+        {
+          "command": "localReview.deleteReview",
+          "when": "view == localReview.reviews && viewItem =~ /^localReview.review/",
+          "group": "inline@3"
         }
       ],
       "commandPalette": [
         {
           "command": "localReview.revealFile",
           "when": "false"
+        },
+        {
+          "command": "localReview.switchReview",
+          "when": "false"
+        },
+        {
+          "command": "localReview.renameReview",
+          "when": "false"
+        },
+        {
+          "command": "localReview.deleteReview",
+          "when": "false"
+        },
+        {
+          "command": "localReview.moveReviewToCurrentBranch",
+          "when": "false"
         }
       ]
     },
+    "keybindings": [
+      {
+        "command": "localReview.renameReview",
+        "key": "f2",
+        "when": "focusedView == localReview.reviews"
+      }
+    ],
     "configuration": {
       "title": "Local Review",
       "properties": {

@@ -1,31 +1,32 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import { ReviewState } from './reviewState';
-import { CommentStore } from './comments/CommentStore';
+import { ReviewStore } from './comments/ReviewStore';
 import { reanchor, reanchorOne, createAnchor, rangeText, type AnchorLocator } from './comments/anchoring';
-import { getRepositories, getDiff, getFileTexts } from './git/git';
+import { getRepositories, getDiff, getFileTexts, listBranches } from './git/git';
 import { orderByTree } from './fileTree';
 import type { DiffResult, DiffSource, FileDiff, RepoInfo, ReviewDiff, ViewMode } from './model/ReviewDiff';
-import type { Comment, CommentThread } from './model/Comment';
+import type { Comment, CommentThread, Review } from './model/Comment';
 import type { Events, EventType, ReviewStatePayload } from './protocol/messages';
 
 type PanelPost = <K extends EventType>(type: K, payload: Events[K]) => void;
 
 /**
- * The single coordination hub between the sidebar tree and the editor panel: both surfaces read
- * their state from here and mutate through here; they never talk to each other directly.
+ * The single coordination hub between the sidebar trees and the editor panel. Comments autosave into
+ * the current review for the current `(repoRoot, branch)`; both surfaces read/mutate through here.
  */
 export class ReviewController {
   private repos: RepoInfo[] = [];
+  private branches: string[] = []; // local branches of the current repo (for archived-review detection)
   private current: DiffResult = { state: 'no-repo' };
   private readonly _onDidChange = new vscode.EventEmitter<void>();
-  /** Fires when the tree should refresh. */
+  /** Fires when the trees should refresh. */
   readonly onDidChange = this._onDidChange.event;
   private panelPost?: PanelPost;
 
   constructor(
     private readonly state: ReviewState,
-    private readonly store: CommentStore
+    private readonly reviewStore: ReviewStore
   ) {}
 
   bindPanel(post: PanelPost): void {
@@ -82,18 +83,86 @@ export class ReviewController {
     return this.current.state === 'ok' ? this.current.diff : undefined;
   }
 
-  /** The active review's threads, re-anchored against the currently loaded diff. */
+  /** The branch a review belongs to; `detached@<sha8>` when HEAD is detached. */
+  private branchKey(repoRoot: string): string {
+    const repo = this.repos.find((r) => r.repoRoot === repoRoot);
+    return repo?.branch ?? `detached@${(repo?.headSha ?? 'unknown').slice(0, 8)}`;
+  }
+  private headShaFor(repoRoot: string): string | null {
+    return this.repos.find((r) => r.repoRoot === repoRoot)?.headSha ?? null;
+  }
+
+  /** The current review's threads, re-anchored against the currently loaded diff. */
   private threads(): CommentThread[] {
     const repoRoot = this.state.getPref().repoRoot;
     if (!repoRoot) return [];
-    const stored = this.store.get(repoRoot);
+    const stored = this.reviewStore.current(repoRoot, this.branchKey(repoRoot))?.threads ?? [];
     const diff = this.currentDiff();
     return diff ? reanchor(stored, diff) : stored;
   }
 
-  /** Active review threads (re-anchored) for the sidebar Comments view. */
+  /** The current review's threads (re-anchored) for the sidebar Comments view. */
   activeThreads(): CommentThread[] {
     return this.threads();
+  }
+
+  // --- Review sessions (branch-tied). The current review autosaves; these manage the set. ---
+
+  private repoRootOrThrow(): string {
+    const repoRoot = this.state.getPref().repoRoot;
+    if (!repoRoot) throw new Error('No repository selected.');
+    return repoRoot;
+  }
+
+  /** All reviews for the current repo (the sidebar groups them by branch). */
+  reviewsForRepo(): Review[] {
+    const repoRoot = this.state.getPref().repoRoot;
+    return repoRoot ? this.reviewStore.allForRepo(repoRoot) : [];
+  }
+  currentBranch(): string | undefined {
+    const repoRoot = this.state.getPref().repoRoot;
+    return repoRoot ? this.branchKey(repoRoot) : undefined;
+  }
+  currentReviewId(): string | undefined {
+    const repoRoot = this.state.getPref().repoRoot;
+    return repoRoot ? this.reviewStore.currentId(repoRoot, this.branchKey(repoRoot)) : undefined;
+  }
+  /** Local branch names of the current repo — a review whose branch isn't here is "archived". */
+  existingBranches(): string[] {
+    return this.branches;
+  }
+
+  /** Start a fresh empty review on the current branch and make it current. */
+  async newReview(): Promise<void> {
+    const repoRoot = this.repoRootOrThrow();
+    await this.reviewStore.create(repoRoot, this.branchKey(repoRoot), this.headShaFor(repoRoot));
+    this.afterThreadChange();
+  }
+
+  /** Make a review the current one (for its own branch). */
+  async switchReview(id: string): Promise<void> {
+    const repoRoot = this.repoRootOrThrow();
+    const review = this.reviewStore.get(repoRoot, id);
+    if (!review) return;
+    await this.reviewStore.setCurrent(repoRoot, review.branch, id);
+    this.afterThreadChange();
+  }
+
+  async renameReview(id: string, name: string): Promise<void> {
+    await this.reviewStore.rename(this.repoRootOrThrow(), id, name);
+    this._onDidChange.fire();
+  }
+
+  async deleteReview(id: string): Promise<void> {
+    await this.reviewStore.remove(this.repoRootOrThrow(), id);
+    this.afterThreadChange();
+  }
+
+  /** Re-key a review onto the current branch (e.g. after branching off someone's PR). */
+  async moveReviewToCurrentBranch(id: string): Promise<void> {
+    const repoRoot = this.repoRootOrThrow();
+    await this.reviewStore.moveToBranch(repoRoot, id, this.branchKey(repoRoot));
+    this.afterThreadChange();
   }
 
   async refresh(): Promise<void> {
@@ -105,8 +174,11 @@ export class ReviewController {
       await this.state.setPref({ repoRoot });
     }
     if (!repoRoot) {
+      this.branches = [];
       this.current = { state: 'no-repo' };
     } else {
+      this.branches = await listBranches(repoRoot);
+      await this.reviewStore.migrateLegacy(repoRoot, this.branchKey(repoRoot), this.headShaFor(repoRoot));
       const includeUntracked = vscode.workspace
         .getConfiguration('localReview')
         .get<boolean>('includeUntracked', false);
@@ -161,13 +233,13 @@ export class ReviewController {
     this.panelPost?.('revealFile', { filePath });
   }
 
-  // --- Comment mutations (active review). Each persists, re-broadcasts, and returns the canonical thread. ---
+  // --- Comment mutations (autosave into the current review). Each returns the canonical thread. ---
 
-  private requireContext(): { repoRoot: string; diff: ReviewDiff } {
+  private ctx(): { repoRoot: string; branch: string; diff: ReviewDiff; headSha: string | null } {
     const repoRoot = this.state.getPref().repoRoot;
     const diff = this.currentDiff();
     if (!repoRoot || !diff) throw new Error('No active diff to comment on.');
-    return { repoRoot, diff };
+    return { repoRoot, branch: this.branchKey(repoRoot), diff, headSha: this.headShaFor(repoRoot) };
   }
 
   private afterThreadChange(): void {
@@ -183,7 +255,7 @@ export class ReviewController {
   }
 
   async addComment(loc: AnchorLocator & { body: string; suggestion?: string }): Promise<CommentThread> {
-    const { repoRoot, diff } = this.requireContext();
+    const { repoRoot, branch, diff, headSha } = this.ctx();
     const now = new Date().toISOString();
     const comment: Comment = { id: randomUUID(), body: loc.body, createdAt: now, updatedAt: now };
     if (loc.suggestion != null) {
@@ -191,61 +263,61 @@ export class ReviewController {
       comment.suggestion = { original, replacement: loc.suggestion };
     }
     const thread: CommentThread = { id: randomUUID(), anchor: createAnchor(diff, loc), comments: [comment], resolved: false };
-    const threads = this.store.get(repoRoot);
-    threads.push(thread);
-    await this.store.save(repoRoot, threads);
+    const review = await this.reviewStore.ensureCurrent(repoRoot, branch, headSha);
+    await this.reviewStore.updateThreads(repoRoot, review.id, [...review.threads, thread]);
     this.afterThreadChange();
     return reanchorOne(thread, diff);
   }
 
   async replyComment(threadId: string, body: string, suggestion?: string): Promise<CommentThread> {
-    const { repoRoot, diff } = this.requireContext();
-    const threads = this.store.get(repoRoot);
-    const thread = threads.find((t) => t.id === threadId);
-    if (!thread) throw new Error('Thread not found.');
+    const { repoRoot, branch, diff } = this.ctx();
+    const review = this.reviewStore.current(repoRoot, branch);
+    const thread = review?.threads.find((t) => t.id === threadId);
+    if (!review || !thread) throw new Error('Thread not found.');
     const now = new Date().toISOString();
     const reply: Comment = { id: randomUUID(), body, createdAt: now, updatedAt: now };
     if (suggestion != null) reply.suggestion = this.suggestionFor(thread, diff, suggestion);
     thread.comments.push(reply);
-    await this.store.save(repoRoot, threads);
+    await this.reviewStore.updateThreads(repoRoot, review.id, review.threads);
     this.afterThreadChange();
     return reanchorOne(thread, diff);
   }
 
   async editComment(threadId: string, commentId: string, body: string, suggestion?: string | null): Promise<CommentThread> {
-    const { repoRoot, diff } = this.requireContext();
-    const threads = this.store.get(repoRoot);
-    const thread = threads.find((t) => t.id === threadId);
+    const { repoRoot, branch, diff } = this.ctx();
+    const review = this.reviewStore.current(repoRoot, branch);
+    const thread = review?.threads.find((t) => t.id === threadId);
     const comment = thread?.comments.find((c) => c.id === commentId);
-    if (!thread || !comment) throw new Error('Comment not found.');
+    if (!review || !thread || !comment) throw new Error('Comment not found.');
     comment.body = body;
     comment.updatedAt = new Date().toISOString();
     if (suggestion === null) delete comment.suggestion; // explicitly cleared
     else if (suggestion != null) comment.suggestion = this.suggestionFor(thread, diff, suggestion);
-    await this.store.save(repoRoot, threads);
+    await this.reviewStore.updateThreads(repoRoot, review.id, review.threads);
     this.afterThreadChange();
     return reanchorOne(thread, diff);
   }
 
   async deleteComment(threadId: string, commentId: string): Promise<{ threadId: string; threadDeleted: boolean }> {
-    const { repoRoot } = this.requireContext();
-    const threads = this.store.get(repoRoot);
-    const thread = threads.find((t) => t.id === threadId);
-    if (!thread) return { threadId, threadDeleted: false };
+    const { repoRoot, branch } = this.ctx();
+    const review = this.reviewStore.current(repoRoot, branch);
+    const thread = review?.threads.find((t) => t.id === threadId);
+    if (!review || !thread) return { threadId, threadDeleted: false };
     thread.comments = thread.comments.filter((c) => c.id !== commentId);
     const threadDeleted = thread.comments.length === 0;
-    await this.store.save(repoRoot, threadDeleted ? threads.filter((t) => t.id !== threadId) : threads);
+    const next = threadDeleted ? review.threads.filter((t) => t.id !== threadId) : review.threads;
+    await this.reviewStore.updateThreads(repoRoot, review.id, next);
     this.afterThreadChange();
     return { threadId, threadDeleted };
   }
 
   async resolveThread(threadId: string, resolved: boolean): Promise<CommentThread> {
-    const { repoRoot, diff } = this.requireContext();
-    const threads = this.store.get(repoRoot);
-    const thread = threads.find((t) => t.id === threadId);
-    if (!thread) throw new Error('Thread not found.');
+    const { repoRoot, branch, diff } = this.ctx();
+    const review = this.reviewStore.current(repoRoot, branch);
+    const thread = review?.threads.find((t) => t.id === threadId);
+    if (!review || !thread) throw new Error('Thread not found.');
     thread.resolved = resolved;
-    await this.store.save(repoRoot, threads);
+    await this.reviewStore.updateThreads(repoRoot, review.id, review.threads);
     this.afterThreadChange();
     return reanchorOne(thread, diff);
   }

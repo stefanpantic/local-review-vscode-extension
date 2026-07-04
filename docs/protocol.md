@@ -164,24 +164,27 @@ interface CommentThread {
 
 Anchoring is intentionally **scoped to lines present in the current diff**: a line that has scrolled out of every hunk becomes `outdated` by design (acceptable — the tool is a review-then-export loop, not a full-file annotator). The *same* algorithm re-anchors a **saved review** when it is loaded (it.5).
 
-## 5. Reviews & storage  `[active it.4; saved it.5]`
+## 5. Reviews & storage  `[comments it.4; sessions it.5]`
 
-Durable data lives in the host's `workspaceState`, namespaced `localReview.*`, keyed by **`repoRoot` only** (never by source — see [§7 of spec.md](./spec.md#7-data--storage-model-overview)). One `Review` type serves both roles. See [ADR-0004](./decisions/0004-state-ownership.md), [ADR-0009](./decisions/0009-review-sessions-vs-export.md).
+Durable data lives in the host's `workspaceState`, namespaced `localReview.*`, keyed by **`(repoRoot, branch)`** (branch joins the key in it.5; source never does — see [§7 of spec.md](./spec.md#7-data--storage-model-overview)). A `Review` is a **branch-tied session**; per `(repoRoot, branch)` one review is **current** and autosaves as you comment. See [ADR-0004](./decisions/0004-state-ownership.md), [ADR-0009](./decisions/0009-review-sessions-vs-export.md).
 
 ```ts
 interface Review {
+  id: string;
+  name: string;
   repoRoot: string;
+  branch: string;           // the branch this review belongs to; `detached@<sha8>` when HEAD is detached
+  createdAt: string;        // ISO
+  updatedAt: string;        // ISO (bumped on every autosave)
+  headSha: string | null;   // HEAD when created (null on unborn HEAD)
   threads: CommentThread[];
-  // Set only when the review is SAVED (a named, frozen snapshot); absent for the active review:
-  id?: string;
-  name?: string;
-  createdAt?: string;       // ISO
-  headSha?: string | null;  // HEAD at save time (provenance)
 }
-// The "active review" is the unnamed current working set for a repoRoot.
-// "save" freezes a named copy into the saved-reviews list; "load" copies one back as the active set (re-anchored).
+// Storage keys (all workspaceState):
+//   localReview.reviews        → Record<repoRoot, Review[]>
+//   localReview.currentReview  → Record<repoRoot, Record<branch, reviewId>>   (the current review per branch)
+//   localReview.threads        → LEGACY it.4 active threads; migrated into a Review on first load, then cleared.
 
-interface RepoInfo { repoRoot: string; name: string; headSha: string | null; }  // repoRoot is a normalized fsPath string
+interface RepoInfo { repoRoot: string; name: string; headSha: string | null; branch: string | null; }  // repoRoot is a normalized fsPath string
 ```
 
 ## 6. Message bridge  `[it.1]`

@@ -1,17 +1,24 @@
 import * as vscode from 'vscode';
 import { ReviewState } from './reviewState';
-import { CommentStore } from './comments/CommentStore';
+import { ReviewStore } from './comments/ReviewStore';
 import { ReviewController } from './reviewController';
 import { FilesView } from './webview/filesView';
 import { CommentsView } from './webview/commentsView';
+import { ReviewsView } from './webview/reviewsView';
 import { ReviewPanel } from './webview/ReviewPanel';
 import { listBranches } from './git/git';
 import type { DiffSource } from './model/ReviewDiff';
+import type { Review } from './model/Comment';
+
+/** Narrow a command argument (tree node or selection) to a Review. */
+function asReview(x: unknown): Review | undefined {
+  return x && typeof x === 'object' && 'id' in x && 'threads' in x ? (x as Review) : undefined;
+}
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const state = new ReviewState(context);
-  const store = new CommentStore(context);
-  const controller = new ReviewController(state, store);
+  const reviewStore = new ReviewStore(context.workspaceState);
+  const controller = new ReviewController(state, reviewStore);
   const filesView = new FilesView(controller);
   const tree = vscode.window.createTreeView('localReview.files', {
     treeDataProvider: filesView,
@@ -23,6 +30,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     treeDataProvider: commentsView,
     showCollapseAll: true,
   });
+
+  const reviewsView = new ReviewsView(controller);
+  const reviewsTree = vscode.window.createTreeView('localReview.reviews', { treeDataProvider: reviewsView });
 
   tree.onDidChangeCheckboxState(
     (e) => {
@@ -39,6 +49,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     tree,
     commentsTree,
+    reviewsTree,
+    vscode.commands.registerCommand('localReview.newReview', () => controller.newReview()),
+    vscode.commands.registerCommand('localReview.switchReview', (r) => {
+      const rev = asReview(r);
+      if (rev) void controller.switchReview(rev.id);
+    }),
+    vscode.commands.registerCommand('localReview.renameReview', (r) =>
+      renameReview(controller, asReview(r) ?? asReview(reviewsTree.selection[0]))
+    ),
+    vscode.commands.registerCommand('localReview.deleteReview', (r) =>
+      deleteReview(controller, asReview(r) ?? asReview(reviewsTree.selection[0]))
+    ),
+    vscode.commands.registerCommand('localReview.moveReviewToCurrentBranch', (r) => {
+      const rev = asReview(r) ?? asReview(reviewsTree.selection[0]);
+      if (rev) void controller.moveReviewToCurrentBranch(rev.id);
+    }),
     vscode.commands.registerCommand('localReview.startReview', async () => {
       await controller.refresh();
       ReviewPanel.show(context.extensionUri, controller);
@@ -98,6 +124,18 @@ async function pickSource(controller: ReviewController): Promise<void> {
   } else {
     await controller.setSource(picked.source);
   }
+}
+
+async function renameReview(controller: ReviewController, review?: Review): Promise<void> {
+  if (!review) return;
+  const name = await vscode.window.showInputBox({ prompt: 'Rename review', value: review.name });
+  if (name?.trim()) await controller.renameReview(review.id, name.trim());
+}
+
+async function deleteReview(controller: ReviewController, review?: Review): Promise<void> {
+  if (!review) return;
+  const ok = await vscode.window.showWarningMessage(`Delete review "${review.name}"?`, { modal: true }, 'Delete');
+  if (ok === 'Delete') await controller.deleteReview(review.id);
 }
 
 async function pickRepo(controller: ReviewController): Promise<void> {

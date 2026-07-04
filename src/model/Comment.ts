@@ -37,19 +37,46 @@ export interface CommentThread {
 }
 
 /**
- * One type for the active review and saved snapshots. The active review is the unnamed
- * working set for a repoRoot; saving freezes a named, dated copy.
+ * A review session: a named set of comment threads tied to a `(repoRoot, branch)`. The "current"
+ * review for a branch is the one being edited (autosaved). Uniform — there is no separate active type.
  */
 export interface Review {
   repoRoot: string;
+  branch: string; // branch the review belongs to; `detached@<sha8>` when HEAD is detached
   threads: CommentThread[];
-  id?: string;
-  name?: string;
-  createdAt?: string; // ISO
-  headSha?: string | null; // HEAD at save time (provenance)
+  id: string;
+  name: string;
+  createdAt: string; // ISO
+  updatedAt: string; // ISO
+  headSha: string | null; // HEAD when the review was created (null on unborn HEAD)
 }
 
 /** The durable subset of a thread (drops runtime-only anchoring fields) — what we persist. */
 export function durableThread(t: CommentThread): CommentThread {
   return { id: t.id, anchor: t.anchor, comments: t.comments, resolved: t.resolved };
+}
+
+/** Structural guard for a persisted comment (guarded reads of stale/corrupt state). */
+export function isComment(c: unknown): c is Comment {
+  if (!c || typeof c !== 'object') return false;
+  const o = c as Record<string, unknown>;
+  return typeof o.id === 'string' && typeof o.body === 'string';
+}
+
+/** Structural guard for a persisted comment thread. */
+export function isCommentThread(t: unknown): t is CommentThread {
+  if (!t || typeof t !== 'object') return false;
+  const o = t as Record<string, unknown>;
+  const a = o.anchor as Record<string, unknown> | undefined;
+  return (
+    typeof o.id === 'string' &&
+    typeof o.resolved === 'boolean' &&
+    Array.isArray(o.comments) &&
+    o.comments.every(isComment) &&
+    !!a &&
+    typeof a.filePath === 'string' &&
+    (a.side === 'old' || a.side === 'new') &&
+    typeof a.lineNumber === 'number' &&
+    typeof a.line === 'string'
+  );
 }

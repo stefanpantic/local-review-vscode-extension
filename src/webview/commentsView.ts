@@ -39,15 +39,15 @@ export class CommentsView implements vscode.TreeDataProvider<CommentsNode> {
     const t = node.thread;
     const item = new vscode.TreeItem(preview(t));
     item.id = `cthread:${t.id}`;
-    const line = t.resolvedLine ?? t.anchor.lineNumber;
-    const tag = statusTag(t);
+    // Range-aware label; status is conveyed by the icon, so it's kept out of the description.
+    const start = t.resolvedLine ?? t.anchor.lineNumber;
+    const end = t.resolvedEndLine ?? t.anchor.endLineNumber ?? start;
+    const lineLabel = end > start ? `Lines ${start}–${end}` : `Line ${start}`;
     const replies = t.comments.length - 1;
-    const parts = [`Line ${line}`];
-    if (tag) parts.push(tag);
-    if (replies > 0) parts.push(`${replies} ${replies === 1 ? 'reply' : 'replies'}`);
-    item.description = parts.join(' · ');
+    item.description = replies > 0 ? `${lineLabel} · ${replies} ${replies === 1 ? 'reply' : 'replies'}` : lineLabel;
+    const tag = statusTag(t);
     item.tooltip = new vscode.MarkdownString(
-      `**Line ${line}**${tag ? ` · _${tag}_` : ''}\n\n${t.comments.map((c) => c.body).join('\n\n---\n\n')}`
+      `**${lineLabel}**${tag ? ` · _${tag}_` : ''}\n\n${t.comments.map((c) => c.body).join('\n\n---\n\n')}`
     );
     item.iconPath = new vscode.ThemeIcon(t.resolved ? 'check' : t.status === 'outdated' ? 'warning' : 'comment');
     item.command = { command: 'localReview.revealFile', title: 'Reveal', arguments: [t.anchor.filePath] };
