@@ -34,6 +34,16 @@ async function isUnbornHead(repoRoot: string): Promise<boolean> {
   }
 }
 
+/** The current branch name, or null when HEAD is detached. Works on an unborn HEAD (points at a not-yet-created branch). */
+async function currentBranch(repoRoot: string): Promise<string | null> {
+  try {
+    const b = (await git(repoRoot, ['symbolic-ref', '--short', 'HEAD'])).trim();
+    return b || null;
+  } catch {
+    return null;
+  }
+}
+
 /** Discover the git repositories backing the current workspace folders (deduped by top-level path). */
 export async function getRepositories(): Promise<RepoInfo[]> {
   const folders = vscode.workspace.workspaceFolders ?? [];
@@ -43,7 +53,8 @@ export async function getRepositories(): Promise<RepoInfo[]> {
       const top = (await git(folder.uri.fsPath, ['rev-parse', '--show-toplevel'])).trim();
       if (!top || byRoot.has(top)) continue;
       const headSha = (await isUnbornHead(top)) ? null : (await git(top, ['rev-parse', 'HEAD'])).trim();
-      byRoot.set(top, { repoRoot: top, name: path.basename(top), headSha });
+      const branch = await currentBranch(top);
+      byRoot.set(top, { repoRoot: top, name: path.basename(top), headSha, branch });
     } catch {
       // not a git repository — skip this folder
     }

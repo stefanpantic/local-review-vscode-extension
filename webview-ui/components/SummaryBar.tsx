@@ -1,16 +1,17 @@
 import type { ReviewDiff, DiffSource, ViewMode } from '../../src/model/ReviewDiff';
 
 const SOURCE_LABELS: Record<DiffSource, string> = {
-  'worktree-vs-head': 'Working tree vs HEAD',
-  unstaged: 'Unstaged',
-  staged: 'Staged',
-  'vs-base': 'vs base',
+  'worktree-vs-head': 'Uncommitted changes',
+  unstaged: 'Unstaged changes',
+  staged: 'Staged changes',
+  'vs-base': 'Compared with',
 };
 
 export function SummaryBar({
   diff,
   source,
   baseRef,
+  branch,
   viewMode,
   whitespace,
   onSetViewMode,
@@ -19,6 +20,7 @@ export function SummaryBar({
   diff: ReviewDiff;
   source: DiffSource;
   baseRef?: string;
+  branch?: string | null;
   viewMode: ViewMode;
   whitespace: boolean;
   onSetViewMode: (mode: ViewMode) => void;
@@ -26,10 +28,15 @@ export function SummaryBar({
 }) {
   const additions = diff.files.reduce((n, f) => n + f.additions, 0);
   const deletions = diff.files.reduce((n, f) => n + f.deletions, 0);
-  const label = SOURCE_LABELS[source] + (source === 'vs-base' && baseRef ? ` (${baseRef})` : '');
+  const label = source === 'vs-base' ? `Compared with ${baseRef ?? 'base branch'}` : SOURCE_LABELS[source];
   const n = diff.files.length;
   return (
     <div className="lr-summary">
+      {branch && (
+        <span className="lr-branch" title="Current branch">
+          {branch}
+        </span>
+      )}
       <span className="lr-summary-files">
         {n} file{n === 1 ? '' : 's'} changed
       </span>

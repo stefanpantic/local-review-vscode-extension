@@ -1,17 +1,26 @@
 import * as vscode from 'vscode';
 import { ReviewState } from './reviewState';
+import { CommentStore } from './comments/CommentStore';
 import { ReviewController } from './reviewController';
 import { FilesView } from './webview/filesView';
+import { CommentsView } from './webview/commentsView';
 import { ReviewPanel } from './webview/ReviewPanel';
 import { listBranches } from './git/git';
 import type { DiffSource } from './model/ReviewDiff';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const state = new ReviewState(context);
-  const controller = new ReviewController(state);
+  const store = new CommentStore(context);
+  const controller = new ReviewController(state, store);
   const filesView = new FilesView(controller);
   const tree = vscode.window.createTreeView('localReview.files', {
     treeDataProvider: filesView,
+    showCollapseAll: true,
+  });
+
+  const commentsView = new CommentsView(controller);
+  const commentsTree = vscode.window.createTreeView('localReview.comments', {
+    treeDataProvider: commentsView,
     showCollapseAll: true,
   });
 
@@ -29,6 +38,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     tree,
+    commentsTree,
     vscode.commands.registerCommand('localReview.startReview', async () => {
       await controller.refresh();
       ReviewPanel.show(context.extensionUri, controller);
@@ -59,10 +69,10 @@ export function deactivate(): void {
 }
 
 const SOURCES: { label: string; description: string; source: DiffSource }[] = [
-  { label: 'Working tree vs HEAD', description: 'all uncommitted changes', source: 'worktree-vs-head' },
-  { label: 'Unstaged', description: 'working tree vs index', source: 'unstaged' },
-  { label: 'Staged', description: 'index vs HEAD', source: 'staged' },
-  { label: 'Base branch…', description: 'compare against another branch', source: 'vs-base' },
+  { label: 'Uncommitted changes', description: 'everything not yet committed', source: 'worktree-vs-head' },
+  { label: 'Unstaged changes', description: 'not yet staged', source: 'unstaged' },
+  { label: 'Staged changes', description: 'staged for commit', source: 'staged' },
+  { label: 'Compare with a branch…', description: 'diff against another branch', source: 'vs-base' },
 ];
 
 async function pickSource(controller: ReviewController): Promise<void> {

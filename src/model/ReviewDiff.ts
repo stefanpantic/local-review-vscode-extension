@@ -54,6 +54,7 @@ export interface RepoInfo {
   repoRoot: string; // a normalized fsPath string — never a vscode.Uri
   name: string;
   headSha: string | null;
+  branch: string | null; // current branch name; null when detached
 }
 
 export type ReviewState = 'ok' | 'no-repo' | 'unborn-head' | 'no-changes' | 'error';

@@ -1,8 +1,12 @@
 import * as vscode from 'vscode';
+import { randomUUID } from 'node:crypto';
 import { ReviewState } from './reviewState';
+import { CommentStore } from './comments/CommentStore';
+import { reanchor, reanchorOne, createAnchor, type AnchorLocator } from './comments/anchoring';
 import { getRepositories, getDiff, getFileTexts } from './git/git';
 import { orderByTree } from './fileTree';
-import type { DiffResult, DiffSource, FileDiff, RepoInfo, ViewMode } from './model/ReviewDiff';
+import type { DiffResult, DiffSource, FileDiff, RepoInfo, ReviewDiff, ViewMode } from './model/ReviewDiff';
+import type { CommentThread } from './model/Comment';
 import type { Events, EventType, ReviewStatePayload } from './protocol/messages';
 
 type PanelPost = <K extends EventType>(type: K, payload: Events[K]) => void;
@@ -19,7 +23,10 @@ export class ReviewController {
   readonly onDidChange = this._onDidChange.event;
   private panelPost?: PanelPost;
 
-  constructor(private readonly state: ReviewState) {}
+  constructor(
+    private readonly state: ReviewState,
+    private readonly store: CommentStore
+  ) {}
 
   bindPanel(post: PanelPost): void {
     this.panelPost = post;
@@ -66,8 +73,27 @@ export class ReviewController {
       viewed: pref.repoRoot ? this.state.viewedFor(pref.repoRoot, pref.source, paths) : {},
       viewMode: pref.viewMode,
       whitespace: pref.whitespace,
+      threads: this.threads(),
       config: { largeFileThreshold },
     };
+  }
+
+  private currentDiff(): ReviewDiff | undefined {
+    return this.current.state === 'ok' ? this.current.diff : undefined;
+  }
+
+  /** The active review's threads, re-anchored against the currently loaded diff. */
+  private threads(): CommentThread[] {
+    const repoRoot = this.state.getPref().repoRoot;
+    if (!repoRoot) return [];
+    const stored = this.store.get(repoRoot);
+    const diff = this.currentDiff();
+    return diff ? reanchor(stored, diff) : stored;
+  }
+
+  /** Active review threads (re-anchored) for the sidebar Comments view. */
+  activeThreads(): CommentThread[] {
+    return this.threads();
   }
 
   async refresh(): Promise<void> {
@@ -133,6 +159,84 @@ export class ReviewController {
 
   reveal(filePath: string): void {
     this.panelPost?.('revealFile', { filePath });
+  }
+
+  // --- Comment mutations (active review). Each persists, re-broadcasts, and returns the canonical thread. ---
+
+  private requireContext(): { repoRoot: string; diff: ReviewDiff } {
+    const repoRoot = this.state.getPref().repoRoot;
+    const diff = this.currentDiff();
+    if (!repoRoot || !diff) throw new Error('No active diff to comment on.');
+    return { repoRoot, diff };
+  }
+
+  private afterThreadChange(): void {
+    this._onDidChange.fire();
+    this.panelPost?.('threadsUpdated', { threads: this.threads() });
+  }
+
+  async addComment(loc: AnchorLocator & { body: string }): Promise<CommentThread> {
+    const { repoRoot, diff } = this.requireContext();
+    const now = new Date().toISOString();
+    const thread: CommentThread = {
+      id: randomUUID(),
+      anchor: createAnchor(diff, loc),
+      comments: [{ id: randomUUID(), body: loc.body, createdAt: now, updatedAt: now }],
+      resolved: false,
+    };
+    const threads = this.store.get(repoRoot);
+    threads.push(thread);
+    await this.store.save(repoRoot, threads);
+    this.afterThreadChange();
+    return reanchorOne(thread, diff);
+  }
+
+  async replyComment(threadId: string, body: string): Promise<CommentThread> {
+    const { repoRoot, diff } = this.requireContext();
+    const threads = this.store.get(repoRoot);
+    const thread = threads.find((t) => t.id === threadId);
+    if (!thread) throw new Error('Thread not found.');
+    const now = new Date().toISOString();
+    thread.comments.push({ id: randomUUID(), body, createdAt: now, updatedAt: now });
+    await this.store.save(repoRoot, threads);
+    this.afterThreadChange();
+    return reanchorOne(thread, diff);
+  }
+
+  async editComment(threadId: string, commentId: string, body: string): Promise<CommentThread> {
+    const { repoRoot, diff } = this.requireContext();
+    const threads = this.store.get(repoRoot);
+    const thread = threads.find((t) => t.id === threadId);
+    const comment = thread?.comments.find((c) => c.id === commentId);
+    if (!thread || !comment) throw new Error('Comment not found.');
+    comment.body = body;
+    comment.updatedAt = new Date().toISOString();
+    await this.store.save(repoRoot, threads);
+    this.afterThreadChange();
+    return reanchorOne(thread, diff);
+  }
+
+  async deleteComment(threadId: string, commentId: string): Promise<{ threadId: string; threadDeleted: boolean }> {
+    const { repoRoot } = this.requireContext();
+    const threads = this.store.get(repoRoot);
+    const thread = threads.find((t) => t.id === threadId);
+    if (!thread) return { threadId, threadDeleted: false };
+    thread.comments = thread.comments.filter((c) => c.id !== commentId);
+    const threadDeleted = thread.comments.length === 0;
+    await this.store.save(repoRoot, threadDeleted ? threads.filter((t) => t.id !== threadId) : threads);
+    this.afterThreadChange();
+    return { threadId, threadDeleted };
+  }
+
+  async resolveThread(threadId: string, resolved: boolean): Promise<CommentThread> {
+    const { repoRoot, diff } = this.requireContext();
+    const threads = this.store.get(repoRoot);
+    const thread = threads.find((t) => t.id === threadId);
+    if (!thread) throw new Error('Thread not found.');
+    thread.resolved = resolved;
+    await this.store.save(repoRoot, threads);
+    this.afterThreadChange();
+    return reanchorOne(thread, diff);
   }
 
   /** Full old/new file text for whole-file syntax highlighting, for the current repo + source. */

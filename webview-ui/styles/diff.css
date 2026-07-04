@@ -1,7 +1,12 @@
 :root {
   --lr-add-bg: var(--vscode-diffEditor-insertedLineBackground, rgba(46, 160, 67, 0.15));
   --lr-del-bg: var(--vscode-diffEditor-removedLineBackground, rgba(248, 81, 73, 0.15));
+  /* Hairline for internal dividers; a crisper border for card outlines. */
   --lr-border: var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  --lr-card-border: var(--vscode-widget-border, var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.45)));
+  --lr-radius: 8px;
+  /* Left accent rails: green for diff file cards, the theme accent (focusBorder) for comment cards. */
+  --lr-diff-accent: var(--vscode-gitDecoration-addedResourceForeground, #4caf50);
 }
 
 * {
@@ -44,8 +49,9 @@ body {
   margin-top: 0;
   padding: 8px 12px;
   border: none;
-  border-bottom: 1px solid var(--lr-border);
-  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  border-bottom: 1px solid var(--lr-card-border);
+  border-radius: var(--lr-radius) var(--lr-radius) 0 0;
+  background: var(--vscode-editor-background);
   font-family: var(--vscode-font-family);
 }
 
@@ -152,14 +158,32 @@ body {
 .lr-source {
   color: var(--vscode-descriptionForeground);
 }
+.lr-branch {
+  flex: none;
+  padding: 1px 9px;
+  border: 1px solid var(--lr-border);
+  border-radius: 10px;
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+}
 
 .lr-file {
   display: block;
   margin: 14px 12px 0;
-  border: 1px solid var(--lr-border);
+  border: 1px solid var(--lr-card-border);
+  border-left: 2px solid var(--lr-diff-accent);
+  border-radius: var(--lr-radius);
+  background: var(--vscode-editor-background);
+}
+/* Body wrapper clips hunks to the card's rounded bottom (sticky header is its sibling, not inside it). */
+.lr-file-body {
+  overflow: hidden;
+  border-radius: 0 0 var(--lr-radius) var(--lr-radius);
 }
 .lr-file.lr-collapsed .lr-file-header {
   border-bottom: none;
+  border-radius: var(--lr-radius);
 }
 
 .lr-chevron {
@@ -259,3 +283,311 @@ body {
 }
 
 /* Syntax token color is applied inline from the active theme (see highlight.ts). */
+
+/* --- Comments (it.4) --- */
+
+/* Gutter "+" affordance: hidden until the row is hovered. */
+.lr-row,
+.lr-scell {
+  position: relative;
+}
+.lr-add-btn {
+  position: absolute;
+  left: 1px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  border: none;
+  border-radius: 3px;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  cursor: pointer;
+}
+.lr-row:hover .lr-add-btn,
+.lr-scell:hover .lr-add-btn {
+  display: inline-flex;
+}
+.lr-selected {
+  background: var(--vscode-editor-selectionBackground, rgba(88, 166, 255, 0.25)) !important;
+}
+
+/* Thread + composer rows sit beneath their code line; the card itself provides the surface. */
+.lr-below {
+  padding: 4px 12px 8px 28px;
+  font-family: var(--vscode-font-family);
+  white-space: normal;
+}
+
+/* Thread card: header band (badges/range) · comment rows · footer actions. */
+.lr-thread {
+  max-width: 820px;
+  margin: 4px 0;
+  border: 1px solid var(--lr-card-border);
+  border-radius: var(--lr-radius);
+  background: var(--vscode-editor-background);
+  /* accent rail on the left (inset so it respects the rounded corners) + soft drop shadow */
+  box-shadow:
+    inset 2px 0 0 var(--vscode-focusBorder),
+    0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.22));
+  overflow: hidden;
+  font-size: 12px;
+}
+/* Collapsed thread: just the header row (chevron · line · right-aligned badges). */
+.lr-thread-collapsed {
+  opacity: 1;
+}
+/* A resolved thread is dimmed whether collapsed or expanded (more specific → beats the collapsed rule). */
+.lr-thread.lr-thread-resolved {
+  opacity: 0.55;
+}
+.lr-thread-collapsed .lr-thread-head {
+  border-bottom: none;
+}
+.lr-thread-head-clickable {
+  cursor: pointer;
+}
+.lr-thread-head-clickable:hover {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.08));
+}
+.lr-thread-toggle {
+  flex: none;
+  width: 14px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--vscode-descriptionForeground);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+.lr-thread-toggle:hover {
+  color: var(--vscode-foreground);
+}
+/* Status badges pinned to the right edge of the header (GitHub-style), in both states. */
+.lr-thread-badges {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.lr-thread-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--lr-border);
+}
+.lr-thread-loc {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.lr-comment {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 10px;
+  border-top: 1px solid var(--lr-border);
+}
+.lr-comment:first-child {
+  border-top: none;
+}
+/* Replies nest under the root as indented, rounded cards (no hard left rail). */
+.lr-reply {
+  margin: 6px 10px 6px 24px;
+  border: 1px solid var(--lr-border);
+  border-radius: 6px;
+}
+.lr-comment-editing {
+  display: block;
+}
+.lr-comment-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--vscode-foreground);
+  line-height: 1.45;
+}
+.lr-comment-tools {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.lr-comment:hover .lr-comment-tools {
+  opacity: 1;
+}
+
+.lr-thread-foot {
+  display: flex;
+  gap: 8px;
+  padding: 7px 10px;
+  border-top: 1px solid var(--lr-border);
+}
+
+.lr-badge-moved {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  border-color: currentColor;
+}
+.lr-badge-outdated {
+  color: var(--vscode-errorForeground, #f85149);
+  border-color: currentColor;
+}
+.lr-badge-resolved {
+  color: var(--vscode-charts-green, #4ec9b0);
+  border-color: currentColor;
+}
+
+/* Comment form */
+.lr-comment-form {
+  width: 100%;
+}
+.lr-comment-input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 56px;
+  padding: 6px 8px;
+  resize: vertical;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--lr-border));
+  border-radius: 4px;
+  font-family: var(--vscode-font-family);
+  font-size: 12px;
+}
+.lr-comment-input:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder);
+}
+.lr-comment-actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 8px;
+}
+
+/* Buttons: primary/secondary pill, small variant, and a subtle ghost for per-comment actions. */
+.lr-btn {
+  padding: 3px 12px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 4px;
+  background: var(--vscode-button-secondaryBackground, rgba(128, 128, 128, 0.14));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  font-family: var(--vscode-font-family);
+  font-size: 12px;
+  cursor: pointer;
+}
+.lr-btn:hover {
+  background: var(--vscode-button-secondaryHoverBackground, rgba(128, 128, 128, 0.22));
+}
+.lr-btn-primary {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border-color: var(--vscode-button-background);
+}
+.lr-btn-primary:hover {
+  background: var(--vscode-button-hoverBackground, var(--vscode-button-background));
+}
+.lr-btn-sm {
+  padding: 2px 10px;
+  font-size: 11px;
+}
+.lr-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.lr-ghost-btn {
+  padding: 1px 7px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: none;
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--vscode-font-family);
+  font-size: 11px;
+  cursor: pointer;
+}
+.lr-ghost-btn:hover {
+  color: var(--vscode-foreground);
+  border-color: var(--lr-border);
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
+}
+.lr-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--vscode-textLink-foreground);
+  font-size: 11px;
+  cursor: pointer;
+}
+.lr-link:hover {
+  text-decoration: underline;
+}
+
+/* Error banner */
+.lr-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 12px 0;
+  padding: 6px 12px;
+  border: 1px solid var(--vscode-errorForeground, #f85149);
+  border-radius: 4px;
+  color: var(--vscode-errorForeground, #f85149);
+  font-family: var(--vscode-font-family);
+}
+
+/* Outdated section (threads whose line/file left the current diff) */
+.lr-outdated-section {
+  overflow: hidden; /* safe here: the outdated header is static, not sticky */
+  border-left-color: var(--vscode-errorForeground, #f85149); /* red rail — these comments are stale */
+}
+.lr-outdated-head {
+  position: static;
+  font-weight: 600;
+  cursor: pointer;
+}
+.lr-outdated-head:hover {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.08));
+}
+.lr-outdated-item {
+  padding: 8px 12px;
+  border-top: 1px solid var(--lr-border);
+}
+.lr-outdated-path {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  margin-bottom: 4px;
+}
+/* Outdated threads render their stored hunk as a real (unhighlighted) diff. */
+.lr-outdated-diff {
+  margin-bottom: 8px;
+  border: 1px solid var(--lr-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+/* Fallback when a stored hunk can't be parsed. */
+.lr-outdated-hunk {
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.1));
+  border-radius: 4px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  white-space: pre;
+}
+.lr-outdated-item .lr-below {
+  padding-left: 12px;
+  border: none;
+  background: none;
+}

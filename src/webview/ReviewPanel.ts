@@ -53,6 +53,11 @@ export class ReviewPanel {
           return { ok: true as const };
         },
         getFileTexts: (p) => this.controller.getFileTexts(p.files),
+        addComment: (p) => this.controller.addComment(p),
+        replyComment: (p) => this.controller.replyComment(p.threadId, p.body),
+        editComment: (p) => this.controller.editComment(p.threadId, p.commentId, p.body),
+        deleteComment: (p) => this.controller.deleteComment(p.threadId, p.commentId),
+        resolveThread: (p) => this.controller.resolveThread(p.threadId, p.resolved),
       },
       this.disposables,
       (parts) => log('[webview]', ...parts)

@@ -1,16 +1,25 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { HighlighterCore } from 'shiki/core';
 import type { ReviewStatePayload } from '../../src/protocol/messages';
-import type { FileDiff, DiffRow, DiffSource, ViewMode } from '../../src/model/ReviewDiff';
+import type { FileDiff, DiffRow, DiffSource, ReviewDiff, Side, ViewMode } from '../../src/model/ReviewDiff';
+import type { Anchor, CommentThread } from '../../src/model/Comment';
 import { request, dlog } from '../rpcClient';
-import { UnifiedHunk } from './UnifiedRows';
+import { UnifiedHunk, type AddCtl } from './UnifiedRows';
 import { SplitHunk } from './SplitRows';
 import { getHighlighter, activeTheme, langForPath, tokenizeFile, tokenizeFullFiles, type Tok } from './highlight';
+import { parseHunk } from './parseHunk';
+import { CommentThreadView, type ThreadOps } from '../comments/CommentThread';
+import { CommentForm } from '../comments/CommentForm';
 import { FileHeader } from '../components/FileHeader';
 import { SummaryBar } from '../components/SummaryBar';
 import { EmptyState } from '../components/EmptyState';
 
 type OverrideMap = Record<string, 'expanded' | 'collapsed'>;
+type Composer = { filePath: string; side: Side; startLine: number; endLine?: number };
+type Drag = { filePath: string; side: Side; from: number; to: number };
+
+// Outdated hunks render as plain (unhighlighted) diff rows — the stored hunk has no live file to tokenize.
+const NO_TOKENS = new Map<DiffRow, Tok[] | null>();
 
 function noChangesDetail(source: DiffSource, baseRef?: string): string {
   switch (source) {
@@ -19,10 +28,25 @@ function noChangesDetail(source: DiffSource, baseRef?: string): string {
     case 'unstaged':
       return 'No unstaged changes.';
     case 'vs-base':
-      return `No changes vs ${baseRef ?? 'the base branch'}.`;
+      return `No changes compared with ${baseRef ?? 'the base branch'}.`;
     default:
-      return 'No changes vs HEAD.';
+      return 'No uncommitted changes.';
   }
+}
+
+function lineOn(row: DiffRow, side: Side): number | null {
+  return side === 'old' ? row.oldLineNo : row.newLineNo;
+}
+
+/** Find the diff row a thread currently renders against (by file — incl. rename — + side + resolved line). */
+function findRowFor(diff: ReviewDiff, anchor: Anchor, line: number): DiffRow | undefined {
+  const file =
+    diff.files.find((f) => f.path === anchor.filePath) ??
+    diff.files.find((f) => f.oldPath === anchor.filePath) ??
+    (anchor.oldPath ? diff.files.find((f) => f.path === anchor.oldPath || f.oldPath === anchor.oldPath) : undefined);
+  if (!file) return undefined;
+  for (const h of file.hunks) for (const r of h.rows) if (lineOn(r, anchor.side) === line) return r;
+  return undefined;
 }
 
 export function DiffView({
@@ -37,24 +61,40 @@ export function DiffView({
   const [override, setOverride] = useState<OverrideMap>({});
   const [hl, setHl] = useState<HighlighterCore | null>(null);
   const [fileTexts, setFileTexts] = useState<Record<string, { old: string; new: string }>>({});
+  const [composer, setComposer] = useState<Composer | null>(null);
+  const [drag, setDrag] = useState<Drag | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [outdatedOpen, setOutdatedOpen] = useState(true);
 
   useEffect(() => {
     let alive = true;
     getHighlighter()
-      .then((h) => {
-        if (alive) setHl(h);
-      })
-      .catch((e) => {
-        dlog('getHighlighter failed', e instanceof Error ? e.message : String(e));
-      });
+      .then((h) => alive && setHl(h))
+      .catch((e) => dlog('getHighlighter failed', e instanceof Error ? e.message : String(e)));
     return () => {
       alive = false;
     };
   }, []);
 
-  const diff = state && state.result.state === 'ok' ? state.result.diff : undefined;
+  // Finish a range selection on mouse release (anywhere) → open the composer for [lo, hi].
+  const dragRef = useRef<Drag | null>(null);
+  dragRef.current = drag;
+  useEffect(() => {
+    const up = () => {
+      const d = dragRef.current;
+      if (!d) return;
+      const lo = Math.min(d.from, d.to);
+      const hi = Math.max(d.from, d.to);
+      setComposer({ filePath: d.filePath, side: d.side, startLine: lo, endLine: hi === lo ? undefined : hi });
+      setDrag(null);
+    };
+    window.addEventListener('mouseup', up);
+    return () => window.removeEventListener('mouseup', up);
+  }, []);
 
-  // Fetch full old/new file text so each file is tokenized whole, then clipped to the diff (see below).
+  const diff = state && state.result.state === 'ok' ? state.result.diff : undefined;
+  const threadList = state?.threads;
+
   useEffect(() => {
     let alive = true;
     const files = (diff?.files ?? [])
@@ -65,17 +105,13 @@ export function DiffView({
       return;
     }
     request('getFileTexts', { files })
-      .then((res) => {
-        if (alive) setFileTexts(res.texts);
-      })
+      .then((res) => alive && setFileTexts(res.texts))
       .catch((e) => dlog('getFileTexts failed', e instanceof Error ? e.message : String(e)));
     return () => {
       alive = false;
     };
   }, [diff]);
 
-  // Highlight the WHOLE file (full context), then clip to the diff by line number; fall back to per-hunk
-  // when the file's text is unavailable or very large. Recomputes only when highlighter/diff/texts change.
   const tokens = useMemo<Map<DiffRow, Tok[] | null>>(() => {
     const map = new Map<DiffRow, Tok[] | null>();
     if (!hl || !diff) return map;
@@ -88,6 +124,53 @@ export function DiffView({
     }
     return map;
   }, [hl, diff, fileTexts]);
+
+  // Split anchored/moved threads (render inline against their row) from outdated ones (render at the end).
+  const { threadsByRow, outdated } = useMemo(() => {
+    const byRow = new Map<DiffRow, CommentThread[]>();
+    const stale: CommentThread[] = [];
+    if (diff) {
+      for (const t of threadList ?? []) {
+        const row = t.resolvedLine != null ? findRowFor(diff, t.anchor, t.resolvedLine) : undefined;
+        if (row) (byRow.get(row) ?? byRow.set(row, []).get(row)!).push(t);
+        else stale.push(t);
+      }
+    }
+    return { threadsByRow: byRow, outdated: stale };
+  }, [threadList, diff]);
+
+  const ops = (threadId: string): ThreadOps => ({
+    onReply: (body) => mutate(request('replyComment', { threadId, body })),
+    onEdit: (commentId, body) => mutate(request('editComment', { threadId, commentId, body })),
+    onDelete: (commentId) => mutate(request('deleteComment', { threadId, commentId })),
+    onResolve: (resolved) => mutate(request('resolveThread', { threadId, resolved })),
+  });
+
+  function mutate(p: Promise<unknown>): void {
+    void p.catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  }
+
+  const submitAdd = (body: string): void => {
+    if (!composer) return;
+    const c = composer;
+    setComposer(null);
+    mutate(request('addComment', { filePath: c.filePath, side: c.side, startLine: c.startLine, endLine: c.endLine, body }));
+  };
+
+  const renderBelow = (filePath: string, row: DiffRow): ReactNode => {
+    const rowThreads = threadsByRow.get(row) ?? [];
+    const showComposer =
+      composer?.filePath === filePath && lineOn(row, composer.side) === (composer.endLine ?? composer.startLine);
+    if (!rowThreads.length && !showComposer) return null;
+    return (
+      <div className="lr-below">
+        {rowThreads.map((t) => (
+          <CommentThreadView key={t.id} thread={t} ops={ops(t.id)} />
+        ))}
+        {showComposer && <CommentForm submitLabel="Comment" onSubmit={submitAdd} onCancel={() => setComposer(null)} />}
+      </div>
+    );
+  };
 
   if (!state) return <EmptyState state="loading" />;
   const { result } = state;
@@ -120,13 +203,36 @@ export function DiffView({
         diff={d}
         source={state.source}
         baseRef={state.baseRef}
+        branch={state.repos.find((r) => r.repoRoot === state.repoRoot)?.branch ?? null}
         viewMode={state.viewMode}
         whitespace={state.whitespace}
         onSetViewMode={(m) => setViewPref({ viewMode: m })}
         onSetWhitespace={(w) => setViewPref({ whitespace: w })}
       />
+      {error && (
+        <div className="lr-error-banner">
+          {error}
+          <button className="lr-link" onClick={() => setError(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
       {d.files.map((file) => {
         const collapsed = isCollapsed(file);
+        const add: AddCtl | undefined = file.isCommentable
+          ? {
+              onDown: (side, line) => setDrag({ filePath: file.path, side, from: line, to: line }),
+              onEnter: (side, line) =>
+                setDrag((prev) => (prev && prev.filePath === file.path && prev.side === side ? { ...prev, to: line } : prev)),
+              selected: (side, line) =>
+                !!drag &&
+                drag.filePath === file.path &&
+                drag.side === side &&
+                line >= Math.min(drag.from, drag.to) &&
+                line <= Math.max(drag.from, drag.to),
+            }
+          : undefined;
+        const below = (row: DiffRow) => renderBelow(file.path, row);
         return (
           <section className={collapsed ? 'lr-file lr-collapsed' : 'lr-file'} data-lr-path={file.path} key={file.path}>
             <FileHeader
@@ -136,17 +242,55 @@ export function DiffView({
               onToggleCollapse={() => toggleCollapse(file)}
               onToggleViewed={() => toggleViewed(file)}
             />
-            {!collapsed &&
-              file.hunks.map((hunk, hi) =>
-                state.viewMode === 'split' ? (
-                  <SplitHunk key={hi} hunk={hunk} tokens={tokens} />
-                ) : (
-                  <UnifiedHunk key={hi} hunk={hunk} tokens={tokens} />
-                )
-              )}
+            {!collapsed && (
+              <div className="lr-file-body">
+                {file.hunks.map((hunk, hi) =>
+                  state.viewMode === 'split' ? (
+                    <SplitHunk key={hi} hunk={hunk} tokens={tokens} add={add} below={below} />
+                  ) : (
+                    <UnifiedHunk key={hi} hunk={hunk} tokens={tokens} add={add} below={below} />
+                  )
+                )}
+              </div>
+            )}
           </section>
         );
       })}
+      {outdated.length > 0 && (
+        <section className={outdatedOpen ? 'lr-file lr-outdated-section' : 'lr-file lr-outdated-section lr-collapsed'}>
+          <div
+            className="lr-file-header lr-outdated-head"
+            role="button"
+            tabIndex={0}
+            onClick={() => setOutdatedOpen((o) => !o)}
+            onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setOutdatedOpen((o) => !o)}
+          >
+            <span className="lr-chevron" aria-hidden="true">
+              {outdatedOpen ? '▾' : '▸'}
+            </span>
+            Outdated comments ({outdated.length})
+          </div>
+          {outdatedOpen &&
+            outdated.map((t) => {
+            const hunk = parseHunk(t.anchor.originalDiffHunk);
+            return (
+              <div className="lr-outdated-item" key={t.id}>
+                <div className="lr-outdated-path">{t.anchor.filePath}</div>
+                {hunk ? (
+                  <div className="lr-outdated-diff">
+                    <UnifiedHunk hunk={hunk} tokens={NO_TOKENS} />
+                  </div>
+                ) : (
+                  t.anchor.originalDiffHunk && <pre className="lr-outdated-hunk">{t.anchor.originalDiffHunk}</pre>
+                )}
+                <div className="lr-below">
+                  <CommentThreadView thread={t} ops={ops(t.id)} />
+                </div>
+              </div>
+            );
+          })}
+        </section>
+      )}
     </div>
   );
 }

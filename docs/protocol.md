@@ -88,6 +88,7 @@ interface ReviewStatePayload {
   viewed: Record<string, boolean>;   // filePath -> viewed, for the current repo+source
   viewMode: ViewMode;                // [it.3]
   whitespace: boolean;               // [it.3] hide whitespace (git diff -w)
+  threads: CommentThread[];          // [it.4] active review, re-anchored against the current diff
   config: { largeFileThreshold: number };
 }
 ```
@@ -204,8 +205,7 @@ The webview keeps `let seq = 0` and a `Map<number, {resolve, reject}>`. A reques
 | `setViewed` | `{ filePath, viewed }` | `{ ok: true }` | it.2 |
 | `setViewPref` | `{ viewMode?, whitespace? }` | `{ ok: true }` | it.3 |
 | `getFileTexts` | `{ files: {path, oldPath?}[] }` | `{ texts }` — full old/new text per file (host resolves repo/source/base) for whole-file highlighting | it.3 |
-| `getThreads` | `{ repoRoot }` | `CommentThread[]` | it.4 |
-| `addComment` | `{ anchor, body }` | `CommentThread` | it.4 |
+| `addComment` | `{ filePath, side, startLine, endLine?, body }` | `CommentThread` — host authors the `Anchor` from its own diff (D2) | it.4 |
 | `editComment` | `{ threadId, commentId, body }` | `CommentThread` | it.4 |
 | `deleteComment` | `{ threadId, commentId }` | `{ threadId, threadDeleted: boolean }` | it.4 |
 | `replyComment` | `{ threadId, body }` | `CommentThread` | it.4 |
@@ -217,7 +217,7 @@ The webview keeps `let seq = 0` and a `Map<number, {resolve, reject}>`. A reques
 | `deleteSavedReview` | `{ savedReviewId }` | `{ ok: true }` | it.5 |
 | `generateExport` | `{ repoRoot, source, scope, target }` | `{ markdown, wrotePath? }` | it.6 |
 
-`scope: 'all' | 'unresolved' | 'file'` and `target: 'clipboard' | 'file'` (it.6). There is no `reanchorThread` — all re-anchoring is the host's automatic load-time computation (§4), surfaced via `threadsUpdated`.
+`scope: 'all' | 'unresolved' | 'file'` and `target: 'clipboard' | 'file'` (it.6). There is no `reanchorThread` — all re-anchoring is the host's automatic load-time computation (§4), surfaced via `threadsUpdated`. There is no `getThreads` — the (re-anchored) active review rides in `ReviewStatePayload.threads` and updates via `threadsUpdated`, mirroring how `viewed` works (D1). `addComment` sends only a line locator; the host authors the durable `Anchor` (exact line text, `originalDiffHunk`, source) from its own diff — the webview never constructs anchor internals (D2).
 
 ### 7.2 Events (host → webview, no `id`, no response)
 
@@ -226,7 +226,7 @@ The webview keeps `let seq = 0` and a `Map<number, {resolve, reject}>`. A reques
 | `stateChanged` | `ReviewStatePayload` | it.1/it.2 (after refresh / source / repo switch) |
 | `viewedUpdated` | `{ viewed: Record<string, boolean> }` | it.2 |
 | `revealFile` | `{ filePath }` | it.2 (scroll the panel to a file) |
-| `threadsUpdated` | `{ repoRoot, threads: CommentThread[] }` | it.4 (after any mutation or re-anchor) |
+| `threadsUpdated` | `{ threads: CommentThread[] }` | it.4 (lightweight push after a mutation; diff not re-sent) |
 | `savedReviewsUpdated` | `{ repoRoot, reviews: Review[] }` | it.5 |
 | `configChanged` | `{ viewMode?, source? }` | it.2 (echo of a persisted pref; host value wins) |
 | `showError` | `{ message }` | it.1 |

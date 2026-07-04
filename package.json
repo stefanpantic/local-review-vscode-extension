@@ -30,6 +30,10 @@
         {
           "id": "localReview.files",
           "name": "Changes"
+        },
+        {
+          "id": "localReview.comments",
+          "name": "Comments"
         }
       ]
     },
@@ -62,12 +66,16 @@
       {
         "view": "localReview.files",
         "when": "localReview.emptyReason == no-changes && localReview.source == worktree-vs-head",
-        "contents": "No changes vs HEAD.\n[Change source](command:localReview.selectSource)"
+        "contents": "No uncommitted changes.\n[Change source](command:localReview.selectSource)"
       },
       {
         "view": "localReview.files",
         "when": "localReview.emptyReason == no-changes && localReview.source == vs-base",
-        "contents": "No changes vs the base branch.\n[Change source](command:localReview.selectSource)"
+        "contents": "No changes compared with the base branch.\n[Change source](command:localReview.selectSource)"
+      },
+      {
+        "view": "localReview.comments",
+        "contents": "No comments in this review yet.\nHover a line in the diff and click + to start one."
       }
     ],
     "commands": [

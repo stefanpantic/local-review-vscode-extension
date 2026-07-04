@@ -1,7 +1,8 @@
 // Shared, DEPENDENCY-FREE message contract (imported by both the node host and the browser webview).
 // Lean bridge: `id`-correlated request/response for calls needing a reply; id-less events for pushes.
 
-import type { DiffSource, RepoInfo, DiffResult, ViewMode } from '../model/ReviewDiff';
+import type { DiffSource, RepoInfo, DiffResult, ViewMode, Side } from '../model/ReviewDiff';
+import type { CommentThread } from '../model/Comment';
 
 export interface Message {
   id?: number; // present → request or its matching response; absent → a broadcast event
@@ -20,6 +21,7 @@ export interface ReviewStatePayload {
   viewed: Record<string, boolean>; // filePath -> viewed, for the current repo+source
   viewMode: ViewMode;
   whitespace: boolean; // hide whitespace
+  threads: CommentThread[]; // active review, re-anchored against the current diff
   config: { largeFileThreshold: number };
 }
 
@@ -35,6 +37,18 @@ export interface Requests {
   setViewPref: { payload: { viewMode?: ViewMode; whitespace?: boolean }; response: { ok: true } };
   // Host already knows the current repo/source/baseRef; the webview just names the files.
   getFileTexts: { payload: { files: { path: string; oldPath?: string }[] }; response: FileTexts };
+  // Comment mutations (active review). The host authors the durable Anchor from its own diff (D2).
+  addComment: {
+    payload: { filePath: string; side: Side; startLine: number; endLine?: number; body: string };
+    response: CommentThread;
+  };
+  replyComment: { payload: { threadId: string; body: string }; response: CommentThread };
+  editComment: { payload: { threadId: string; commentId: string; body: string }; response: CommentThread };
+  deleteComment: {
+    payload: { threadId: string; commentId: string };
+    response: { threadId: string; threadDeleted: boolean };
+  };
+  resolveThread: { payload: { threadId: string; resolved: boolean }; response: CommentThread };
 }
 export type RequestType = keyof Requests;
 
@@ -42,6 +56,7 @@ export type RequestType = keyof Requests;
 export interface Events {
   stateChanged: ReviewStatePayload; // after a recompute (refresh / source / repo switch)
   viewedUpdated: { viewed: Record<string, boolean> }; // lightweight: only viewed flags changed
+  threadsUpdated: { threads: CommentThread[] }; // lightweight: after a comment mutation (diff not re-sent)
   revealFile: { filePath: string }; // scroll the panel to a file
   showError: { message: string };
 }
