@@ -13,7 +13,14 @@ const META: ExportMeta = {
 };
 
 function comment(body: string, suggestion?: { original: string; replacement: string }): Comment {
-  return { id: `c${body}`, body, createdAt: '', updatedAt: '', ...(suggestion ? { suggestion } : {}) };
+  return {
+    id: `c${body}`,
+    body,
+    createdAt: '',
+    updatedAt: '',
+    author: 'tester',
+    ...(suggestion ? { suggestion } : {}),
+  };
 }
 
 function thread(over: Partial<CommentThread> & { comments?: Comment[] } = {}): CommentThread {

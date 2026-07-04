@@ -20,9 +20,13 @@ export interface Comment {
   body: string;
   createdAt: string; // ISO
   updatedAt: string; // ISO
+  author: string; // who wrote it: the human's git username, "AI Agent" for MCP-posted comments, or "unknown"
   // A proposed replacement for the anchored range (capture-and-export only; never written to disk).
   suggestion?: { original: string; replacement: string };
 }
+
+/** Fallback author when the writer is unknown (git user.name unset, or a legacy comment). */
+export const UNKNOWN_AUTHOR = 'unknown';
 
 export interface CommentThread {
   id: string;

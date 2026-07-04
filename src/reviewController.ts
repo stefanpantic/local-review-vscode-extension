@@ -3,10 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { ReviewState } from './reviewState';
 import { ReviewStore } from './comments/ReviewStore';
 import { reanchor, reanchorOne, createAnchor, rangeText, type AnchorLocator } from './comments/anchoring';
-import { getRepositories, getDiff, getFileTexts, listBranches } from './git/git';
+import { getRepositories, getDiff, getFileTexts, listBranches, getUserName } from './git/git';
 import { orderByTree } from './fileTree';
 import type { DiffResult, DiffSource, FileDiff, RepoInfo, ReviewDiff, ViewMode } from './model/ReviewDiff';
 import type { Comment, CommentThread, Review } from './model/Comment';
+import { UNKNOWN_AUTHOR } from './model/Comment';
+import type { McpReviewApi } from './mcp/tools';
 import type { Events, EventType, ReviewStatePayload } from './protocol/messages';
 
 type PanelPost = <K extends EventType>(type: K, payload: Events[K]) => void;
@@ -19,6 +21,8 @@ export class ReviewController {
   private repos: RepoInfo[] = [];
   private branches: string[] = []; // local branches of the current repo (for archived-review detection)
   private current: DiffResult = { state: 'no-repo' };
+  private userName: string | undefined; // git config user.name of the current repo — attributes your comments
+  private userNameRepo: string | undefined; // repoRoot the cached userName belongs to
   private readonly _onDidChange = new vscode.EventEmitter<void>();
   /** Fires when the trees should refresh. */
   readonly onDidChange = this._onDidChange.event;
@@ -228,6 +232,10 @@ export class ReviewController {
       this.current = { state: 'no-repo' };
     } else {
       this.branches = await listBranches(repoRoot);
+      if (repoRoot !== this.userNameRepo) {
+        this.userName = await getUserName(repoRoot);
+        this.userNameRepo = repoRoot;
+      }
       await this.reviewStore.migrateLegacy(repoRoot, this.branchKey(repoRoot), this.headShaFor(repoRoot));
       const includeUntracked = vscode.workspace.getConfiguration('localReview').get<boolean>('includeUntracked', true);
       this.current = await getDiff({
@@ -307,10 +315,18 @@ export class ReviewController {
     return { original: rangeText(diff, thread.anchor.filePath, thread.anchor.side, start, start + span), replacement };
   }
 
-  async addComment(loc: AnchorLocator & { body: string; suggestion?: string }): Promise<CommentThread> {
+  async addComment(
+    loc: AnchorLocator & { body: string; suggestion?: string; author?: string },
+  ): Promise<CommentThread> {
     const { repoRoot, branch, diff, headSha } = this.ctx();
     const now = new Date().toISOString();
-    const comment: Comment = { id: randomUUID(), body: loc.body, createdAt: now, updatedAt: now };
+    const comment: Comment = {
+      id: randomUUID(),
+      body: loc.body,
+      createdAt: now,
+      updatedAt: now,
+      author: loc.author ?? this.userName ?? UNKNOWN_AUTHOR,
+    };
     if (loc.suggestion != null) {
       const original = rangeText(diff, loc.filePath, loc.side, loc.startLine, loc.endLine ?? loc.startLine);
       comment.suggestion = { original, replacement: loc.suggestion };
@@ -327,13 +343,19 @@ export class ReviewController {
     return reanchorOne(thread, diff);
   }
 
-  async replyComment(threadId: string, body: string, suggestion?: string): Promise<CommentThread> {
+  async replyComment(threadId: string, body: string, suggestion?: string, author?: string): Promise<CommentThread> {
     const { repoRoot, branch, diff } = this.ctx();
     const review = this.reviewStore.current(repoRoot, branch);
     const thread = review?.threads.find((t) => t.id === threadId);
     if (!review || !thread) throw new Error('Thread not found.');
     const now = new Date().toISOString();
-    const reply: Comment = { id: randomUUID(), body, createdAt: now, updatedAt: now };
+    const reply: Comment = {
+      id: randomUUID(),
+      body,
+      createdAt: now,
+      updatedAt: now,
+      author: author ?? this.userName ?? UNKNOWN_AUTHOR,
+    };
     if (suggestion != null) reply.suggestion = this.suggestionFor(thread, diff, suggestion);
     thread.comments.push(reply);
     await this.reviewStore.updateThreads(repoRoot, review.id, review.threads);
@@ -399,5 +421,38 @@ export class ReviewController {
       files,
     });
     return { texts };
+  }
+
+  /** The narrow surface the in-process MCP server calls — just another client of this controller. */
+  mcpApi(): McpReviewApi {
+    return {
+      getDiff: () => this.currentDiff(),
+      listReviews: () => {
+        const repoRoot = this.state.getPref().repoRoot;
+        if (!repoRoot) return [];
+        const curId = this.reviewStore.currentId(repoRoot, this.branchKey(repoRoot));
+        return this.reviewStore.allForRepo(repoRoot).map((r) => ({
+          id: r.id,
+          name: r.name,
+          branch: r.branch,
+          current: r.id === curId,
+          updatedAt: r.updatedAt,
+          threads: r.threads.length,
+        }));
+      },
+      getReview: (id) => {
+        const repoRoot = this.state.getPref().repoRoot;
+        if (!repoRoot) return undefined;
+        const review = id
+          ? this.reviewStore.get(repoRoot, id)
+          : this.reviewStore.current(repoRoot, this.branchKey(repoRoot));
+        if (!review) return undefined;
+        const diff = this.currentDiff();
+        return diff ? { ...review, threads: reanchor(review.threads, diff) } : review;
+      },
+      addComment: (a) => this.addComment(a),
+      reply: (a) => this.replyComment(a.threadId, a.body, undefined, a.author),
+      resolve: (a) => this.resolveThread(a.threadId, a.resolved),
+    };
   }
 }

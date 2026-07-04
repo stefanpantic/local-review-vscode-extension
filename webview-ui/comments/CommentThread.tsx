@@ -1,4 +1,7 @@
 import { useEffect, useState } from 'react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import type { CommentThread } from '../../src/model/Comment';
 import { TokenText } from '../render/UnifiedRows';
 import type { Tok } from '../render/highlight';
@@ -124,7 +127,16 @@ export function CommentThreadView({
           ) : (
             <div className={cls} key={c.id}>
               <div className="lr-comment-main">
-                {c.body && <div className="lr-comment-body">{c.body}</div>}
+                {c.author && (
+                  <div className={`lr-comment-author${c.author === 'AI Agent' ? ' lr-author-agent' : ''}`}>
+                    {c.author}
+                  </div>
+                )}
+                {c.body && (
+                  <div className="lr-comment-body lr-markdown">
+                    <Markdown remarkPlugins={[remarkGfm, remarkBreaks]}>{c.body}</Markdown>
+                  </div>
+                )}
                 {c.suggestion && (
                   <Suggestion
                     original={c.suggestion.original}
