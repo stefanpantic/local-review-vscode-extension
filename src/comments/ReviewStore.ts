@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { CommentThread, Review } from '../model/Comment';
-import { durableThread, isCommentThread } from '../model/Comment';
+import { durableThread, isCommentThread, UNKNOWN_AUTHOR } from '../model/Comment';
 
 const REVIEWS_KEY = 'localReview.reviews';
 const CURRENT_KEY = 'localReview.currentReview';
@@ -138,10 +138,21 @@ function sanitizeReviews(raw: unknown): Record<string, Review[]> {
   const out: Record<string, Review[]> = {};
   for (const [repoRoot, list] of Object.entries(raw as Record<string, unknown>)) {
     if (!Array.isArray(list)) continue;
-    const reviews = list.filter(isReview);
+    const reviews = list.filter(isReview).map(withAuthors);
     if (reviews.length) out[repoRoot] = reviews;
   }
   return out;
+}
+
+/** Default a missing comment author (legacy data) to `unknown`, so the field is always populated. */
+function withAuthors(r: Review): Review {
+  return {
+    ...r,
+    threads: r.threads.map((t) => ({
+      ...t,
+      comments: t.comments.map((c) => (c.author ? c : { ...c, author: UNKNOWN_AUTHOR })),
+    })),
+  };
 }
 
 function isReview(r: unknown): r is Review {

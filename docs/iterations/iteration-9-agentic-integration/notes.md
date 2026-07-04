@@ -1,0 +1,10 @@
+# Iteration 9 — notes
+
+Additions and deviations from the refinement, mostly surfaced during the `F5` + Claude Code session.
+
+- **Tool output is readable text, not JSON.** Early `get_diff` returned deeply-nested JSON (one object per diff line) — a token-heavy wall. All tools now return text: `get_diff` is annotated patch text (`<sign> <lineNo> | <code>`), `get_review`/`list_reviews` are readable listings with thread ids, and mutations return one-line confirmations. Handlers return strings; the server wraps them directly.
+- **Explicit lifecycle instead of a single `enabled` flag.** Replaced `localReview.mcp.enabled` with `localReview.mcp.autoStart` (start on launch) plus **Start MCP Server** / **Stop MCP Server** commands. A session's running intent (`mcpDesired`) is seeded from `autoStart` and flipped by the commands, so a manual stop stays stopped even with autostart on. Setup prompts for the port **and** the autostart choice.
+- **Autostart needs eager activation.** Added `activationEvents: ["onStartupFinished"]` so the extension (and, if enabled, the server) start on launch rather than only when the view is first opened. When MCP isn't wanted, `syncMcp` no-ops.
+- **Port persistence.** An auto-assigned (ephemeral) port is persisted in `workspaceState` and reused across restarts, so the `claude mcp add` URL stays valid; if the port is taken on restart it falls back to a fresh one. The setup command's copied command is a remove-then-add one-liner, so re-running is idempotent.
+- **Markdown comment bodies.** Agents post markdown, so the review panel renders comment bodies with `react-markdown` + `remark-gfm` + `remark-breaks` (GFM, hard line breaks). Safe under the webview CSP (React elements, not `innerHTML`; URLs sanitized). Sidebar tree labels stay plain text (a tree-item limitation).
+- **Author is a required field.** `Comment.author` is required (`string`), defaulted to `"unknown"` when the git user name is unset or for legacy comments (coerced on read in `ReviewStore`); the human path stamps `git config user.name`, MCP stamps `"AI Agent"`.

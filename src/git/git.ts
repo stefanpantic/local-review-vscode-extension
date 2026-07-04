@@ -62,6 +62,16 @@ export async function getRepositories(): Promise<RepoInfo[]> {
   return [...byRoot.values()];
 }
 
+/** The configured git user name (for attributing comments), or undefined when unset. */
+export async function getUserName(repoRoot: string): Promise<string | undefined> {
+  try {
+    const name = (await git(repoRoot, ['config', 'user.name'])).trim();
+    return name || undefined;
+  } catch {
+    return undefined; // user.name not configured
+  }
+}
+
 /** Local branch names, for the vs-base picker. */
 export async function listBranches(repoRoot: string): Promise<string[]> {
   try {

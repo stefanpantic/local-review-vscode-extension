@@ -29,7 +29,7 @@ function thread(anchor: Partial<Anchor>): CommentThread {
       originalDiffHunk: '',
       ...anchor,
     },
-    comments: [{ id: 'c1', body: 'hi', createdAt: '', updatedAt: '' }],
+    comments: [{ id: 'c1', body: 'hi', createdAt: '', updatedAt: '', author: 'tester' }],
     resolved: false,
   };
 }

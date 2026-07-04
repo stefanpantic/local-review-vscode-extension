@@ -23,7 +23,9 @@
     "SCM Providers",
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -189,6 +191,24 @@
         "command": "localReview.prevComment",
         "title": "Previous Comment",
         "category": "Local Review"
+      },
+      {
+        "command": "localReview.setupMcp",
+        "title": "Set up MCP for Claude Code",
+        "category": "Local Review",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "localReview.startMcp",
+        "title": "Start MCP Server",
+        "category": "Local Review",
+        "icon": "$(play)"
+      },
+      {
+        "command": "localReview.stopMcp",
+        "title": "Stop MCP Server",
+        "category": "Local Review",
+        "icon": "$(debug-stop)"
       }
     ],
     "menus": {
@@ -355,6 +375,16 @@
           "type": "number",
           "default": 3,
           "description": "Lines of surrounding context captured for comments and export (used from Iteration 4)."
+        },
+        "localReview.mcp.autoStart": {
+          "type": "boolean",
+          "default": false,
+          "description": "Start the local MCP server automatically when VS Code launches, so a coding agent (e.g. Claude Code) can read the diff and post, reply to, and resolve review comments. Otherwise start it with the 'Local Review: Start MCP Server' command. Binds to 127.0.0.1 only."
+        },
+        "localReview.mcp.port": {
+          "type": "number",
+          "default": 0,
+          "description": "Port for the MCP server (0 picks a free port, then reuses it across restarts). Set a fixed port for a guaranteed-stable URL."
         }
       }
     }
@@ -372,8 +402,10 @@
     "package": "vsce package --no-dependencies"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "parse-diff": "^0.11.1",
-    "shiki": "^4.3.0"
+    "shiki": "^4.3.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -390,6 +422,9 @@
     "prettier": "^3.9.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1",
     "tsx": "^4.16.0",
     "typescript": "^5.5.4",
     "typescript-eslint": "^8.62.1"

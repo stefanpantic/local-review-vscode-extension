@@ -8,7 +8,11 @@ import { ReviewsView } from './webview/reviewsView';
 import { ReviewPanel } from './webview/ReviewPanel';
 import { listBranches } from './git/git';
 import { watchRepoChanges } from './git/watch';
+import { startMcpServer, type McpServerHandle } from './mcp/server';
 import { exportReviewMarkdown, type ExportMeta } from './export/exportMarkdown';
+import { randomUUID } from 'node:crypto';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import type { DiffSource } from './model/ReviewDiff';
 import type { Review } from './model/Comment';
 
@@ -35,6 +39,100 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const reviewsView = new ReviewsView(controller);
   const reviewsTree = vscode.window.createTreeView('localReview.reviews', { treeDataProvider: reviewsView });
+
+  // --- MCP server lifecycle (binds to 127.0.0.1 only). Runs on launch when localReview.mcp.autoStart,
+  //     or on demand via Start/Stop; `mcpDesired` is the session's running intent. ---
+  let mcpHandle: McpServerHandle | undefined;
+  let mcpDesired = vscode.workspace.getConfiguration('localReview').get<boolean>('mcp.autoStart', false);
+  let mcpOp: Promise<void> = Promise.resolve(); // serializes start/stop so bursts can't race
+  const mcpToken = (): string => {
+    let t = context.workspaceState.get<string>('localReview.mcp.token');
+    if (!t) {
+      t = randomUUID();
+      void context.workspaceState.update('localReview.mcp.token', t);
+    }
+    return t;
+  };
+  // Make the running server match `mcpDesired`: tear down, then (re)start if wanted (also applies a port change).
+  const syncMcp = (): Promise<void> => {
+    mcpOp = mcpOp.then(async () => {
+      if (mcpHandle) {
+        mcpHandle.dispose();
+        mcpHandle = undefined;
+      }
+      if (!mcpDesired) return;
+      const cfg = vscode.workspace.getConfiguration('localReview');
+      const opts = { version: context.extension.packageJSON.version as string, token: mcpToken() };
+      const cfgPort = cfg.get<number>('mcp.port', 0);
+      // A fixed port wins; otherwise reuse the last auto-assigned one so the URL survives restarts.
+      const wantPort =
+        cfgPort > 0 ? cfgPort : (context.workspaceState.get<number>('localReview.mcp.resolvedPort') ?? 0);
+      try {
+        mcpHandle = await startMcpServer(controller.mcpApi(), { ...opts, port: wantPort });
+      } catch {
+        mcpHandle = await startMcpServer(controller.mcpApi(), { ...opts, port: 0 }); // requested port busy — take any free one
+      }
+      if (cfgPort === 0) void context.workspaceState.update('localReview.mcp.resolvedPort', mcpHandle.port);
+    });
+    return mcpOp;
+  };
+  const setupMcp = async (): Promise<void> => {
+    const cfg = vscode.workspace.getConfiguration('localReview');
+    const input = await vscode.window.showInputBox({
+      title: 'Local Review — MCP server port',
+      prompt: 'Port for the MCP server (0 = pick a free port; it is then reused across restarts)',
+      value: String(cfg.get<number>('mcp.port', 0)),
+      validateInput: (v) =>
+        /^\d+$/.test(v.trim()) && Number(v) <= 65535 ? undefined : 'Enter a port number between 0 and 65535.',
+    });
+    if (input === undefined) return; // cancelled
+    const auto = await vscode.window.showQuickPick(
+      [
+        { label: 'Autostart on launch', description: 'run the MCP server every time VS Code opens', value: true },
+        { label: 'Start manually', description: 'start it with "Local Review: Start MCP Server"', value: false },
+      ],
+      { title: 'Local Review — MCP autostart', placeHolder: 'Start the MCP server automatically on launch?' },
+    );
+    if (!auto) return; // cancelled
+    await cfg.update('mcp.port', Number(input.trim()), vscode.ConfigurationTarget.Workspace);
+    await cfg.update('mcp.autoStart', auto.value, vscode.ConfigurationTarget.Workspace);
+    await context.workspaceState.update('localReview.mcp.configured', true);
+    mcpDesired = true;
+    await syncMcp();
+    if (!mcpHandle) {
+      void vscode.window.showErrorMessage('Local Review: could not start the MCP server.');
+      return;
+    }
+    const { url, token } = mcpHandle;
+    await writeMcpArtifacts(url, token);
+    // Remove-then-add so re-running is idempotent — it clears any prior (possibly stale-port) entry first.
+    const command = `claude mcp remove local-review 2>/dev/null; claude mcp add --transport http local-review ${url} --header "Authorization: Bearer ${token}"`;
+    await vscode.env.clipboard.writeText(command);
+    const choice = await vscode.window.showInformationMessage(
+      'Local Review MCP server is running.',
+      {
+        modal: true,
+        detail: `URL: ${url}\n\nTo (re)connect Claude Code, run this in your project (already copied to your clipboard). It replaces any existing entry:\n\n${command}`,
+      },
+      'Copy command again',
+    );
+    if (choice === 'Copy command again') await vscode.env.clipboard.writeText(command);
+  };
+  // Start on demand. First time (never configured) runs setup so the user gets the connect command.
+  const startMcp = async (): Promise<void> => {
+    if (!context.workspaceState.get<boolean>('localReview.mcp.configured')) {
+      await setupMcp();
+      return;
+    }
+    mcpDesired = true;
+    await syncMcp();
+    if (mcpHandle) void vscode.window.showInformationMessage(`Local Review MCP server is running at ${mcpHandle.url}.`);
+  };
+  const stopMcp = async (): Promise<void> => {
+    mcpDesired = false;
+    await syncMcp();
+    void vscode.window.showInformationMessage('Local Review MCP server stopped.');
+  };
 
   tree.onDidChangeCheckboxState(
     (e) => {
@@ -90,16 +188,45 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('localReview.toggleWhitespace', () =>
       controller.setViewPref({ whitespace: !controller.whitespace }),
     ),
+    vscode.commands.registerCommand('localReview.setupMcp', () => setupMcp()),
+    vscode.commands.registerCommand('localReview.startMcp', () => startMcp()),
+    vscode.commands.registerCommand('localReview.stopMcp', () => stopMcp()),
     vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('localReview.mcp.port')) void syncMcp(); // a port change restarts a running server
       if (e.affectsConfiguration('localReview')) void controller.refresh();
     }),
+    new vscode.Disposable(() => mcpHandle?.dispose()),
   );
 
   await controller.refresh();
+  void syncMcp();
 }
 
 export function deactivate(): void {
   // context.subscriptions handles cleanup
+}
+
+/** Write the MCP connection file (`.local-review/mcp.json`) and make sure `.local-review/` is gitignored. */
+async function writeMcpArtifacts(url: string, token: string): Promise<void> {
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  if (!folder) return;
+  const root = folder.uri.fsPath;
+  await fs.mkdir(path.join(root, '.local-review'), { recursive: true });
+  await fs.writeFile(
+    path.join(root, '.local-review', 'mcp.json'),
+    JSON.stringify({ url, token }, null, 2) + '\n',
+    'utf8',
+  );
+  const gitignore = path.join(root, '.gitignore');
+  let text = '';
+  try {
+    text = await fs.readFile(gitignore, 'utf8');
+  } catch {
+    // no .gitignore yet — we'll create it
+  }
+  if (!text.split(/\r?\n/).some((line) => line.trim().replace(/\/$/, '') === '.local-review')) {
+    await fs.writeFile(gitignore, text + (text && !text.endsWith('\n') ? '\n' : '') + '.local-review/\n', 'utf8');
+  }
 }
 
 const SOURCES: { label: string; description: string; source: DiffSource }[] = [

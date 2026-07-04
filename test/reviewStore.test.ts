@@ -25,7 +25,7 @@ function thread(id: string): CommentThread {
       source: 'worktree-vs-head',
       originalDiffHunk: '',
     },
-    comments: [{ id: `c${id}`, body: 'hi', createdAt: '', updatedAt: '' }],
+    comments: [{ id: `c${id}`, body: 'hi', createdAt: '', updatedAt: '', author: 'tester' }],
     resolved: false,
   };
 }

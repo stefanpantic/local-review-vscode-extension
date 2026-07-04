@@ -464,11 +464,108 @@ body {
   flex: 1 1 auto;
   min-width: 0;
 }
+.lr-comment-author {
+  font-size: 0.85em;
+  font-weight: 600;
+  color: var(--vscode-descriptionForeground);
+  margin-bottom: 2px;
+}
+.lr-comment-author.lr-author-agent {
+  color: var(--vscode-charts-purple, var(--vscode-textLink-foreground));
+}
+.lr-comment-author.lr-author-agent::before {
+  content: '✦ ';
+}
 .lr-comment-body {
-  white-space: pre-wrap;
   word-break: break-word;
   color: var(--vscode-foreground);
   line-height: 1.45;
+}
+
+/* Markdown-rendered comment bodies (agents post markdown; humans can too). */
+.lr-markdown > :first-child {
+  margin-top: 0;
+}
+.lr-markdown > :last-child {
+  margin-bottom: 0;
+}
+.lr-markdown p {
+  margin: 0 0 0.5em;
+}
+.lr-markdown h1,
+.lr-markdown h2,
+.lr-markdown h3,
+.lr-markdown h4,
+.lr-markdown h5,
+.lr-markdown h6 {
+  margin: 0.7em 0 0.3em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.lr-markdown h1 {
+  font-size: 1.2em;
+}
+.lr-markdown h2 {
+  font-size: 1.1em;
+}
+.lr-markdown h3,
+.lr-markdown h4,
+.lr-markdown h5,
+.lr-markdown h6 {
+  font-size: 1em;
+}
+.lr-markdown ul,
+.lr-markdown ol {
+  margin: 0.3em 0;
+  padding-left: 1.4em;
+}
+.lr-markdown li {
+  margin: 0.15em 0;
+}
+.lr-markdown a {
+  color: var(--vscode-textLink-foreground);
+}
+.lr-markdown code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.9em;
+  background: var(--vscode-textCodeBlock-background, var(--lr-card-border));
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+}
+.lr-markdown pre {
+  margin: 0.4em 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+  background: var(--vscode-textCodeBlock-background, var(--lr-card-border));
+}
+.lr-markdown pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.9em;
+}
+.lr-markdown blockquote {
+  margin: 0.4em 0;
+  padding-left: 0.8em;
+  border-left: 2px solid var(--lr-card-border);
+  color: var(--vscode-descriptionForeground);
+}
+.lr-markdown table {
+  border-collapse: collapse;
+  margin: 0.4em 0;
+}
+.lr-markdown th,
+.lr-markdown td {
+  border: 1px solid var(--lr-card-border);
+  padding: 2px 6px;
+}
+.lr-markdown img {
+  max-width: 100%;
+}
+.lr-markdown hr {
+  border: none;
+  border-top: 1px solid var(--lr-card-border);
+  margin: 0.6em 0;
 }
 .lr-comment-tools {
   flex: none;
