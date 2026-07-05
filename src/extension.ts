@@ -12,7 +12,6 @@ import { startMcpServer, type McpServerHandle } from './mcp/server';
 import { exportReviewMarkdown, type ExportMeta } from './export/exportMarkdown';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import type { DiffSource } from './model/ReviewDiff';
 import type { Review } from './model/Comment';
 
@@ -26,30 +25,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const reviewStore = new ReviewStore(context.workspaceState);
   const controller = new ReviewController(state, reviewStore);
   const filesView = new FilesView(controller);
-  const tree = vscode.window.createTreeView('localReview.files', {
+  const tree = vscode.window.createTreeView('agenticReview.files', {
     treeDataProvider: filesView,
     showCollapseAll: true,
   });
 
   const commentsView = new CommentsView(controller);
-  const commentsTree = vscode.window.createTreeView('localReview.comments', {
+  const commentsTree = vscode.window.createTreeView('agenticReview.comments', {
     treeDataProvider: commentsView,
     showCollapseAll: true,
   });
 
   const reviewsView = new ReviewsView(controller);
-  const reviewsTree = vscode.window.createTreeView('localReview.reviews', { treeDataProvider: reviewsView });
+  const reviewsTree = vscode.window.createTreeView('agenticReview.reviews', { treeDataProvider: reviewsView });
 
-  // --- MCP server lifecycle (binds to 127.0.0.1 only). Runs on launch when localReview.mcp.autoStart,
+  // --- MCP server lifecycle (binds to 127.0.0.1 only). Runs on launch when agenticReview.mcp.autoStart,
   //     or on demand via Start/Stop; `mcpDesired` is the session's running intent. ---
   let mcpHandle: McpServerHandle | undefined;
-  let mcpDesired = vscode.workspace.getConfiguration('localReview').get<boolean>('mcp.autoStart', false);
+  let mcpDesired = vscode.workspace.getConfiguration('agenticReview').get<boolean>('mcp.autoStart', false);
   let mcpOp: Promise<void> = Promise.resolve(); // serializes start/stop so bursts can't race
   const mcpToken = (): string => {
-    let t = context.workspaceState.get<string>('localReview.mcp.token');
+    let t = context.workspaceState.get<string>('agenticReview.mcp.token');
     if (!t) {
       t = randomUUID();
-      void context.workspaceState.update('localReview.mcp.token', t);
+      void context.workspaceState.update('agenticReview.mcp.token', t);
     }
     return t;
   };
@@ -61,25 +60,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         mcpHandle = undefined;
       }
       if (!mcpDesired) return;
-      const cfg = vscode.workspace.getConfiguration('localReview');
+      const cfg = vscode.workspace.getConfiguration('agenticReview');
       const opts = { version: context.extension.packageJSON.version as string, token: mcpToken() };
       const cfgPort = cfg.get<number>('mcp.port', 0);
-      // A fixed port wins; otherwise reuse the last auto-assigned one so the URL survives restarts.
-      const wantPort =
-        cfgPort > 0 ? cfgPort : (context.workspaceState.get<number>('localReview.mcp.resolvedPort') ?? 0);
+      // A fixed port wins; otherwise take this workspace's stable slot from the cross-window registry.
+      const wantPort = cfgPort > 0 ? cfgPort : assignedPort(context);
       try {
         mcpHandle = await startMcpServer(controller.mcpApi(), { ...opts, port: wantPort });
       } catch {
-        mcpHandle = await startMcpServer(controller.mcpApi(), { ...opts, port: 0 }); // requested port busy — take any free one
+        mcpHandle = await startMcpServer(controller.mcpApi(), { ...opts, port: 0 }); // slot taken by another process — take any free one
       }
-      if (cfgPort === 0) void context.workspaceState.update('localReview.mcp.resolvedPort', mcpHandle.port);
+      if (cfgPort === 0) rememberPort(context, mcpHandle.port);
     });
     return mcpOp;
   };
   const setupMcp = async (): Promise<void> => {
-    const cfg = vscode.workspace.getConfiguration('localReview');
+    const cfg = vscode.workspace.getConfiguration('agenticReview');
     const input = await vscode.window.showInputBox({
-      title: 'Local Review MCP server port',
+      title: 'Agentic Review MCP server port',
       prompt: 'Port for the MCP server (0 = pick a free port; it is then reused across restarts)',
       value: String(cfg.get<number>('mcp.port', 0)),
       validateInput: (v) =>
@@ -89,27 +87,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const auto = await vscode.window.showQuickPick(
       [
         { label: 'Autostart on launch', description: 'run the MCP server every time VS Code opens', value: true },
-        { label: 'Start manually', description: 'start it with "Local Review: Start MCP Server"', value: false },
+        { label: 'Start manually', description: 'start it with "Agentic Review: Start MCP Server"', value: false },
       ],
-      { title: 'Local Review MCP autostart', placeHolder: 'Start the MCP server automatically on launch?' },
+      { title: 'Agentic Review MCP autostart', placeHolder: 'Start the MCP server automatically on launch?' },
     );
     if (!auto) return; // cancelled
     await cfg.update('mcp.port', Number(input.trim()), vscode.ConfigurationTarget.Workspace);
     await cfg.update('mcp.autoStart', auto.value, vscode.ConfigurationTarget.Workspace);
-    await context.workspaceState.update('localReview.mcp.configured', true);
+    await context.workspaceState.update('agenticReview.mcp.configured', true);
     mcpDesired = true;
     await syncMcp();
     if (!mcpHandle) {
-      void vscode.window.showErrorMessage('Local Review: could not start the MCP server.');
+      void vscode.window.showErrorMessage('Agentic Review: could not start the MCP server.');
       return;
     }
     const { url, token } = mcpHandle;
-    const jsonUri = await writeMcpArtifacts(url, token);
+    const jsonUri = await writeMcpArtifacts(context, url, token);
     const choice = await vscode.window.showInformationMessage(
-      'Local Review MCP server is running.',
+      'Agentic Review MCP server is running.',
       {
         modal: true,
-        detail: `URL: ${url}\n\nConnect your MCP client using .local-review/mcp.json. It has the URL, token, and ready-to-run connect commands for Claude Code and other clients.`,
+        detail: `URL: ${url}\n\nConnect your MCP client using the mcp.json this opens (or the "Open MCP Config" command anytime). It has the URL, token, and ready-to-run connect commands for Claude Code and other clients.`,
       },
       'Open mcp.json',
       'Copy URL',
@@ -119,16 +117,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
   // Start on demand. First time (never configured) runs setup so the user gets the connect details.
   const startMcp = async (): Promise<void> => {
-    if (!context.workspaceState.get<boolean>('localReview.mcp.configured')) {
+    if (!context.workspaceState.get<boolean>('agenticReview.mcp.configured')) {
       await setupMcp();
       return;
     }
     mcpDesired = true;
     await syncMcp();
     if (!mcpHandle) return;
-    const jsonUri = await writeMcpArtifacts(mcpHandle.url, mcpHandle.token);
+    const jsonUri = await writeMcpArtifacts(context, mcpHandle.url, mcpHandle.token);
     const choice = await vscode.window.showInformationMessage(
-      `Local Review MCP server is running at ${mcpHandle.url}.`,
+      `Agentic Review MCP server is running at ${mcpHandle.url}.`,
       'Open mcp.json',
     );
     if (choice === 'Open mcp.json' && jsonUri) await vscode.window.showTextDocument(jsonUri);
@@ -136,7 +134,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const stopMcp = async (): Promise<void> => {
     mcpDesired = false;
     await syncMcp();
-    void vscode.window.showInformationMessage('Local Review MCP server stopped.');
+    void vscode.window.showInformationMessage('Agentic Review MCP server stopped.');
+  };
+  // Open the connect file (regenerating it with the live url + token). Starts the server first if needed.
+  const openMcpConfig = async (): Promise<void> => {
+    if (!mcpHandle) {
+      const choice = await vscode.window.showInformationMessage(
+        'The Agentic Review MCP server is not running.',
+        'Start MCP Server',
+      );
+      if (choice === 'Start MCP Server') await startMcp();
+      return;
+    }
+    const jsonUri = await writeMcpArtifacts(context, mcpHandle.url, mcpHandle.token);
+    if (jsonUri) await vscode.window.showTextDocument(jsonUri);
+    else void vscode.window.showErrorMessage('Agentic Review: no workspace storage available to write the MCP config.');
   };
 
   tree.onDidChangeCheckboxState(
@@ -155,50 +167,51 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     tree,
     commentsTree,
     reviewsTree,
-    vscode.commands.registerCommand('localReview.newReview', () => controller.newReview()),
-    vscode.commands.registerCommand('localReview.switchReview', (r) => {
+    vscode.commands.registerCommand('agenticReview.newReview', () => controller.newReview()),
+    vscode.commands.registerCommand('agenticReview.switchReview', (r) => {
       const rev = asReview(r);
       if (rev) void controller.switchReview(rev.id);
     }),
-    vscode.commands.registerCommand('localReview.renameReview', (r) =>
+    vscode.commands.registerCommand('agenticReview.renameReview', (r) =>
       renameReview(controller, asReview(r) ?? asReview(reviewsTree.selection[0])),
     ),
-    vscode.commands.registerCommand('localReview.deleteReview', (r) =>
+    vscode.commands.registerCommand('agenticReview.deleteReview', (r) =>
       deleteReview(controller, asReview(r) ?? asReview(reviewsTree.selection[0])),
     ),
-    vscode.commands.registerCommand('localReview.moveReviewToCurrentBranch', (r) => {
+    vscode.commands.registerCommand('agenticReview.moveReviewToCurrentBranch', (r) => {
       const rev = asReview(r) ?? asReview(reviewsTree.selection[0]);
       if (rev) void controller.moveReviewToCurrentBranch(rev.id);
     }),
-    vscode.commands.registerCommand('localReview.exportReview', (r) => exportReview(controller, asReview(r))),
-    vscode.commands.registerCommand('localReview.nextChange', () => controller.navigate('file', 'next')),
-    vscode.commands.registerCommand('localReview.prevChange', () => controller.navigate('file', 'prev')),
-    vscode.commands.registerCommand('localReview.nextComment', () => controller.navigate('comment', 'next')),
-    vscode.commands.registerCommand('localReview.prevComment', () => controller.navigate('comment', 'prev')),
+    vscode.commands.registerCommand('agenticReview.exportReview', (r) => exportReview(controller, asReview(r))),
+    vscode.commands.registerCommand('agenticReview.nextChange', () => controller.navigate('file', 'next')),
+    vscode.commands.registerCommand('agenticReview.prevChange', () => controller.navigate('file', 'prev')),
+    vscode.commands.registerCommand('agenticReview.nextComment', () => controller.navigate('comment', 'next')),
+    vscode.commands.registerCommand('agenticReview.prevComment', () => controller.navigate('comment', 'prev')),
     watchRepoChanges(() => void controller.refresh()),
-    vscode.commands.registerCommand('localReview.startReview', async () => {
+    vscode.commands.registerCommand('agenticReview.startReview', async () => {
       await controller.refresh();
       ReviewPanel.show(context.extensionUri, controller);
     }),
-    vscode.commands.registerCommand('localReview.refresh', () => controller.refresh()),
-    vscode.commands.registerCommand('localReview.revealFile', (filePath?: string) => {
+    vscode.commands.registerCommand('agenticReview.refresh', () => controller.refresh()),
+    vscode.commands.registerCommand('agenticReview.revealFile', (filePath?: string) => {
       ReviewPanel.show(context.extensionUri, controller); // create or reveal (focuses the tab)
       if (typeof filePath === 'string') controller.reveal(filePath);
     }),
-    vscode.commands.registerCommand('localReview.selectSource', () => pickSource(controller)),
-    vscode.commands.registerCommand('localReview.selectRepo', () => pickRepo(controller)),
-    vscode.commands.registerCommand('localReview.toggleViewMode', () =>
+    vscode.commands.registerCommand('agenticReview.selectSource', () => pickSource(controller)),
+    vscode.commands.registerCommand('agenticReview.selectRepo', () => pickRepo(controller)),
+    vscode.commands.registerCommand('agenticReview.toggleViewMode', () =>
       controller.setViewPref({ viewMode: controller.viewMode === 'split' ? 'unified' : 'split' }),
     ),
-    vscode.commands.registerCommand('localReview.toggleWhitespace', () =>
+    vscode.commands.registerCommand('agenticReview.toggleWhitespace', () =>
       controller.setViewPref({ whitespace: !controller.whitespace }),
     ),
-    vscode.commands.registerCommand('localReview.setupMcp', () => setupMcp()),
-    vscode.commands.registerCommand('localReview.startMcp', () => startMcp()),
-    vscode.commands.registerCommand('localReview.stopMcp', () => stopMcp()),
+    vscode.commands.registerCommand('agenticReview.setupMcp', () => setupMcp()),
+    vscode.commands.registerCommand('agenticReview.startMcp', () => startMcp()),
+    vscode.commands.registerCommand('agenticReview.stopMcp', () => stopMcp()),
+    vscode.commands.registerCommand('agenticReview.openMcpConfig', () => openMcpConfig()),
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('localReview.mcp.port')) void syncMcp(); // a port change restarts a running server
-      if (e.affectsConfiguration('localReview')) void controller.refresh();
+      if (e.affectsConfiguration('agenticReview.mcp.port')) void syncMcp(); // a port change restarts a running server
+      if (e.affectsConfiguration('agenticReview')) void controller.refresh();
     }),
     new vscode.Disposable(() => mcpHandle?.dispose()),
   );
@@ -212,46 +225,82 @@ export function deactivate(): void {
 }
 
 /**
- * Write the client-agnostic connect file (`.local-review/mcp.json`) and gitignore `.local-review/`; returns its Uri.
+ * Write the client-agnostic connect file to the extension's per-workspace storage (outside the repo); returns its Uri.
  * It's a standard MCP server, so connect commands for common clients live as comments and the connection
  * details are the JSON body. Nothing parses this file — it's a reference the user opens.
  */
-async function writeMcpArtifacts(url: string, token: string): Promise<vscode.Uri | undefined> {
-  const folder = vscode.workspace.workspaceFolders?.[0];
-  if (!folder) return undefined;
-  const root = folder.uri.fsPath;
-  await fs.mkdir(path.join(root, '.local-review'), { recursive: true });
+async function writeMcpArtifacts(
+  context: vscode.ExtensionContext,
+  url: string,
+  token: string,
+): Promise<vscode.Uri | undefined> {
+  const dir = context.storageUri;
+  if (!dir) return undefined; // no workspace storage (no folder open)
+  await fs.mkdir(dir.fsPath, { recursive: true });
 
-  const content = `// Local Review MCP server. A standard, local (127.0.0.1), token-guarded MCP server over Streamable HTTP.
+  const content = `// Agentic Review MCP server. A standard, local (127.0.0.1), token-guarded MCP server over Streamable HTTP.
 // Connect any MCP client with the url + token below. Ready-to-use options:
 //
 // Claude Code (CLI):
-//   claude mcp remove local-review 2>/dev/null; claude mcp add --transport http local-review ${url} --header "Authorization: Bearer ${token}"
+//   claude mcp remove agentic-review 2>/dev/null; claude mcp add --transport http agentic-review ${url} --header "Authorization: Bearer ${token}"
 //
 // mcpServers config for Claude Desktop, Cursor, Windsurf, VS Code, and other clients. Add under "mcpServers":
-//   "local-review": {
+//   "agentic-review": {
 //     "type": "http",
 //     "url": "${url}",
 //     "headers": { "Authorization": "Bearer ${token}" }
 //   }
 //
-// Regenerated by "Set up MCP" / "Start MCP Server". The port + token persist across restarts.
+// Regenerated by "Set up MCP", "Start MCP Server", or "Open MCP Config". The port + token persist across restarts.
 ${JSON.stringify({ url, token, transport: 'http' }, null, 2)}
 `;
-  const jsonUri = vscode.Uri.file(path.join(root, '.local-review', 'mcp.json'));
+  const jsonUri = vscode.Uri.joinPath(dir, 'mcp.json');
   await fs.writeFile(jsonUri.fsPath, content, 'utf8');
-
-  const gitignore = path.join(root, '.gitignore');
-  let text = '';
-  try {
-    text = await fs.readFile(gitignore, 'utf8');
-  } catch {
-    // no .gitignore yet — we'll create it
-  }
-  if (!text.split(/\r?\n/).some((line) => line.trim().replace(/\/$/, '') === '.local-review')) {
-    await fs.writeFile(gitignore, text + (text && !text.endsWith('\n') ? '\n' : '') + '.local-review/\n', 'utf8');
-  }
   return jsonUri;
+}
+
+// MCP ports come from a registry in globalState (shared across every window), so each workspace keeps a
+// stable, unique port: register the server in your agent once and its URL survives restarts and never
+// collides with another window. The range sits above common dev-server ports to reduce external clashes.
+const PORT_REGISTRY_KEY = 'agenticReview.mcp.ports';
+const PORT_BASE = 39217;
+const PORT_SPAN = 20000;
+
+function mcpWorkspaceKey(context: vscode.ExtensionContext): string {
+  return context.storageUri?.fsPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? 'default';
+}
+function hashString(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+/**
+ * This workspace's assigned port, taken once and kept in the cross-window registry so every workspace gets
+ * a distinct, stable port. Seeded from a hash of the path, then bumped to the first slot no other workspace
+ * has claimed. Returns the same port on every later launch.
+ */
+function assignedPort(context: vscode.ExtensionContext): number {
+  const key = mcpWorkspaceKey(context);
+  const map = { ...(context.globalState.get<Record<string, number>>(PORT_REGISTRY_KEY) ?? {}) };
+  if (map[key]) return map[key];
+  const used = new Set(Object.values(map));
+  let port = PORT_BASE + (hashString(key) % PORT_SPAN);
+  while (used.has(port)) port = PORT_BASE + ((port - PORT_BASE + 1) % PORT_SPAN);
+  map[key] = port;
+  void context.globalState.update(PORT_REGISTRY_KEY, map);
+  return port;
+}
+/** Record the actually-bound port; it differs from the assignment only if that slot was externally taken. */
+function rememberPort(context: vscode.ExtensionContext, port: number): void {
+  const key = mcpWorkspaceKey(context);
+  const map = { ...(context.globalState.get<Record<string, number>>(PORT_REGISTRY_KEY) ?? {}) };
+  if (map[key] !== port) {
+    map[key] = port;
+    void context.globalState.update(PORT_REGISTRY_KEY, map);
+  }
 }
 
 const SOURCES: { label: string; description: string; source: DiffSource }[] = [
@@ -275,7 +324,7 @@ async function pickSource(controller: ReviewController): Promise<void> {
   if (picked.source === 'vs-base') {
     const branches = controller.repoRoot ? await listBranches(controller.repoRoot) : [];
     if (branches.length === 0) {
-      void vscode.window.showWarningMessage('Local Review: no local branches to compare against.');
+      void vscode.window.showWarningMessage('Agentic Review: no local branches to compare against.');
       return;
     }
     const base = await vscode.window.showQuickPick(branches, { placeHolder: 'Select the base branch' });
@@ -289,7 +338,7 @@ async function pickSource(controller: ReviewController): Promise<void> {
 async function exportReview(controller: ReviewController, arg?: Review): Promise<void> {
   const review = arg ?? controller.reviewToExport();
   if (!review) {
-    void vscode.window.showInformationMessage('Local Review: no review to export.');
+    void vscode.window.showInformationMessage('Agentic Review: no review to export.');
     return;
   }
 
@@ -307,7 +356,7 @@ async function exportReview(controller: ReviewController, arg?: Review): Promise
   if (scopePick.scope === 'file') {
     const files = [...new Set(review.threads.map((t) => t.anchor.filePath))].sort();
     if (files.length === 0) {
-      void vscode.window.showInformationMessage('Local Review: this review has no comments.');
+      void vscode.window.showInformationMessage('Agentic Review: this review has no comments.');
       return;
     }
     file = await vscode.window.showQuickPick(files, { placeHolder: 'File to export' });
@@ -336,7 +385,7 @@ async function exportReview(controller: ReviewController, arg?: Review): Promise
   };
   const md = exportReviewMarkdown(meta, controller.exportThreads(review, live), { scope: scopePick.scope, file });
   if (!md) {
-    void vscode.window.showInformationMessage('Local Review: no comments match that scope.');
+    void vscode.window.showInformationMessage('Agentic Review: no comments match that scope.');
     return;
   }
 
@@ -360,7 +409,7 @@ function sourceLabel(source: DiffSource, baseRef?: string): string {
 async function deliverExport(action: 'clipboard' | 'editor' | 'file', md: string, name: string): Promise<void> {
   if (action === 'clipboard') {
     await vscode.env.clipboard.writeText(md);
-    void vscode.window.showInformationMessage('Local Review: export copied to clipboard.');
+    void vscode.window.showInformationMessage('Agentic Review: export copied to clipboard.');
   } else if (action === 'editor') {
     const doc = await vscode.workspace.openTextDocument({ content: md, language: 'markdown' });
     await vscode.window.showTextDocument(doc);
@@ -391,7 +440,7 @@ async function deleteReview(controller: ReviewController, review?: Review): Prom
 async function pickRepo(controller: ReviewController): Promise<void> {
   const repos = controller.repositories;
   if (repos.length <= 1) {
-    void vscode.window.showInformationMessage('Local Review: only one repository in this workspace.');
+    void vscode.window.showInformationMessage('Agentic Review: only one repository in this workspace.');
     return;
   }
   const picked = await vscode.window.showQuickPick(

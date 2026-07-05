@@ -1,6 +1,6 @@
 {
-  "name": "local-review",
-  "displayName": "Local Review",
+  "name": "agentic-review",
+  "displayName": "Agentic Review",
   "description": "PR-style review of your local git diff, exported for a coding agent.",
   "version": "0.0.3",
   "publisher": "StefanPantic",
@@ -40,308 +40,314 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "localReview",
-          "title": "Local Review",
-          "icon": "media/local-review.svg"
+          "id": "agenticReview",
+          "title": "Agentic Review",
+          "icon": "media/agentic-review.svg"
         }
       ]
     },
     "views": {
-      "localReview": [
+      "agenticReview": [
         {
-          "id": "localReview.files",
+          "id": "agenticReview.files",
           "name": "Changes"
         },
         {
-          "id": "localReview.comments",
+          "id": "agenticReview.comments",
           "name": "Active Review Comments"
         },
         {
-          "id": "localReview.reviews",
+          "id": "agenticReview.reviews",
           "name": "Saved Reviews"
         }
       ]
     },
     "viewsWelcome": [
       {
-        "view": "localReview.files",
-        "when": "localReview.emptyReason == no-repo",
+        "view": "agenticReview.files",
+        "when": "agenticReview.emptyReason == no-repo",
         "contents": "No Git repository in this workspace.\nOpen a folder that is a Git repository to review its changes."
       },
       {
-        "view": "localReview.files",
-        "when": "localReview.emptyReason == unborn-head",
+        "view": "agenticReview.files",
+        "when": "agenticReview.emptyReason == unborn-head",
         "contents": "This repository has no commits yet. Nothing is staged or tracked to review."
       },
       {
-        "view": "localReview.files",
-        "when": "localReview.emptyReason == error",
-        "contents": "Couldn't read the diff.\n[Retry](command:localReview.refresh)"
+        "view": "agenticReview.files",
+        "when": "agenticReview.emptyReason == error",
+        "contents": "Couldn't read the diff.\n[Retry](command:agenticReview.refresh)"
       },
       {
-        "view": "localReview.files",
-        "when": "localReview.emptyReason == no-changes && localReview.source == staged",
-        "contents": "No staged changes.\n[Change source](command:localReview.selectSource)"
+        "view": "agenticReview.files",
+        "when": "agenticReview.emptyReason == no-changes && agenticReview.source == staged",
+        "contents": "No staged changes.\n[Change source](command:agenticReview.selectSource)"
       },
       {
-        "view": "localReview.files",
-        "when": "localReview.emptyReason == no-changes && localReview.source == unstaged",
-        "contents": "No unstaged changes.\n[Change source](command:localReview.selectSource)"
+        "view": "agenticReview.files",
+        "when": "agenticReview.emptyReason == no-changes && agenticReview.source == unstaged",
+        "contents": "No unstaged changes.\n[Change source](command:agenticReview.selectSource)"
       },
       {
-        "view": "localReview.files",
-        "when": "localReview.emptyReason == no-changes && localReview.source == worktree-vs-head",
-        "contents": "No uncommitted changes.\n[Change source](command:localReview.selectSource)"
+        "view": "agenticReview.files",
+        "when": "agenticReview.emptyReason == no-changes && agenticReview.source == worktree-vs-head",
+        "contents": "No uncommitted changes.\n[Change source](command:agenticReview.selectSource)"
       },
       {
-        "view": "localReview.files",
-        "when": "localReview.emptyReason == no-changes && localReview.source == vs-base",
-        "contents": "No changes compared with the base branch.\n[Change source](command:localReview.selectSource)"
+        "view": "agenticReview.files",
+        "when": "agenticReview.emptyReason == no-changes && agenticReview.source == vs-base",
+        "contents": "No changes compared with the base branch.\n[Change source](command:agenticReview.selectSource)"
       },
       {
-        "view": "localReview.comments",
+        "view": "agenticReview.comments",
         "contents": "No comments in the active review yet.\nHover a line in the diff and click + to add one."
       },
       {
-        "view": "localReview.reviews",
+        "view": "agenticReview.reviews",
         "contents": "No reviews yet.\nComment on the diff (a review is created automatically), or use New Review to start one."
       }
     ],
     "commands": [
       {
-        "command": "localReview.startReview",
+        "command": "agenticReview.startReview",
         "title": "Start a Review",
-        "category": "Local Review",
+        "category": "Agentic Review",
         "icon": "$(git-pull-request)"
       },
       {
-        "command": "localReview.refresh",
+        "command": "agenticReview.refresh",
         "title": "Refresh",
-        "category": "Local Review",
+        "category": "Agentic Review",
         "icon": "$(refresh)"
       },
       {
-        "command": "localReview.selectSource",
+        "command": "agenticReview.selectSource",
         "title": "Select Diff Source",
-        "category": "Local Review",
+        "category": "Agentic Review",
         "icon": "$(git-compare)"
       },
       {
-        "command": "localReview.selectRepo",
+        "command": "agenticReview.selectRepo",
         "title": "Select Repository",
-        "category": "Local Review",
+        "category": "Agentic Review",
         "icon": "$(repo)"
       },
       {
-        "command": "localReview.revealFile",
+        "command": "agenticReview.revealFile",
         "title": "Reveal File",
-        "category": "Local Review"
+        "category": "Agentic Review"
       },
       {
-        "command": "localReview.toggleViewMode",
+        "command": "agenticReview.toggleViewMode",
         "title": "Toggle Split / Unified View",
-        "category": "Local Review"
+        "category": "Agentic Review"
       },
       {
-        "command": "localReview.toggleWhitespace",
+        "command": "agenticReview.toggleWhitespace",
         "title": "Toggle Hide Whitespace",
-        "category": "Local Review"
+        "category": "Agentic Review"
       },
       {
-        "command": "localReview.newReview",
+        "command": "agenticReview.newReview",
         "title": "New Review",
-        "category": "Local Review",
+        "category": "Agentic Review",
         "icon": "$(add)"
       },
       {
-        "command": "localReview.switchReview",
+        "command": "agenticReview.switchReview",
         "title": "Switch to Review",
-        "category": "Local Review"
+        "category": "Agentic Review"
       },
       {
-        "command": "localReview.renameReview",
+        "command": "agenticReview.renameReview",
         "title": "Rename Review",
-        "category": "Local Review",
+        "category": "Agentic Review",
         "icon": "$(pencil)"
       },
       {
-        "command": "localReview.deleteReview",
+        "command": "agenticReview.deleteReview",
         "title": "Delete Review",
-        "category": "Local Review",
+        "category": "Agentic Review",
         "icon": "$(trash)"
       },
       {
-        "command": "localReview.moveReviewToCurrentBranch",
+        "command": "agenticReview.moveReviewToCurrentBranch",
         "title": "Move to Current Branch",
-        "category": "Local Review",
+        "category": "Agentic Review",
         "icon": "$(arrow-right)"
       },
       {
-        "command": "localReview.exportReview",
+        "command": "agenticReview.exportReview",
         "title": "Export Review",
-        "category": "Local Review",
+        "category": "Agentic Review",
         "icon": "$(export)"
       },
       {
-        "command": "localReview.nextChange",
+        "command": "agenticReview.nextChange",
         "title": "Next Changed File",
-        "category": "Local Review"
+        "category": "Agentic Review"
       },
       {
-        "command": "localReview.prevChange",
+        "command": "agenticReview.prevChange",
         "title": "Previous Changed File",
-        "category": "Local Review"
+        "category": "Agentic Review"
       },
       {
-        "command": "localReview.nextComment",
+        "command": "agenticReview.nextComment",
         "title": "Next Comment",
-        "category": "Local Review"
+        "category": "Agentic Review"
       },
       {
-        "command": "localReview.prevComment",
+        "command": "agenticReview.prevComment",
         "title": "Previous Comment",
-        "category": "Local Review"
+        "category": "Agentic Review"
       },
       {
-        "command": "localReview.setupMcp",
+        "command": "agenticReview.setupMcp",
         "title": "Set up MCP",
-        "category": "Local Review",
+        "category": "Agentic Review",
         "icon": "$(plug)"
       },
       {
-        "command": "localReview.startMcp",
+        "command": "agenticReview.startMcp",
         "title": "Start MCP Server",
-        "category": "Local Review",
+        "category": "Agentic Review",
         "icon": "$(play)"
       },
       {
-        "command": "localReview.stopMcp",
+        "command": "agenticReview.stopMcp",
         "title": "Stop MCP Server",
-        "category": "Local Review",
+        "category": "Agentic Review",
         "icon": "$(debug-stop)"
+      },
+      {
+        "command": "agenticReview.openMcpConfig",
+        "title": "Open MCP Config",
+        "category": "Agentic Review",
+        "icon": "$(json)"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "localReview.startReview",
-          "when": "view == localReview.files",
+          "command": "agenticReview.startReview",
+          "when": "view == agenticReview.files",
           "group": "navigation@1"
         },
         {
-          "command": "localReview.selectSource",
-          "when": "view == localReview.files",
+          "command": "agenticReview.selectSource",
+          "when": "view == agenticReview.files",
           "group": "navigation@2"
         },
         {
-          "command": "localReview.selectRepo",
-          "when": "view == localReview.files",
+          "command": "agenticReview.selectRepo",
+          "when": "view == agenticReview.files",
           "group": "navigation@3"
         },
         {
-          "command": "localReview.refresh",
-          "when": "view == localReview.files",
+          "command": "agenticReview.refresh",
+          "when": "view == agenticReview.files",
           "group": "navigation@4"
         },
         {
-          "command": "localReview.newReview",
-          "when": "view == localReview.reviews",
+          "command": "agenticReview.newReview",
+          "when": "view == agenticReview.reviews",
           "group": "navigation@1"
         },
         {
-          "command": "localReview.exportReview",
-          "when": "view == localReview.comments",
+          "command": "agenticReview.exportReview",
+          "when": "view == agenticReview.comments",
           "group": "navigation@1"
         }
       ],
       "view/item/context": [
         {
-          "command": "localReview.exportReview",
-          "when": "view == localReview.reviews && viewItem =~ /^localReview.review/",
+          "command": "agenticReview.exportReview",
+          "when": "view == agenticReview.reviews && viewItem =~ /^agenticReview.review/",
           "group": "export@1"
         },
         {
-          "command": "localReview.moveReviewToCurrentBranch",
-          "when": "view == localReview.reviews && viewItem == localReview.review.other",
+          "command": "agenticReview.moveReviewToCurrentBranch",
+          "when": "view == agenticReview.reviews && viewItem == agenticReview.review.other",
           "group": "inline@1"
         },
         {
-          "command": "localReview.renameReview",
-          "when": "view == localReview.reviews && viewItem =~ /^localReview.review/",
+          "command": "agenticReview.renameReview",
+          "when": "view == agenticReview.reviews && viewItem =~ /^agenticReview.review/",
           "group": "inline@2"
         },
         {
-          "command": "localReview.deleteReview",
-          "when": "view == localReview.reviews && viewItem =~ /^localReview.review/",
+          "command": "agenticReview.deleteReview",
+          "when": "view == agenticReview.reviews && viewItem =~ /^agenticReview.review/",
           "group": "inline@3"
         }
       ],
       "editor/title": [
         {
-          "command": "localReview.exportReview",
-          "when": "activeWebviewPanelId == localReview.panel",
+          "command": "agenticReview.exportReview",
+          "when": "activeWebviewPanelId == agenticReview.panel",
           "group": "navigation@1"
         },
         {
-          "command": "localReview.refresh",
-          "when": "activeWebviewPanelId == localReview.panel",
+          "command": "agenticReview.refresh",
+          "when": "activeWebviewPanelId == agenticReview.panel",
           "group": "navigation@2"
         }
       ],
       "commandPalette": [
         {
-          "command": "localReview.revealFile",
+          "command": "agenticReview.revealFile",
           "when": "false"
         },
         {
-          "command": "localReview.switchReview",
+          "command": "agenticReview.switchReview",
           "when": "false"
         },
         {
-          "command": "localReview.renameReview",
+          "command": "agenticReview.renameReview",
           "when": "false"
         },
         {
-          "command": "localReview.deleteReview",
+          "command": "agenticReview.deleteReview",
           "when": "false"
         },
         {
-          "command": "localReview.moveReviewToCurrentBranch",
+          "command": "agenticReview.moveReviewToCurrentBranch",
           "when": "false"
         }
       ]
     },
     "keybindings": [
       {
-        "command": "localReview.renameReview",
+        "command": "agenticReview.renameReview",
         "key": "f2",
-        "when": "focusedView == localReview.reviews"
+        "when": "focusedView == agenticReview.reviews"
       },
       {
-        "command": "localReview.nextChange",
+        "command": "agenticReview.nextChange",
         "key": "alt+down",
-        "when": "activeWebviewPanelId == localReview.panel"
+        "when": "activeWebviewPanelId == agenticReview.panel"
       },
       {
-        "command": "localReview.prevChange",
+        "command": "agenticReview.prevChange",
         "key": "alt+up",
-        "when": "activeWebviewPanelId == localReview.panel"
+        "when": "activeWebviewPanelId == agenticReview.panel"
       },
       {
-        "command": "localReview.nextComment",
+        "command": "agenticReview.nextComment",
         "key": "alt+shift+down",
-        "when": "activeWebviewPanelId == localReview.panel"
+        "when": "activeWebviewPanelId == agenticReview.panel"
       },
       {
-        "command": "localReview.prevComment",
+        "command": "agenticReview.prevComment",
         "key": "alt+shift+up",
-        "when": "activeWebviewPanelId == localReview.panel"
+        "when": "activeWebviewPanelId == agenticReview.panel"
       }
     ],
     "configuration": {
-      "title": "Local Review",
+      "title": "Agentic Review",
       "properties": {
-        "localReview.defaultSource": {
+        "agenticReview.defaultSource": {
           "type": "string",
           "enum": [
             "worktree-vs-head",
@@ -352,7 +358,7 @@
           "default": "worktree-vs-head",
           "description": "Default diff source when a review is first opened."
         },
-        "localReview.defaultViewMode": {
+        "agenticReview.defaultViewMode": {
           "type": "string",
           "enum": [
             "unified",
@@ -361,40 +367,40 @@
           "default": "unified",
           "description": "Default diff rendering mode."
         },
-        "localReview.defaultHideWhitespace": {
+        "agenticReview.defaultHideWhitespace": {
           "type": "boolean",
           "default": false,
           "description": "Hide whitespace-only changes by default (git diff -w)."
         },
-        "localReview.log": {
+        "agenticReview.log": {
           "type": "boolean",
           "default": false,
-          "description": "Write diagnostic logs to the 'Local Review' output channel."
+          "description": "Write diagnostic logs to the 'Agentic Review' output channel."
         },
-        "localReview.includeUntracked": {
+        "agenticReview.includeUntracked": {
           "type": "boolean",
           "default": true,
           "description": "Include untracked files (shown as all-addition entries; .gitignored files are excluded)."
         },
-        "localReview.largeFileThreshold": {
+        "agenticReview.largeFileThreshold": {
           "type": "number",
           "default": 1000,
           "description": "Files with more than this many changed lines start collapsed."
         },
-        "localReview.contextLines": {
+        "agenticReview.contextLines": {
           "type": "number",
           "default": 3,
           "description": "Lines of surrounding context captured for comments and export (used from Iteration 4)."
         },
-        "localReview.mcp.autoStart": {
+        "agenticReview.mcp.autoStart": {
           "type": "boolean",
           "default": false,
-          "description": "Start the local MCP server automatically when VS Code launches, so a coding agent (e.g. Claude Code) can read the diff and post, reply to, and resolve review comments. Otherwise start it with the 'Local Review: Start MCP Server' command. Binds to 127.0.0.1 only."
+          "description": "Start the local MCP server automatically when VS Code launches, so a coding agent (e.g. Claude Code) can read the diff and post, reply to, and resolve review comments. Otherwise start it with the 'Agentic Review: Start MCP Server' command. Binds to 127.0.0.1 only."
         },
-        "localReview.mcp.port": {
+        "agenticReview.mcp.port": {
           "type": "number",
           "default": 0,
-          "description": "Port for the MCP server (0 picks a free port, then reuses it across restarts). Set a fixed port for a guaranteed-stable URL."
+          "description": "Port for the MCP server. 0 assigns this workspace a stable, unique port, tracked across windows so multiple VS Code instances never collide, and reuses it across restarts. Set a fixed number to force a specific port."
         }
       }
     }

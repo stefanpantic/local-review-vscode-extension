@@ -107,7 +107,7 @@ test('reviews are scoped per repo', async () => {
 
 test('migrateLegacy wraps legacy active threads into a review, once', async () => {
   const fake = new FakeStore();
-  fake.data.set('localReview.threads', { '/r': [thread('t1'), thread('t2')] });
+  fake.data.set('agenticReview.threads', { '/r': [thread('t1'), thread('t2')] });
   const store = new ReviewStore(fake);
   await store.migrateLegacy('/r', 'main', 'sha');
   const cur = store.current('/r', 'main');
@@ -120,7 +120,7 @@ test('migrateLegacy wraps legacy active threads into a review, once', async () =
 
 test('guarded read: junk degrades to empty', () => {
   const fake = new FakeStore();
-  fake.data.set('localReview.reviews', { '/r': [{ nope: true }] });
+  fake.data.set('agenticReview.reviews', { '/r': [{ nope: true }] });
   const store = new ReviewStore(fake);
   assert.deepEqual(store.allForRepo('/r'), []);
 });

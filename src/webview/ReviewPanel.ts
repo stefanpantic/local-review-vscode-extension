@@ -19,7 +19,7 @@ export class ReviewPanel {
       ReviewPanel.current.panel.reveal();
       return;
     }
-    const panel = vscode.window.createWebviewPanel('localReview.panel', 'Local Review', vscode.ViewColumn.Active, {
+    const panel = vscode.window.createWebviewPanel('agenticReview.panel', 'Agentic Review', vscode.ViewColumn.Active, {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'dist'), vscode.Uri.joinPath(extensionUri, 'media')],
     });

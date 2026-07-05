@@ -49,7 +49,7 @@ export class ReviewsView implements vscode.TreeDataProvider<ReviewNode> {
       item.description = node.archived ? 'archived' : `${node.reviews.length}`;
       if (node.archived)
         item.tooltip = 'This branch no longer exists. Move a review to your current branch to reuse it.';
-      item.contextValue = 'localReview.branchGroup';
+      item.contextValue = 'agenticReview.branchGroup';
       return item;
     }
     const review = node;
@@ -65,8 +65,8 @@ export class ReviewsView implements vscode.TreeDataProvider<ReviewNode> {
         (review.headSha ? `\n\nHEAD \`${review.headSha.slice(0, 8)}\` at save` : ''),
     );
     item.iconPath = new vscode.ThemeIcon(isCurrent ? 'circle-filled' : 'circle-outline');
-    item.contextValue = onCurrentBranch ? 'localReview.review.current' : 'localReview.review.other';
-    item.command = { command: 'localReview.switchReview', title: 'Switch to review', arguments: [review] };
+    item.contextValue = onCurrentBranch ? 'agenticReview.review.current' : 'agenticReview.review.other';
+    item.command = { command: 'agenticReview.switchReview', title: 'Switch to review', arguments: [review] };
     return item;
   }
 
