@@ -55,7 +55,7 @@ function formatThread(t: CommentThread): string {
 }
 
 export function formatReview(r: Review): string {
-  const header = `Review "${r.name}" (${r.branch}) — ${r.threads.length} thread(s)`;
+  const header = `Review "${r.name}" (${r.branch}) has ${r.threads.length} thread(s)`;
   if (r.threads.length === 0) return `${header}\n(no comments yet)`;
   return [header, ...r.threads.map(formatThread)].join('\n\n');
 }
@@ -63,7 +63,7 @@ export function formatReview(r: Review): string {
 function formatReviews(list: ReturnType<McpReviewApi['listReviews']>): string {
   if (list.length === 0) return 'No reviews yet.';
   return list
-    .map((r) => `${r.current ? '*' : ' '} [${r.id}] "${r.name}" (${r.branch}) — ${r.threads} thread(s)`)
+    .map((r) => `${r.current ? '*' : ' '} [${r.id}] "${r.name}" (${r.branch}), ${r.threads} thread(s)`)
     .join('\n');
 }
 
@@ -142,7 +142,7 @@ export const TOOLS: ToolDef[] = [
     name: 'get_diff',
     title: 'Get diff',
     description:
-      'Get the diff under review as annotated patch text. Each line is "<sign> <lineNo> | <code>" — sign is + (added), - (removed), or space (context). To comment, use the shown line number with side="old" for - lines and side="new" for + or context lines. Only lines shown here are commentable.',
+      'Get the diff under review as annotated patch text. Each line is "<sign> <lineNo> | <code>", where the sign is + (added), - (removed), or space (context). To comment, use the shown line number with side="old" for - lines and side="new" for + or context lines. Only lines shown here are commentable.',
     inputShape: {},
     handler: async (api) => formatDiff(requireDiff(api)),
   },

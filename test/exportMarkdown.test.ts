@@ -46,7 +46,7 @@ test('header, counts, file:line headings, and stable id', () => {
     [thread(), thread({ id: 't2', anchor: { ...thread().anchor, filePath: 'src/b.ts' } })],
     { scope: 'all' },
   );
-  assert.match(md, /^# Local Review — Review 1/);
+  assert.match(md, /^# Local Review: Review 1/);
   assert.match(md, /\*\*branch\*\* feature\/x/);
   assert.match(md, /2 comment threads across 2 files · 2 unresolved/);
   assert.match(md, /## `src\/a\.ts:42`/);

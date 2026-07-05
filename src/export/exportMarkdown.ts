@@ -33,7 +33,7 @@ export function exportReviewMarkdown(meta: ExportMeta, threads: CommentThread[],
   const unresolved = selected.filter((t) => !t.resolved).length;
 
   const out: string[] = [
-    `# Local Review — ${meta.name}`,
+    `# Local Review: ${meta.name}`,
     '',
     `**repo** ${meta.repoName} · **branch** ${meta.branch} · **source** ${meta.source} · **generated** ${meta.generatedAt}`,
     '',

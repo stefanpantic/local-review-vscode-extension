@@ -44,11 +44,11 @@
         },
         {
           "id": "localReview.comments",
-          "name": "Active review comments"
+          "name": "Active Review Comments"
         },
         {
           "id": "localReview.reviews",
-          "name": "Saved reviews"
+          "name": "Saved Reviews"
         }
       ]
     },
@@ -61,7 +61,7 @@
       {
         "view": "localReview.files",
         "when": "localReview.emptyReason == unborn-head",
-        "contents": "This repository has no commits yet — nothing staged or tracked to review."
+        "contents": "This repository has no commits yet. Nothing is staged or tracked to review."
       },
       {
         "view": "localReview.files",
