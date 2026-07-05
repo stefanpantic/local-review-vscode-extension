@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.0.3](https://github.com/stefanpantic/local-review-vscode-extension/compare/local-review-v0.0.2...local-review-v0.0.3) (2026-07-05)
+
+
+### Features
+
+* agentic integration via in-process MCP server ([#4](https://github.com/stefanpantic/local-review-vscode-extension/issues/4)) ([677ec92](https://github.com/stefanpantic/local-review-vscode-extension/commit/677ec927cd378f3a83d5dcf25a7298bf86153630))
+* make MCP setup client-agnostic ([#6](https://github.com/stefanpantic/local-review-vscode-extension/issues/6)) ([d2abb12](https://github.com/stefanpantic/local-review-vscode-extension/commit/d2abb12b29f1b5f3f3d81bdd68ed2c6f2d42a970))
+* publish to the VS Code Marketplace ([#17](https://github.com/stefanpantic/local-review-vscode-extension/issues/17)) ([57a3a41](https://github.com/stefanpantic/local-review-vscode-extension/commit/57a3a41d786a8ea621e0f6cac2ada92e0123f1df))
+
+
+### Bug Fixes
+
+* remove em-dashes from user-facing text ([#7](https://github.com/stefanpantic/local-review-vscode-extension/issues/7)) ([9529f34](https://github.com/stefanpantic/local-review-vscode-extension/commit/9529f34c0c1fd8ea11a9c30d4163461a9caa9590))
+
 ## [0.0.2](https://github.com/stefanpantic/local-review-vscode-extension/compare/local-review-v0.0.1...local-review-v0.0.2) (2026-07-04)
 
 
