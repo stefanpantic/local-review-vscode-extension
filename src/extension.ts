@@ -79,7 +79,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const setupMcp = async (): Promise<void> => {
     const cfg = vscode.workspace.getConfiguration('localReview');
     const input = await vscode.window.showInputBox({
-      title: 'Local Review — MCP server port',
+      title: 'Local Review MCP server port',
       prompt: 'Port for the MCP server (0 = pick a free port; it is then reused across restarts)',
       value: String(cfg.get<number>('mcp.port', 0)),
       validateInput: (v) =>
@@ -91,7 +91,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         { label: 'Autostart on launch', description: 'run the MCP server every time VS Code opens', value: true },
         { label: 'Start manually', description: 'start it with "Local Review: Start MCP Server"', value: false },
       ],
-      { title: 'Local Review — MCP autostart', placeHolder: 'Start the MCP server automatically on launch?' },
+      { title: 'Local Review MCP autostart', placeHolder: 'Start the MCP server automatically on launch?' },
     );
     if (!auto) return; // cancelled
     await cfg.update('mcp.port', Number(input.trim()), vscode.ConfigurationTarget.Workspace);
@@ -109,7 +109,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       'Local Review MCP server is running.',
       {
         modal: true,
-        detail: `URL: ${url}\n\nConnect your MCP client using .local-review/mcp.json — it has the URL + token and ready-to-run connect commands for Claude Code and other clients.`,
+        detail: `URL: ${url}\n\nConnect your MCP client using .local-review/mcp.json. It has the URL, token, and ready-to-run connect commands for Claude Code and other clients.`,
       },
       'Open mcp.json',
       'Copy URL',
@@ -222,13 +222,13 @@ async function writeMcpArtifacts(url: string, token: string): Promise<vscode.Uri
   const root = folder.uri.fsPath;
   await fs.mkdir(path.join(root, '.local-review'), { recursive: true });
 
-  const content = `// Local Review MCP server — a standard, local (127.0.0.1), token-guarded MCP server over Streamable HTTP.
+  const content = `// Local Review MCP server. A standard, local (127.0.0.1), token-guarded MCP server over Streamable HTTP.
 // Connect any MCP client with the url + token below. Ready-to-use options:
 //
 // Claude Code (CLI):
 //   claude mcp remove local-review 2>/dev/null; claude mcp add --transport http local-review ${url} --header "Authorization: Bearer ${token}"
 //
-// mcpServers config (Claude Desktop, Cursor, Windsurf, VS Code, …) — add under "mcpServers":
+// mcpServers config for Claude Desktop, Cursor, Windsurf, VS Code, and other clients. Add under "mcpServers":
 //   "local-review": {
 //     "type": "http",
 //     "url": "${url}",

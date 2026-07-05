@@ -48,7 +48,7 @@ export class ReviewsView implements vscode.TreeDataProvider<ReviewNode> {
       item.iconPath = new vscode.ThemeIcon(node.archived ? 'archive' : 'git-branch');
       item.description = node.archived ? 'archived' : `${node.reviews.length}`;
       if (node.archived)
-        item.tooltip = 'This branch no longer exists — move a review to your current branch to reuse it.';
+        item.tooltip = 'This branch no longer exists. Move a review to your current branch to reuse it.';
       item.contextValue = 'localReview.branchGroup';
       return item;
     }
@@ -61,7 +61,7 @@ export class ReviewsView implements vscode.TreeDataProvider<ReviewNode> {
     item.id = `review:${review.id}`;
     item.description = `${n} comment${n === 1 ? '' : 's'} · ${relativeTime(review.updatedAt)}${isCurrent ? ' · current' : ''}`;
     item.tooltip = new vscode.MarkdownString(
-      `**${review.name}** — \`${review.branch}\`\n\n${n} comment${n === 1 ? '' : 's'} · updated ${relativeTime(review.updatedAt)}` +
+      `**${review.name}** (\`${review.branch}\`)\n\n${n} comment${n === 1 ? '' : 's'} · updated ${relativeTime(review.updatedAt)}` +
         (review.headSha ? `\n\nHEAD \`${review.headSha.slice(0, 8)}\` at save` : ''),
     );
     item.iconPath = new vscode.ThemeIcon(isCurrent ? 'circle-filled' : 'circle-outline');

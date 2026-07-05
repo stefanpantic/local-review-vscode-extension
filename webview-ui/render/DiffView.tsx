@@ -416,7 +416,7 @@ export function DiffView({
             />
             {collapsed && isLarge(file) && !state.viewed[file.path] && file.hunks.length > 0 && (
               <div className="lr-large">
-                Large file — {file.additions + file.deletions} changes.{' '}
+                Large file with {file.additions + file.deletions} changes.{' '}
                 <button className="lr-link" onClick={() => toggleCollapse(file)}>
                   Load anyway
                 </button>
