@@ -1,4 +1,4 @@
-# Local Review
+# Agentic Review
 
 A VS Code extension that renders the local git diff as a PR-style review and exports it for a coding agent. The vision, invariants, and architecture live in [docs/spec.md](docs/spec.md) (the source of truth) and [docs/protocol.md](docs/protocol.md) — read those before changing behavior.
 
@@ -22,7 +22,7 @@ Work proceeds **one iteration at a time** — never open two at once. Rhythm: **
 
 ## MCP integration (participating in a review as an agent)
 
-Local Review can run a local MCP server so you can take part in a review. Set it up with the **"Local Review: Set up MCP"** command. It prompts for a port and whether to autostart, then writes the connection details to **`.local-review/mcp.json`** with ready-to-run connect commands for Claude Code and other MCP clients (it is a standard MCP server, not tool-specific). Afterwards **Start MCP Server** / **Stop MCP Server** control it, and `localReview.mcp.autoStart` runs it on launch. The server is **localhost-only** (`127.0.0.1`, bearer-token).
+Agentic Review can run a local MCP server so you can take part in a review. Set it up with the **"Agentic Review: Set up MCP"** command. It prompts for a port and whether to autostart, then writes the connection details to an mcp.json in the extension's per-workspace storage (open it anytime with **Open MCP Config**), with ready-to-run connect commands for Claude Code and other MCP clients (it is a standard MCP server, not tool-specific). Afterwards **Start MCP Server** / **Stop MCP Server** control it, and `agenticReview.mcp.autoStart` runs it on launch. The server is **localhost-only** (`127.0.0.1`, bearer-token).
 
 Once connected, these tools are available:
 
@@ -31,4 +31,4 @@ Once connected, these tools are available:
 - `post_comment` — add a comment on a line or range (`side` "new" for added/context lines, "old" for removed), optionally with a `suggestion`.
 - `reply` / `resolve` — respond in a thread or resolve/reopen it.
 
-Comments you post are attributed to **"AI Agent"** and appear in the review UI exactly like the human's, anchored the same way. You never apply suggestions to files through Local Review — action them by editing files yourself.
+Comments you post are attributed to **"AI Agent"** and appear in the review UI exactly like the human's, anchored the same way. You never apply suggestions to files through Agentic Review — action them by editing files yourself.

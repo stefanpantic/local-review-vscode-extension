@@ -54,7 +54,7 @@ export class FilesView implements vscode.TreeDataProvider<TreeNode> {
     item.tooltip = file.oldPath && file.oldPath !== file.path ? `${file.oldPath} → ${file.path}` : file.path;
     item.iconPath = new vscode.ThemeIcon(ICONS[file.status], new vscode.ThemeColor(COLORS[file.status]));
     item.contextValue = file.status;
-    item.command = { command: 'localReview.revealFile', title: 'Reveal', arguments: [file.path] };
+    item.command = { command: 'agenticReview.revealFile', title: 'Reveal', arguments: [file.path] };
     item.checkboxState = this.controller.isViewed(file.path)
       ? vscode.TreeItemCheckboxState.Checked
       : vscode.TreeItemCheckboxState.Unchecked;

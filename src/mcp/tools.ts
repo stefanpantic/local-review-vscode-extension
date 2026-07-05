@@ -105,7 +105,7 @@ export function lineInDiff(diff: ReviewDiff, filePath: string, side: Side, line:
 
 function requireDiff(api: McpReviewApi): ReviewDiff {
   const diff = api.getDiff();
-  if (!diff) throw new Error('No diff is loaded. Open a repository with changes in Local Review first.');
+  if (!diff) throw new Error('No diff is loaded. Open a repository with changes in Agentic Review first.');
   return diff;
 }
 

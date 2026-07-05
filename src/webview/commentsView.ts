@@ -51,7 +51,7 @@ export class CommentsView implements vscode.TreeDataProvider<CommentsNode> {
       `**${lineLabel}**${tag ? ` · _${tag}_` : ''}\n\n${t.comments.map((c) => c.body).join('\n\n---\n\n')}`,
     );
     item.iconPath = new vscode.ThemeIcon(t.resolved ? 'check' : t.status === 'outdated' ? 'warning' : 'comment');
-    item.command = { command: 'localReview.revealFile', title: 'Reveal', arguments: [t.anchor.filePath] };
+    item.command = { command: 'agenticReview.revealFile', title: 'Reveal', arguments: [t.anchor.filePath] };
     return item;
   }
 

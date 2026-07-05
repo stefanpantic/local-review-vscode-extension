@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 import type { CommentThread, Review } from '../model/Comment';
 import { durableThread, isCommentThread, UNKNOWN_AUTHOR } from '../model/Comment';
 
-const REVIEWS_KEY = 'localReview.reviews';
-const CURRENT_KEY = 'localReview.currentReview';
-const LEGACY_THREADS_KEY = 'localReview.threads';
+const REVIEWS_KEY = 'agenticReview.reviews';
+const CURRENT_KEY = 'agenticReview.currentReview';
+const LEGACY_THREADS_KEY = 'agenticReview.threads';
 
 /** Minimal persisted key-value store (satisfied by vscode's `workspaceState`); keeps this module vscode-free/testable. */
 export interface KeyValueStore {
@@ -110,7 +110,7 @@ export class ReviewStore {
     await this.setCurrent(repoRoot, branch, id);
   }
 
-  /** One-time migration of the legacy active-threads store (`localReview.threads`) into a review on `branch`. Idempotent. */
+  /** One-time migration of the legacy active-threads store (`agenticReview.threads`) into a review on `branch`. Idempotent. */
   async migrateLegacy(repoRoot: string, branch: string, headSha: string | null): Promise<void> {
     const legacy = this.store.get<Record<string, unknown>>(LEGACY_THREADS_KEY);
     if (!legacy || typeof legacy !== 'object' || !(repoRoot in legacy)) return;

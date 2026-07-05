@@ -66,7 +66,9 @@ export class ReviewController {
   buildState(): ReviewStatePayload {
     const pref = this.state.getPref();
     const paths = this.files().map((f) => f.path);
-    const largeFileThreshold = vscode.workspace.getConfiguration('localReview').get<number>('largeFileThreshold', 1000);
+    const largeFileThreshold = vscode.workspace
+      .getConfiguration('agenticReview')
+      .get<number>('largeFileThreshold', 1000);
     return {
       result: this.current,
       repoRoot: pref.repoRoot,
@@ -237,7 +239,9 @@ export class ReviewController {
         this.userNameRepo = repoRoot;
       }
       await this.reviewStore.migrateLegacy(repoRoot, this.branchKey(repoRoot), this.headShaFor(repoRoot));
-      const includeUntracked = vscode.workspace.getConfiguration('localReview').get<boolean>('includeUntracked', true);
+      const includeUntracked = vscode.workspace
+        .getConfiguration('agenticReview')
+        .get<boolean>('includeUntracked', true);
       this.current = await getDiff({
         repoRoot,
         source: pref.source,
@@ -249,8 +253,8 @@ export class ReviewController {
         this.current.diff.files = orderByTree(this.current.diff.files);
       }
     }
-    void vscode.commands.executeCommand('setContext', 'localReview.emptyReason', this.current.state);
-    void vscode.commands.executeCommand('setContext', 'localReview.source', this.state.getPref().source);
+    void vscode.commands.executeCommand('setContext', 'agenticReview.emptyReason', this.current.state);
+    void vscode.commands.executeCommand('setContext', 'agenticReview.source', this.state.getPref().source);
     this._onDidChange.fire();
     this.panelPost?.('stateChanged', this.buildState());
   }
