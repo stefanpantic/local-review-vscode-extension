@@ -194,7 +194,7 @@
       },
       {
         "command": "localReview.setupMcp",
-        "title": "Set up MCP for Claude Code",
+        "title": "Set up MCP",
         "category": "Local Review",
         "icon": "$(plug)"
       },

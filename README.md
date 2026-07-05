@@ -5,43 +5,55 @@
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-fe5196.svg)](https://www.conventionalcommits.org)
 [![code style: Prettier](https://img.shields.io/badge/code_style-Prettier-ff69b4.svg)](https://prettier.io)
 
-**Review your local changes like a GitHub pull request — without opening one.**
+Review your local git changes like a pull request, without opening one. Then hand the review to a coding agent, or let the agent post its own.
 
-Local Review renders your working-tree diff as a continuous, PR-style review surface right inside VS Code: side-by-side or unified, syntax-highlighted, with inline comments on any line or range. When you're done, it exports a structured Markdown work list you can hand to a coding agent (e.g. Claude Code) to action.
+> **Everything stays on your machine.** No remote, no PR, no account, no telemetry.
 
-> **Everything stays on your machine.** No remote, no PR, no account, no telemetry. Local Review never sends your code anywhere — it's a private review loop for your own changes.
+![Local Review: a unified diff with an inline comment, a suggested change, and the sidebar showing changed files, active comments, and saved reviews](docs/images/review-panel.png)
 
-![Local Review — a unified diff with an inline comment, a suggested change, and the sidebar showing changed files, active comments, and saved reviews](docs/images/review-panel.png)
+## What it does
 
-## Why
+- Renders your working-tree diff as a continuous, PR-style review inside VS Code (unified or side-by-side, syntax-highlighted).
+- Lets you comment on any line or range, on added or removed lines, with reply, resolve, and code suggestions.
+- Keeps comments anchored as code shifts. They drift with their lines, or go "outdated", never silently lost.
+- Saves a review per branch automatically.
+- Hands off to a coding agent two ways: a structured Markdown export, or a live MCP connection.
 
-Opening a draft PR just to get a structured, line-anchored review of your own work is heavyweight: it needs a remote, pollutes history, and round-trips through a server. Local Review keeps the _discipline_ of PR review — continuous diff, "viewed" tracking, line comments, resolve/reply — entirely local, and turns the result into an agent-ready task list.
+## Getting started
 
-## The review loop
+1. Install the extension (see [Install](#install)).
+2. Make some local changes, then open **Local Review** from the activity bar. The diff opens in a full-width tab.
+3. Hover a line and click **+** (or drag to select a range) to comment. Reply and resolve as you go.
+4. Hand it to a coding agent:
+   - **Export:** run **Export Review** for a Markdown work list (clipboard, file, or editor), then paste it into your agent.
+   - **MCP (live):** run **Set up MCP**, connect your agent, and it reads the diff and posts comments straight into the review.
 
-1. Make some local changes.
-2. Open **Local Review** from the activity bar — the diff opens in a full-width editor tab.
-3. Read it: toggle unified/side-by-side, hide whitespace, mark files as viewed.
-4. Leave inline comments on lines or ranges (on added _and_ removed lines); reply and resolve as your thinking evolves.
-5. **Export Review** → a structured Markdown file (or clipboard).
-6. Paste it into your coding agent to action the comments. As the agent edits, your comments **drift** with their lines or surface as _outdated_.
+## Agent integration (MCP)
+
+Local Review runs a standard, local MCP server (bound to `127.0.0.1`, token-guarded, off by default) that any MCP client can use. The handoff goes both ways: you comment and the agent actions it, and the agent can post its own comments, replies, and suggestions that show up in the panel attributed to "AI Agent", anchored like yours.
+
+1. Run **Local Review: Set up MCP**. Pick a port and whether to start it on launch.
+2. It writes `.local-review/mcp.json` with the URL, token, and ready-to-run connect commands (Claude Code, plus a generic `mcpServers` config for other clients).
+3. Connect your client. Use **Start MCP Server** / **Stop MCP Server** to control it anytime.
+
+Tools the agent gets: `get_diff`, `get_review`, `list_reviews`, `post_comment`, `reply`, `resolve`. It never writes to your files. It posts comments, and actions them by editing code itself.
 
 ## Features
 
-- **Continuous multi-file diff** across everything that changed, in one scrollable surface.
-- **Unified and side-by-side** rendering, toggleable.
-- **Syntax highlighting**, with **intra-line word highlighting** — a modified line highlights only the characters that actually changed (like the native diff editor).
-- **Expand context** at hunk boundaries to reveal the surrounding unchanged lines.
+- **Unified and side-by-side** diff, toggleable.
+- **Syntax highlighting** with intra-line word highlighting (only the changed characters light up).
+- **Expand context** at hunk boundaries to reveal surrounding lines.
 - **Hide whitespace** changes.
-- **Inline comments** on single lines and multi-line ranges, on both the old and new side — with **edit / delete / reply / resolve**.
-- **Suggestions** — propose replacement code inside a comment, rendered as a before→after diff and captured in the export. (Suggestions are never written to your files.)
-- **Line drift** — comments follow their lines as code changes, and become _outdated_ (never silently deleted) when they can't be matched.
-- **Branch-tied review sessions** — your comments are saved automatically per branch. Switch branches and the matching review follows. Reviews for deleted/merged branches are **archived**, never lost, and can be moved to the current branch.
-- **Structured Markdown export** — grouped by file with locations, diff context, comment text, and suggestion blocks. Scope to all comments, unresolved only, or a single file; reference lines by their current (re-anchored) positions or as originally reviewed; copy to clipboard, open in an editor, or save to a file.
+- **Inline comments** on single lines or ranges, old or new side, with edit, delete, reply, resolve.
+- **Suggestions:** propose replacement code in a comment, rendered as a before/after diff and captured in the export. Never written to disk.
+- **Markdown comments**, rendered in the panel.
+- **Line drift:** comments follow their lines, and go "outdated" instead of vanishing when they can't be matched.
+- **Branch-tied reviews:** saved automatically per branch. Reviews for deleted or merged branches are archived, not lost, and can be moved to the current branch.
+- **Structured Markdown export:** grouped by file, scoped to all, unresolved, or one file, at current or as-reviewed line positions.
 
 ## Diff sources
 
-Pick what you're reviewing from **Select Diff Source**:
+Pick what you review from **Select Diff Source**:
 
 | Source                    | What it shows                          |
 | ------------------------- | -------------------------------------- |
@@ -50,15 +62,14 @@ Pick what you're reviewing from **Select Diff Source**:
 | **Staged changes**        | staged for commit                      |
 | **Compare with a branch** | diff against another local branch      |
 
-Switching source only changes _what diff you see_ — your comments re-anchor against whatever is loaded, so staging a hunk or switching source never orphans a comment.
+Switching source changes only what you see. Comments re-anchor against whatever is loaded, so staging a hunk or switching source never orphans one.
 
 ## Install
 
-Local Review isn't on the Marketplace yet. Install the packaged `.vsix`:
+Not on the Marketplace yet. Install the packaged `.vsix`:
 
-1. Download `local-review-<version>.vsix` from the [Releases](https://github.com/stefanpantic/local-review-vscode-extension/releases) page — or build it yourself with `pnpm run package` (see [CONTRIBUTING](CONTRIBUTING.md)).
-2. In VS Code: **Extensions** view → **⋯** menu → **Install from VSIX…** → pick the file.
-   (Or from the command line: `code --install-extension local-review-<version>.vsix`.)
+1. Download `local-review-<version>.vsix` from [Releases](https://github.com/stefanpantic/local-review-vscode-extension/releases), or build it with `pnpm run package` (see [CONTRIBUTING](CONTRIBUTING.md)).
+2. In VS Code: **Extensions** view, `⋯` menu, **Install from VSIX…**. Or run `code --install-extension local-review-<version>.vsix`.
 
 ## Keybindings
 
@@ -70,19 +81,21 @@ Local Review isn't on the Marketplace yet. Install the packaged `.vsix`:
 
 ## Settings
 
-| Setting                             | Default            | Description                                                                     |
-| ----------------------------------- | ------------------ | ------------------------------------------------------------------------------- |
-| `localReview.defaultSource`         | `worktree-vs-head` | Diff source when a review is first opened.                                      |
-| `localReview.defaultViewMode`       | `unified`          | Default rendering mode (`unified` or `split`).                                  |
-| `localReview.defaultHideWhitespace` | `false`            | Hide whitespace-only changes by default.                                        |
-| `localReview.includeUntracked`      | `true`             | Include untracked files (as all-addition entries; ignores `.gitignore`d files). |
-| `localReview.largeFileThreshold`    | `1000`             | Files with more than this many changed lines start collapsed.                   |
-| `localReview.contextLines`          | `3`                | Lines of surrounding context captured for comments and export.                  |
-| `localReview.log`                   | `false`            | Write diagnostic logs to the "Local Review" output channel.                     |
+| Setting                             | Default            | Description                                                    |
+| ----------------------------------- | ------------------ | -------------------------------------------------------------- |
+| `localReview.defaultSource`         | `worktree-vs-head` | Diff source when a review is first opened.                     |
+| `localReview.defaultViewMode`       | `unified`          | Default rendering mode (`unified` or `split`).                 |
+| `localReview.defaultHideWhitespace` | `false`            | Hide whitespace-only changes by default.                       |
+| `localReview.includeUntracked`      | `true`             | Include untracked files (ignores `.gitignore`d files).         |
+| `localReview.largeFileThreshold`    | `1000`             | Files with more changed lines than this start collapsed.       |
+| `localReview.contextLines`          | `3`                | Lines of surrounding context captured for comments and export. |
+| `localReview.mcp.autoStart`         | `false`            | Start the MCP server when VS Code launches.                    |
+| `localReview.mcp.port`              | `0`                | MCP server port (`0` picks a free port and reuses it).         |
+| `localReview.log`                   | `false`            | Write diagnostic logs to the "Local Review" output channel.    |
 
 ## Contributing
 
-Development setup, the build/watch loop, and the release process live in [CONTRIBUTING.md](CONTRIBUTING.md). Bug reports and feature requests are welcome via the [issue templates](https://github.com/stefanpantic/local-review-vscode-extension/issues/new/choose).
+Development setup, the build and watch loop, and the release process are in [CONTRIBUTING.md](CONTRIBUTING.md). Bug reports and feature requests are welcome via the [issue templates](https://github.com/stefanpantic/local-review-vscode-extension/issues/new/choose).
 
 ## License
 

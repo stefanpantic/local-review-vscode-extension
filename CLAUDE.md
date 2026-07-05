@@ -22,7 +22,7 @@ Work proceeds **one iteration at a time** — never open two at once. Rhythm: **
 
 ## MCP integration (participating in a review as an agent)
 
-Local Review can run a local MCP server so you can take part in a review. Set it up with the **"Local Review: Set up MCP for Claude Code"** command — it prompts for a port and whether to autostart, then copies a `claude mcp` one-liner to the clipboard (run it once to register; re-running is safe). Afterwards **Start MCP Server** / **Stop MCP Server** control it, and `localReview.mcp.autoStart` runs it on launch. The server is **localhost-only** (`127.0.0.1`, bearer-token).
+Local Review can run a local MCP server so you can take part in a review. Set it up with the **"Local Review: Set up MCP"** command. It prompts for a port and whether to autostart, then writes the connection details to **`.local-review/mcp.json`** with ready-to-run connect commands for Claude Code and other MCP clients (it is a standard MCP server, not tool-specific). Afterwards **Start MCP Server** / **Stop MCP Server** control it, and `localReview.mcp.autoStart` runs it on launch. The server is **localhost-only** (`127.0.0.1`, bearer-token).
 
 Once connected, these tools are available:
 
