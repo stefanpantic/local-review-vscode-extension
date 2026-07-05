@@ -3,7 +3,8 @@
   "displayName": "Local Review",
   "description": "PR-style review of your local git diff, exported for a coding agent.",
   "version": "0.0.2",
-  "publisher": "local",
+  "publisher": "StefanPantic",
+  "icon": "media/icon.png",
   "private": true,
   "license": "MIT",
   "packageManager": "pnpm@11.9.0",
@@ -22,6 +23,15 @@
   "categories": [
     "SCM Providers",
     "Other"
+  ],
+  "keywords": [
+    "git",
+    "diff",
+    "code review",
+    "pull request",
+    "review",
+    "mcp",
+    "agent"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -399,7 +409,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "package": "vsce package --no-dependencies"
+    "package": "vsce package --no-dependencies",
+    "publish": "vsce publish --no-dependencies"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

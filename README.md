@@ -66,10 +66,9 @@ Switching source changes only what you see. Comments re-anchor against whatever 
 
 ## Install
 
-Not on the Marketplace yet. Install the packaged `.vsix`:
+Install from the VS Code Marketplace: search **Local Review** in the Extensions view, or run `code --install-extension StefanPantic.local-review`.
 
-1. Download `local-review-<version>.vsix` from [Releases](https://github.com/stefanpantic/local-review-vscode-extension/releases), or build it with `pnpm run package` (see [CONTRIBUTING](CONTRIBUTING.md)).
-2. In VS Code: **Extensions** view, `⋯` menu, **Install from VSIX…**. Or run `code --install-extension local-review-<version>.vsix`.
+Prefer a packaged `.vsix`? Download `local-review-<version>.vsix` from [Releases](https://github.com/stefanpantic/local-review-vscode-extension/releases), or build it with `pnpm run package` (see [CONTRIBUTING](CONTRIBUTING.md)). Then in VS Code open the **Extensions** view, use the `⋯` menu, and pick **Install from VSIX…**, or run `code --install-extension local-review-<version>.vsix`.
 
 ## Keybindings
 
@@ -96,6 +95,10 @@ Not on the Marketplace yet. Install the packaged `.vsix`:
 ## Contributing
 
 Development setup, the build and watch loop, and the release process are in [CONTRIBUTING.md](CONTRIBUTING.md). Bug reports and feature requests are welcome via the [issue templates](https://github.com/stefanpantic/local-review-vscode-extension/issues/new/choose).
+
+## Credits
+
+Icon by [edt.im](https://edt.im).
 
 ## License
 
