@@ -414,7 +414,7 @@
     "@types/react-dom": "^18.3.0",
     "@types/vscode": "^1.90.0",
     "@vscode/vsce": "^2.31.0",
-    "esbuild": "^0.23.0",
+    "esbuild": "^0.28.1",
     "eslint": "^10.6.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.1.1",
@@ -425,7 +425,7 @@
     "react-markdown": "^10.1.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
-    "tsx": "^4.16.0",
+    "tsx": "^4.23.0",
     "typescript": "^5.5.4",
     "typescript-eslint": "^8.62.1"
   }
