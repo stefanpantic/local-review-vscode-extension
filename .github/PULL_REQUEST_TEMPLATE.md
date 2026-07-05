@@ -1,4 +1,4 @@
-<!-- Keep the title a Conventional Commit, e.g. "feat: add …" or "fix: …" -->
+<!-- Keep the title a Conventional Commit, e.g. "feat:" or "fix:" -->
 
 ## What
 
