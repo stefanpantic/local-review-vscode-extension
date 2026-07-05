@@ -37,3 +37,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload ${{ steps.release.outputs.tag_name }} *.vsix
+      # Publish that same packaged extension to the VS Code Marketplace.
+      - if: ${{ steps.release.outputs.release_created }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: pnpm exec vsce publish --packagePath $(ls *.vsix)
