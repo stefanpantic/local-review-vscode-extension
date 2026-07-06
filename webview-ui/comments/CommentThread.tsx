@@ -99,11 +99,18 @@ export function CommentThreadView({
   );
 
   if (!expanded) {
-    return <div className={`lr-thread lr-thread-collapsed${thread.resolved ? ' lr-thread-resolved' : ''}`}>{head}</div>;
+    return (
+      <div
+        className={`lr-thread lr-thread-collapsed${thread.resolved ? ' lr-thread-resolved' : ''}`}
+        data-lr-thread={thread.id}
+      >
+        {head}
+      </div>
+    );
   }
 
   return (
-    <div className={`lr-thread${thread.resolved ? ' lr-thread-resolved' : ''}`}>
+    <div className={`lr-thread${thread.resolved ? ' lr-thread-resolved' : ''}`} data-lr-thread={thread.id}>
       {head}
 
       <div className="lr-comments">

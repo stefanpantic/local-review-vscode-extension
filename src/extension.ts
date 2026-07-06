@@ -193,9 +193,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       ReviewPanel.show(context.extensionUri, controller);
     }),
     vscode.commands.registerCommand('agenticReview.refresh', () => controller.refresh()),
-    vscode.commands.registerCommand('agenticReview.revealFile', (filePath?: string) => {
+    vscode.commands.registerCommand('agenticReview.revealFile', (filePath?: string, threadId?: string) => {
       ReviewPanel.show(context.extensionUri, controller); // create or reveal (focuses the tab)
-      if (typeof filePath === 'string') controller.reveal(filePath);
+      if (typeof filePath === 'string') controller.reveal(filePath, threadId);
     }),
     vscode.commands.registerCommand('agenticReview.selectSource', () => pickSource(controller)),
     vscode.commands.registerCommand('agenticReview.selectRepo', () => pickRepo(controller)),

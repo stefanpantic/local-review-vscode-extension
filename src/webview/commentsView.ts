@@ -16,6 +16,14 @@ function statusTag(t: CommentThread): string {
   return t.status === 'outdated' ? 'outdated' : t.status === 'moved' ? 'moved' : '';
 }
 
+/** Sort keys mirroring the displayed line label (outdated threads fall back to their anchor line). */
+function startLine(t: CommentThread): number {
+  return t.resolvedLine ?? t.anchor.lineNumber;
+}
+function endLine(t: CommentThread): number {
+  return t.resolvedEndLine ?? t.anchor.endLineNumber ?? startLine(t);
+}
+
 /**
  * Sidebar "Comments" panel: every thread in the active review, grouped by file, re-anchored.
  * Clicking a thread reveals its file in the panel. Refreshes with the controller (mutations + diff loads).
@@ -51,7 +59,7 @@ export class CommentsView implements vscode.TreeDataProvider<CommentsNode> {
       `**${lineLabel}**${tag ? ` · _${tag}_` : ''}\n\n${t.comments.map((c) => c.body).join('\n\n---\n\n')}`,
     );
     item.iconPath = new vscode.ThemeIcon(t.resolved ? 'check' : t.status === 'outdated' ? 'warning' : 'comment');
-    item.command = { command: 'agenticReview.revealFile', title: 'Reveal', arguments: [t.anchor.filePath] };
+    item.command = { command: 'agenticReview.revealFile', title: 'Reveal', arguments: [t.anchor.filePath, t.id] };
     return item;
   }
 
@@ -63,6 +71,13 @@ export class CommentsView implements vscode.TreeDataProvider<CommentsNode> {
       if (arr) arr.push(t);
       else byFile.set(t.anchor.filePath, [t]);
     }
-    return [...byFile.keys()].sort().map((filePath) => ({ kind: 'file', filePath, threads: byFile.get(filePath)! }));
+    return [...byFile.keys()].sort().map((filePath) => ({
+      kind: 'file',
+      filePath,
+      threads: byFile
+        .get(filePath)!
+        .slice()
+        .sort((a, b) => startLine(a) - startLine(b) || endLine(a) - endLine(b)),
+    }));
   }
 }

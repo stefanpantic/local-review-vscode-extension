@@ -6,9 +6,27 @@ import type { ReviewStatePayload } from '../src/protocol/messages';
 import type { ViewMode } from '../src/model/ReviewDiff';
 import { DiffView } from './render/DiffView';
 
-function revealFile(filePath: string): void {
-  const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(filePath) : filePath.replace(/"/g, '\\"');
-  const el = document.querySelector(`[data-lr-path="${escaped}"]`);
+function cssEscape(v: string): string {
+  return typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(v) : v.replace(/"/g, '\\"');
+}
+
+/**
+ * Scroll to a specific comment thread when a threadId is given, else to the file section. If the target
+ * thread isn't in the DOM (its "Outdated comments" section is collapsed), open that section, then scroll.
+ */
+function revealFile(filePath: string, threadId?: string): void {
+  const find = (): Element | null =>
+    (threadId ? document.querySelector(`[data-lr-thread="${cssEscape(threadId)}"]`) : null) ??
+    document.querySelector(`[data-lr-path="${cssEscape(filePath)}"]`);
+  const el = find();
+  if (!el && threadId) {
+    const head = document.querySelector<HTMLElement>('.lr-outdated-section.lr-collapsed .lr-outdated-head');
+    if (head) {
+      head.click(); // expand the outdated section, then scroll once it renders
+      requestAnimationFrame(() => find()?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      return;
+    }
+  }
   el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -62,7 +80,7 @@ function App() {
     const offState = on('stateChanged', (s) => setState(s));
     const offViewed = on('viewedUpdated', ({ viewed }) => setState((prev) => (prev ? { ...prev, viewed } : prev)));
     const offThreads = on('threadsUpdated', ({ threads }) => setState((prev) => (prev ? { ...prev, threads } : prev)));
-    const offReveal = on('revealFile', ({ filePath }) => revealFile(filePath));
+    const offReveal = on('revealFile', ({ filePath, threadId }) => revealFile(filePath, threadId));
     const offNav = on('navigate', ({ target, dir }) => navigateTo(target, dir));
     return () => {
       cancelled = true;

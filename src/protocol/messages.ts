@@ -62,7 +62,7 @@ export interface Events {
   stateChanged: ReviewStatePayload; // after a recompute (refresh / source / repo switch)
   viewedUpdated: { viewed: Record<string, boolean> }; // lightweight: only viewed flags changed
   threadsUpdated: { threads: CommentThread[] }; // lightweight: after a comment mutation (diff not re-sent)
-  revealFile: { filePath: string }; // scroll the panel to a file
+  revealFile: { filePath: string; threadId?: string }; // scroll the panel to a file, or to a specific comment thread
   navigate: { target: 'file' | 'comment'; dir: 'next' | 'prev' }; // scroll to next/prev change or comment
   showError: { message: string };
 }
