@@ -14,8 +14,10 @@ export function SummaryBar({
   branch,
   viewMode,
   whitespace,
+  wrap,
   onSetViewMode,
   onSetWhitespace,
+  onSetWrap,
 }: {
   diff: ReviewDiff;
   source: DiffSource;
@@ -23,8 +25,10 @@ export function SummaryBar({
   branch?: string | null;
   viewMode: ViewMode;
   whitespace: boolean;
+  wrap: boolean;
   onSetViewMode: (mode: ViewMode) => void;
   onSetWhitespace: (hide: boolean) => void;
+  onSetWrap: (wrap: boolean) => void;
 }) {
   const additions = diff.files.reduce((n, f) => n + f.additions, 0);
   const deletions = diff.files.reduce((n, f) => n + f.deletions, 0);
@@ -65,6 +69,9 @@ export function SummaryBar({
         <label className="lr-ws" title="Ignore whitespace-only changes (git diff -w)">
           <input type="checkbox" checked={whitespace} onChange={(e) => onSetWhitespace(e.target.checked)} /> Hide
           whitespace
+        </label>
+        <label className="lr-ws" title="Wrap long lines instead of scrolling horizontally">
+          <input type="checkbox" checked={wrap} onChange={(e) => onSetWrap(e.target.checked)} /> Wrap lines
         </label>
       </span>
     </div>

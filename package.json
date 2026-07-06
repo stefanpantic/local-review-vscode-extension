@@ -148,6 +148,11 @@
         "category": "Agentic Review"
       },
       {
+        "command": "agenticReview.toggleWrap",
+        "title": "Toggle Wrap Lines",
+        "category": "Agentic Review"
+      },
+      {
         "command": "agenticReview.newReview",
         "title": "New Review",
         "category": "Agentic Review",
@@ -371,6 +376,11 @@
           "type": "boolean",
           "default": false,
           "description": "Hide whitespace-only changes by default (git diff -w)."
+        },
+        "agenticReview.defaultWrap": {
+          "type": "boolean",
+          "default": false,
+          "description": "Wrap long lines by default instead of scrolling horizontally."
         },
         "agenticReview.log": {
           "type": "boolean",

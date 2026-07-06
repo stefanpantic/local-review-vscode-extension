@@ -66,7 +66,7 @@ export function DiffView({
 }: {
   state: ReviewStatePayload | null;
   setViewed: (filePath: string, viewed: boolean) => void;
-  setViewPref: (patch: { viewMode?: ViewMode; whitespace?: boolean }) => void;
+  setViewPref: (patch: { viewMode?: ViewMode; whitespace?: boolean; wrap?: boolean }) => void;
 }) {
   const [override, setOverride] = useState<OverrideMap>({});
   const [hl, setHl] = useState<HighlighterCore | null>(null);
@@ -368,7 +368,7 @@ export function DiffView({
   };
 
   return (
-    <div className="lr-diff">
+    <div className={`lr-diff${state.wrap ? ' lr-wrap' : ''}`}>
       <SummaryBar
         diff={d}
         source={state.source}
@@ -376,8 +376,10 @@ export function DiffView({
         branch={state.repos.find((r) => r.repoRoot === state.repoRoot)?.branch ?? null}
         viewMode={state.viewMode}
         whitespace={state.whitespace}
+        wrap={state.wrap}
         onSetViewMode={(m) => setViewPref({ viewMode: m })}
         onSetWhitespace={(w) => setViewPref({ whitespace: w })}
+        onSetWrap={(w) => setViewPref({ wrap: w })}
       />
       {error && (
         <div className="lr-error-banner">
@@ -424,31 +426,33 @@ export function DiffView({
             )}
             {!collapsed && (
               <div className="lr-file-body">
-                {file.hunks.map((hunk, hi) =>
-                  state.viewMode === 'split' ? (
-                    <SplitHunk
-                      key={hi}
-                      hunk={hunk}
-                      tokens={tokens}
-                      add={add}
-                      below={below}
-                      commented={commentedRows}
-                      changes={changesByRow}
-                      expand={hunkExpand(file, hi, hunk)}
-                    />
-                  ) : (
-                    <UnifiedHunk
-                      key={hi}
-                      hunk={hunk}
-                      tokens={tokens}
-                      add={add}
-                      below={below}
-                      commented={commentedRows}
-                      changes={changesByRow}
-                      expand={hunkExpand(file, hi, hunk)}
-                    />
-                  ),
-                )}
+                <div className="lr-hscroll">
+                  {file.hunks.map((hunk, hi) =>
+                    state.viewMode === 'split' ? (
+                      <SplitHunk
+                        key={hi}
+                        hunk={hunk}
+                        tokens={tokens}
+                        add={add}
+                        below={below}
+                        commented={commentedRows}
+                        changes={changesByRow}
+                        expand={hunkExpand(file, hi, hunk)}
+                      />
+                    ) : (
+                      <UnifiedHunk
+                        key={hi}
+                        hunk={hunk}
+                        tokens={tokens}
+                        add={add}
+                        below={below}
+                        commented={commentedRows}
+                        changes={changesByRow}
+                        expand={hunkExpand(file, hi, hunk)}
+                      />
+                    ),
+                  )}
+                </div>
               </div>
             )}
           </section>
@@ -476,7 +480,9 @@ export function DiffView({
                   <div className="lr-outdated-path">{t.anchor.filePath}</div>
                   {hunk ? (
                     <div className="lr-outdated-diff">
-                      <UnifiedHunk hunk={hunk} tokens={NO_TOKENS} />
+                      <div className="lr-hscroll">
+                        <UnifiedHunk hunk={hunk} tokens={NO_TOKENS} />
+                      </div>
                     </div>
                   ) : (
                     t.anchor.originalDiffHunk && <pre className="lr-outdated-hunk">{t.anchor.originalDiffHunk}</pre>

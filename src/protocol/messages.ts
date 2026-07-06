@@ -21,6 +21,7 @@ export interface ReviewStatePayload {
   viewed: Record<string, boolean>; // filePath -> viewed, for the current repo+source
   viewMode: ViewMode;
   whitespace: boolean; // hide whitespace
+  wrap: boolean; // wrap long lines instead of scrolling horizontally
   threads: CommentThread[]; // active review, re-anchored against the current diff
   config: { largeFileThreshold: number };
 }
@@ -34,7 +35,7 @@ export interface FileTexts {
 export interface Requests {
   getState: { payload: Record<string, never>; response: ReviewStatePayload };
   setViewed: { payload: { filePath: string; viewed: boolean }; response: { ok: true } };
-  setViewPref: { payload: { viewMode?: ViewMode; whitespace?: boolean }; response: { ok: true } };
+  setViewPref: { payload: { viewMode?: ViewMode; whitespace?: boolean; wrap?: boolean }; response: { ok: true } };
   // Host already knows the current repo/source/baseRef; the webview just names the files.
   getFileTexts: { payload: { files: { path: string; oldPath?: string }[] }; response: FileTexts };
   // Comment mutations (active review). The host authors the durable Anchor from its own diff.
