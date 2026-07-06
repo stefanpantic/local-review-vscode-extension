@@ -52,6 +52,7 @@ function App() {
             viewed: {},
             viewMode: 'unified',
             whitespace: false,
+            wrap: false,
             threads: [],
             config: { largeFileThreshold: 1000 },
           });
@@ -76,7 +77,7 @@ function App() {
   const setViewed = (filePath: string, viewed: boolean): void => {
     void request('setViewed', { filePath, viewed });
   };
-  const setViewPref = (patch: { viewMode?: ViewMode; whitespace?: boolean }): void => {
+  const setViewPref = (patch: { viewMode?: ViewMode; whitespace?: boolean; wrap?: boolean }): void => {
     void request('setViewPref', patch);
   };
 

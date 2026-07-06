@@ -55,6 +55,9 @@ export class ReviewController {
   get whitespace(): boolean {
     return this.state.getPref().whitespace;
   }
+  get wrap(): boolean {
+    return this.state.getPref().wrap;
+  }
   files(): FileDiff[] {
     return this.current.state === 'ok' && this.current.diff ? this.current.diff.files : [];
   }
@@ -78,6 +81,7 @@ export class ReviewController {
       viewed: pref.repoRoot ? this.state.viewedFor(pref.repoRoot, pref.source, paths) : {},
       viewMode: pref.viewMode,
       whitespace: pref.whitespace,
+      wrap: pref.wrap,
       threads: this.threads(),
       config: { largeFileThreshold },
     };
@@ -269,7 +273,7 @@ export class ReviewController {
     await this.refresh();
   }
 
-  async setViewPref(patch: { viewMode?: ViewMode; whitespace?: boolean }): Promise<void> {
+  async setViewPref(patch: { viewMode?: ViewMode; whitespace?: boolean; wrap?: boolean }): Promise<void> {
     const before = this.state.getPref();
     await this.state.setPref(patch);
     if (patch.whitespace !== undefined && patch.whitespace !== before.whitespace) {

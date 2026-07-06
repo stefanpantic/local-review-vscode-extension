@@ -101,7 +101,6 @@ body {
   color: var(--vscode-descriptionForeground);
   background: var(--vscode-diffEditor-unchangedRegionBackground, rgba(128, 128, 128, 0.08));
   white-space: pre;
-  overflow-x: auto;
 }
 
 /* "Expand context" bar (reveal/collapse unchanged lines above/below a hunk). */
@@ -165,7 +164,6 @@ body {
 .lr-code {
   flex: 1 1 auto;
   padding-right: 12px;
-  overflow-x: auto;
 }
 
 .lr-empty {
@@ -214,8 +212,15 @@ body {
 }
 /* Body wrapper clips hunks to the card's rounded bottom (sticky header is its sibling, not inside it). */
 .lr-file-body {
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   border-radius: 0 0 var(--lr-radius) var(--lr-radius);
+}
+/* One shared horizontal-scroll track per file: sized to the widest line so every row stretches to the
+   same width (tints + comment wash span the full scrolled width) and the whole diff scrolls as one unit. */
+.lr-hscroll {
+  width: max-content;
+  min-width: 100%;
 }
 .lr-file.lr-collapsed .lr-file-header {
   border-bottom: none;
@@ -300,7 +305,7 @@ body {
 }
 .lr-scell {
   flex: 1 1 50%;
-  min-width: 0;
+  min-width: max-content;
   display: flex;
   align-items: baseline;
   white-space: pre;
@@ -316,6 +321,25 @@ body {
 }
 .lr-scell-empty {
   background: var(--vscode-diffEditor-unchangedRegionBackground, rgba(128, 128, 128, 0.05));
+}
+
+/* Wrap mode: long lines wrap instead of scrolling; the shared track collapses so there's no h-scroll. */
+.lr-wrap .lr-hscroll {
+  width: auto;
+  min-width: 0;
+}
+.lr-wrap .lr-row,
+.lr-wrap .lr-scell,
+.lr-wrap .lr-code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.lr-wrap .lr-row,
+.lr-wrap .lr-scell {
+  align-items: flex-start;
+}
+.lr-wrap .lr-scell {
+  min-width: 0;
 }
 
 /* Syntax token color is applied inline from the active theme (see highlight.ts). */
@@ -778,7 +802,8 @@ body {
   margin-bottom: 8px;
   border: 1px solid var(--lr-border);
   border-radius: 6px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 /* Fallback when a stored hunk can't be parsed. */
 .lr-outdated-hunk {

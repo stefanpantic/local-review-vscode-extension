@@ -205,6 +205,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('agenticReview.toggleWhitespace', () =>
       controller.setViewPref({ whitespace: !controller.whitespace }),
     ),
+    vscode.commands.registerCommand('agenticReview.toggleWrap', () =>
+      controller.setViewPref({ wrap: !controller.wrap }),
+    ),
     vscode.commands.registerCommand('agenticReview.setupMcp', () => setupMcp()),
     vscode.commands.registerCommand('agenticReview.startMcp', () => startMcp()),
     vscode.commands.registerCommand('agenticReview.stopMcp', () => stopMcp()),
