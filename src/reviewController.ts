@@ -293,8 +293,8 @@ export class ReviewController {
     this.panelPost?.('viewedUpdated', { viewed: this.state.viewedFor(pref.repoRoot, pref.source, paths) });
   }
 
-  reveal(filePath: string): void {
-    this.panelPost?.('revealFile', { filePath });
+  reveal(filePath: string, threadId?: string): void {
+    this.panelPost?.('revealFile', { filePath, threadId });
   }
 
   /** Ask the panel to scroll to the next/previous changed file or comment. */
