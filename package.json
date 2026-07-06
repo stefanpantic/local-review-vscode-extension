@@ -2,7 +2,7 @@
   "name": "agentic-review",
   "displayName": "Agentic Review",
   "description": "PR-style review of your local git diff, exported for a coding agent.",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "publisher": "StefanPantic",
   "icon": "media/icon.png",
   "private": true,

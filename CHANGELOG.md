@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.6](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.0.5...agentic-review-v0.0.6) (2026-07-06)
+
+
+### Bug Fixes
+
+* sort sidebar comments by line and focus outdated comments on click ([#24](https://github.com/stefanpantic/local-review-vscode-extension/issues/24)) ([9f18099](https://github.com/stefanpantic/local-review-vscode-extension/commit/9f1809968c7cd4da1393638da4067df24d0d249f))
+
 ## [0.0.5](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.0.4...agentic-review-v0.0.5) (2026-07-06)
 
 
