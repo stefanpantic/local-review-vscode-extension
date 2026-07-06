@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.0.5](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.0.4...agentic-review-v0.0.5) (2026-07-06)
+
+
+### Features
+
+* wrap-lines toggle and whole-diff horizontal scrolling ([#21](https://github.com/stefanpantic/local-review-vscode-extension/issues/21)) ([a2dd31b](https://github.com/stefanpantic/local-review-vscode-extension/commit/a2dd31b5e4aa9b31e4edc0d60964fac4cdfd637a))
+
+
+### Bug Fixes
+
+* update hero image ([#23](https://github.com/stefanpantic/local-review-vscode-extension/issues/23)) ([220ff09](https://github.com/stefanpantic/local-review-vscode-extension/commit/220ff093bc8cbd6d63321ffba13eb6e51fd9e6f6))
+
 ## [0.0.4](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.0.3...agentic-review-v0.0.4) (2026-07-05)
 
 
