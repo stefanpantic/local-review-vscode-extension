@@ -39,6 +39,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const reviewsView = new ReviewsView(controller);
   const reviewsTree = vscode.window.createTreeView('agenticReview.reviews', { treeDataProvider: reviewsView });
 
+  // Badge the activity-bar icon with the number of changed files under review (like the SCM count).
+  const updateBadge = (): void => {
+    const n = controller.files().length;
+    tree.badge = n > 0 ? { value: n, tooltip: `${n} changed file${n === 1 ? '' : 's'} in review` } : undefined;
+  };
+
   // --- MCP server lifecycle (binds to 127.0.0.1 only). Runs on launch when agenticReview.mcp.autoStart,
   //     or on demand via Start/Stop; `mcpDesired` is the session's running intent. ---
   let mcpHandle: McpServerHandle | undefined;
@@ -167,6 +173,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     tree,
     commentsTree,
     reviewsTree,
+    controller.onDidChange(updateBadge),
     vscode.commands.registerCommand('agenticReview.newReview', () => controller.newReview()),
     vscode.commands.registerCommand('agenticReview.switchReview', (r) => {
       const rev = asReview(r);
