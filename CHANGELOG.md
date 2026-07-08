@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.7](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.0.6...agentic-review-v0.0.7) (2026-07-08)
+
+
+### Features
+
+* badge the activity-bar icon with the changed-file count ([#26](https://github.com/stefanpantic/local-review-vscode-extension/issues/26)) ([f0c2b27](https://github.com/stefanpantic/local-review-vscode-extension/commit/f0c2b27a30e70a95b848f93b96d6dde05ee72e2b))
+
 ## [0.0.6](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.0.5...agentic-review-v0.0.6) (2026-07-06)
 
 
