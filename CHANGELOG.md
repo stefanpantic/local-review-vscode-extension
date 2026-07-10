@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.8](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.0.7...agentic-review-v0.0.8) (2026-07-10)
+
+
+### Features
+
+* badge only unviewed files so the count tracks review progress ([#28](https://github.com/stefanpantic/local-review-vscode-extension/issues/28)) ([6fda14d](https://github.com/stefanpantic/local-review-vscode-extension/commit/6fda14d350baf6b6545dd4ae6e98734d5680eb99))
+
 ## [0.0.7](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.0.6...agentic-review-v0.0.7) (2026-07-08)
 
 
