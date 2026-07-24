@@ -5,7 +5,12 @@ const SOURCE_LABELS: Record<DiffSource, string> = {
   unstaged: 'Unstaged changes',
   staged: 'Staged changes',
   'vs-base': 'Compared with',
+  pr: 'Pull request',
 };
+
+// Branch names can be long; clip them so the summary bar stays on one line and the controls never warp.
+const MAX_REF = 22;
+const truncateRef = (s: string): string => (s.length > MAX_REF ? `${s.slice(0, MAX_REF)}...` : s);
 
 export function SummaryBar({
   diff,
@@ -32,14 +37,28 @@ export function SummaryBar({
 }) {
   const additions = diff.files.reduce((n, f) => n + f.additions, 0);
   const deletions = diff.files.reduce((n, f) => n + f.deletions, 0);
-  const label = source === 'vs-base' ? `Compared with ${baseRef ?? 'base branch'}` : SOURCE_LABELS[source];
+  const pr = source === 'pr' ? diff.pr : undefined;
+  const label =
+    source === 'vs-base'
+      ? `Compared with ${baseRef ?? 'base branch'}`
+      : pr
+        ? `Pull request #${pr.number}`
+        : SOURCE_LABELS[source];
   const n = diff.files.length;
   return (
     <div className="lr-summary">
-      {branch && (
-        <span className="lr-branch" title="Current branch">
-          {branch}
+      {pr ? (
+        <span className="lr-branch lr-pr-pill" title={`${pr.headRef ?? 'head'} into ${pr.baseRef ?? 'base'}`}>
+          {truncateRef(pr.headRef ?? 'head')}
+          <span className="lr-pr-arrow"> → </span>
+          {truncateRef(pr.baseRef ?? 'base')}
         </span>
+      ) : (
+        branch && (
+          <span className="lr-branch" title="Current branch">
+            {branch}
+          </span>
+        )
       )}
       <span className="lr-summary-files">
         {n} file{n === 1 ? '' : 's'} changed

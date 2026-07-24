@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import * as vscode from 'vscode';
-import type { DiffSource, RepoInfo, DiffResult } from '../model/ReviewDiff';
+import type { DiffSource, PrRef, RepoInfo, DiffResult } from '../model/ReviewDiff';
 import { diffArgs } from './diffSources';
 import { normalize, synthesizeUntracked } from './normalize';
 import { parseBranches } from './parse';
@@ -72,6 +72,16 @@ export async function getUserName(repoRoot: string): Promise<string | undefined>
   }
 }
 
+/** The fetch URL of a remote (`origin` when unspecified), for detecting the review host. Undefined when absent. */
+export async function getRemoteUrl(repoRoot: string, remote?: string): Promise<string | undefined> {
+  try {
+    const url = (await git(repoRoot, ['remote', 'get-url', remote ?? 'origin'])).trim();
+    return url || undefined;
+  } catch {
+    return undefined; // no such remote
+  }
+}
+
 /** Local branch names, for the vs-base picker. */
 export async function listBranches(repoRoot: string): Promise<string[]> {
   try {
@@ -100,9 +110,16 @@ export async function getDiff(req: {
   baseRef?: string;
   includeUntracked?: boolean;
   whitespace?: boolean;
+  pr?: PrRef;
 }): Promise<DiffResult> {
-  const { repoRoot, source, baseRef, includeUntracked, whitespace } = req;
+  const { repoRoot, source, baseRef, includeUntracked, whitespace, pr } = req;
   try {
+    if (source === 'pr') {
+      if (!pr) return { state: 'error', repoRoot, message: 'No pull request loaded.' };
+      const raw = await git(repoRoot, diffArgs('pr', { unbornHead: false, baseRef, whitespace, pr }));
+      const diff = normalize(raw, { repoRoot, source, headSha: pr.headSha, baseRef: pr.baseRef, pr });
+      return diff.files.length === 0 ? { state: 'no-changes', repoRoot } : { state: 'ok', repoRoot, diff };
+    }
     const unbornHead = await isUnbornHead(repoRoot);
     const raw = await git(repoRoot, diffArgs(source, { unbornHead, baseRef, whitespace }));
     const headSha = unbornHead ? null : (await git(repoRoot, ['rev-parse', 'HEAD'])).trim();
@@ -122,12 +139,68 @@ export async function getDiff(req: {
   }
 }
 
+// The subset of the vscode.git extension API we use: find a repository and fetch through it (so VS Code
+// supplies credentials for private remotes). Untyped export, narrowed here.
+interface GitRepositoryLike {
+  readonly rootUri: vscode.Uri;
+  fetch(options?: { remote?: string; ref?: string; depth?: number; prune?: boolean }): Promise<void>;
+}
+interface GitApiLike {
+  readonly repositories: GitRepositoryLike[];
+}
+
+async function vscodeGitRepo(repoRoot: string): Promise<GitRepositoryLike | undefined> {
+  const ext = vscode.extensions.getExtension('vscode.git');
+  if (!ext) return undefined;
+  await ext.activate();
+  const api = ext.exports?.getAPI?.(1) as GitApiLike | undefined;
+  return api?.repositories.find((r) => r.rootUri.fsPath === repoRoot);
+}
+
+/**
+ * Fetch a PR's head + base commit into the local object store, then pin the head under a hidden ref,
+ * without touching the working tree or any branch. The network fetch goes through the vscode.git API so
+ * VS Code supplies credentials for private remotes; the pin is a local (no-network) update-ref. The CLI
+ * fetch is a fallback only when the git extension is unavailable. Returns the head sha + pinned ref.
+ */
+export async function fetchPr(req: {
+  repoRoot: string;
+  remote: string;
+  number: number;
+  baseSha: string;
+  headSha: string;
+  baseRef?: string; // base branch name — fetched so the base sha (its ancestor) is present for the diff
+  headRefspec?: string; // the remote ref that yields the head, e.g. `pull/<n>/head` (GitHub default)
+}): Promise<{ headSha: string; headRef: string }> {
+  const headRef = `refs/agentic-review/pr/${req.number}`;
+  const headSpec = req.headRefspec ?? `pull/${req.number}/head`;
+  // Fetching the base by branch name is reliable; a bare-sha fetch is the fallback (servers often refuse it).
+  const baseSpecs = [req.baseRef, req.baseSha].filter((s): s is string => !!s);
+  const repo = await vscodeGitRepo(req.repoRoot);
+  const fetchOne = async (ref: string): Promise<void> => {
+    if (repo) await repo.fetch({ remote: req.remote, ref });
+    else await git(req.repoRoot, ['fetch', '--no-tags', req.remote, ref]);
+  };
+  await fetchOne(headSpec);
+  for (const spec of baseSpecs) {
+    try {
+      await fetchOne(spec);
+      break; // one success is enough to bring the base commit into the object store
+    } catch {
+      // try the next form; the base may also already be present locally
+    }
+  }
+  // Pin the fetched head so it survives gc and gives a stable ref for diffing (local, no network).
+  await git(req.repoRoot, ['update-ref', headRef, req.headSha]);
+  return { headSha: req.headSha, headRef };
+}
+
 // --- Whole-file text (for syntax highlighting: tokenize the file, then clip to the diff) ---
 
 type SideSpec = { worktree: true } | { rev: string }; // rev '' means the index (`git show :path`)
 
 /** The (old, new) content sources for a diff source. */
-function sidesFor(source: DiffSource, baseRef?: string): { old: SideSpec; new: SideSpec } {
+function sidesFor(source: DiffSource, baseRef?: string, pr?: PrRef): { old: SideSpec; new: SideSpec } {
   switch (source) {
     case 'unstaged':
       return { old: { rev: '' }, new: { worktree: true } }; // index → working tree
@@ -135,6 +208,8 @@ function sidesFor(source: DiffSource, baseRef?: string): { old: SideSpec; new: S
       return { old: { rev: 'HEAD' }, new: { rev: '' } }; // HEAD → index
     case 'vs-base':
       return { old: { rev: baseRef ?? 'HEAD' }, new: { rev: 'HEAD' } };
+    case 'pr':
+      return { old: { rev: pr?.baseSha ?? 'HEAD' }, new: { rev: pr?.headSha ?? 'HEAD' } };
     case 'worktree-vs-head':
     default:
       return { old: { rev: 'HEAD' }, new: { worktree: true } };
@@ -155,9 +230,10 @@ export async function getFileTexts(req: {
   repoRoot: string;
   source: DiffSource;
   baseRef?: string;
+  pr?: PrRef;
   files: { path: string; oldPath?: string }[];
 }): Promise<Record<string, { old: string; new: string }>> {
-  const sides = sidesFor(req.source, req.baseRef);
+  const sides = sidesFor(req.source, req.baseRef, req.pr);
   const out: Record<string, { old: string; new: string }> = {};
   await Promise.all(
     req.files.map(async (f) => {

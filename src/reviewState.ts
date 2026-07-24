@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { DiffSource, ViewMode } from './model/ReviewDiff';
+import type { DiffSource, PrRef, ViewMode } from './model/ReviewDiff';
 
 export interface Pref {
   repoRoot?: string;
@@ -8,6 +8,7 @@ export interface Pref {
   viewMode: ViewMode;
   whitespace: boolean; // true = hide whitespace (git diff -w)
   wrap: boolean; // true = wrap long lines instead of scrolling horizontally
+  pr?: PrRef; // the pull request under review; present (and restored on reload) when source === 'pr'
 }
 
 const PREF_KEY = 'agenticReview.pref';
@@ -44,15 +45,17 @@ export class ReviewState {
     return this.ctx.workspaceState.get<Record<string, boolean>>(VIEWED_KEY) ?? {};
   }
 
-  private key(repoRoot: string, source: DiffSource, filePath: string): string {
+  // `source` is a viewed-flag namespace, not strictly a DiffSource: PR reviews pass a per-request
+  // namespace (e.g. `pr#<n>`) so viewed state does not collide across different PRs or with local sources.
+  private key(repoRoot: string, source: string, filePath: string): string {
     return `${repoRoot}${SEP}${source}${SEP}${filePath}`;
   }
 
-  isViewed(repoRoot: string, source: DiffSource, filePath: string): boolean {
+  isViewed(repoRoot: string, source: string, filePath: string): boolean {
     return this.viewedMap()[this.key(repoRoot, source, filePath)] ?? false;
   }
 
-  async setViewed(repoRoot: string, source: DiffSource, filePath: string, viewed: boolean): Promise<void> {
+  async setViewed(repoRoot: string, source: string, filePath: string, viewed: boolean): Promise<void> {
     const map = this.viewedMap();
     const k = this.key(repoRoot, source, filePath);
     if (viewed) map[k] = true;
@@ -60,7 +63,7 @@ export class ReviewState {
     await this.ctx.workspaceState.update(VIEWED_KEY, map);
   }
 
-  viewedFor(repoRoot: string, source: DiffSource, filePaths: string[]): Record<string, boolean> {
+  viewedFor(repoRoot: string, source: string, filePaths: string[]): Record<string, boolean> {
     const out: Record<string, boolean> = {};
     for (const p of filePaths) out[p] = this.isViewed(repoRoot, source, p);
     return out;

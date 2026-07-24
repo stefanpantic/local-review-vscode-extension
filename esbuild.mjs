@@ -12,6 +12,10 @@ const host = {
   format: 'cjs',
   target: 'node18',
   external: ['vscode'],
+  // In the Node extension host `navigator` is a global getter that throws on access (a VS Code migration
+  // nudge). Some bundled deps probe `typeof navigator` for environment detection; fold it to undefined so
+  // that probe takes its normal Node path instead of throwing at module load.
+  define: { navigator: 'undefined' },
 };
 
 /** Webview UI bundle (browser). CSS imported from main.tsx is emitted to dist/webview.css. */

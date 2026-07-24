@@ -1,15 +1,19 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
-import { ReviewState } from './reviewState';
+import { ReviewState, type Pref } from './reviewState';
 import { ReviewStore } from './comments/ReviewStore';
 import { reanchor, reanchorOne, createAnchor, rangeText, type AnchorLocator } from './comments/anchoring';
-import { getRepositories, getDiff, getFileTexts, listBranches, getUserName } from './git/git';
+import { getRepositories, getDiff, getFileTexts, listBranches, getUserName, fetchPr, getRemoteUrl } from './git/git';
 import { orderByTree } from './fileTree';
-import type { DiffResult, DiffSource, FileDiff, RepoInfo, ReviewDiff, ViewMode } from './model/ReviewDiff';
-import type { Comment, CommentThread, Review } from './model/Comment';
+import type { DiffResult, DiffSource, FileDiff, PrRef, RepoInfo, ReviewDiff, ViewMode } from './model/ReviewDiff';
+import { prBranchKey, prViewedNamespace } from './model/ReviewDiff';
+import type { Comment, CommentThread, RemoteRef, Review } from './model/Comment';
 import { UNKNOWN_AUTHOR } from './model/Comment';
+import type { RemoteRepoRef, ReviewProvider } from './review/provider';
+import { parseRemoteUrl } from './github/remote';
+import { resolveProvider } from './review/resolveProvider';
 import type { McpReviewApi } from './mcp/tools';
-import type { Events, EventType, ReviewStatePayload } from './protocol/messages';
+import type { Events, EventType, PrDisplay, ReviewStatePayload } from './protocol/messages';
 
 type PanelPost = <K extends EventType>(type: K, payload: Events[K]) => void;
 
@@ -21,6 +25,11 @@ export class ReviewController {
   private repos: RepoInfo[] = [];
   private branches: string[] = []; // local branches of the current repo (for archived-review detection)
   private current: DiffResult = { state: 'no-repo' };
+  private remoteCache?: {
+    repoRoot: string;
+    enterpriseUri?: string;
+    value: { repo: RemoteRepoRef; provider: ReviewProvider } | undefined;
+  };
   private userName: string | undefined; // git config user.name of the current repo — attributes your comments
   private userNameRepo: string | undefined; // repoRoot the cached userName belongs to
   private readonly _onDidChange = new vscode.EventEmitter<void>();
@@ -63,7 +72,7 @@ export class ReviewController {
   }
   isViewed(filePath: string): boolean {
     const p = this.state.getPref();
-    return p.repoRoot ? this.state.isViewed(p.repoRoot, p.source, filePath) : false;
+    return p.repoRoot ? this.state.isViewed(p.repoRoot, this.viewedNs(p), filePath) : false;
   }
 
   buildState(): ReviewStatePayload {
@@ -78,11 +87,12 @@ export class ReviewController {
       source: pref.source,
       baseRef: pref.baseRef,
       repos: this.repos,
-      viewed: pref.repoRoot ? this.state.viewedFor(pref.repoRoot, pref.source, paths) : {},
+      viewed: pref.repoRoot ? this.state.viewedFor(pref.repoRoot, this.viewedNs(pref), paths) : {},
       viewMode: pref.viewMode,
       whitespace: pref.whitespace,
       wrap: pref.wrap,
       threads: this.threads(),
+      pr: this.prDisplay(pref),
       config: { largeFileThreshold },
     };
   }
@@ -91,13 +101,41 @@ export class ReviewController {
     return this.current.state === 'ok' ? this.current.diff : undefined;
   }
 
-  /** The branch a review belongs to; `detached@<sha8>` when HEAD is detached. */
-  private branchKey(repoRoot: string): string {
+  /** Display metadata for the PR under review, from the current remote review's stored request. */
+  private prDisplay(pref: Pref): PrDisplay | undefined {
+    if (pref.source !== 'pr' || !pref.repoRoot) return undefined;
+    const review = this.reviewStore.current(pref.repoRoot, this.branchKey(pref.repoRoot));
+    if (review?.kind !== 'remote') return undefined;
+    const r = review.remote;
+    return { number: r.number, title: r.title, author: r.author, state: r.state, url: r.url, body: r.body };
+  }
+
+  /** The git branch a local review belongs to; `detached@<sha8>` when HEAD is detached. */
+  private localBranchKey(repoRoot: string): string {
     const repo = this.repos.find((r) => r.repoRoot === repoRoot);
     return repo?.branch ?? `detached@${(repo?.headSha ?? 'unknown').slice(0, 8)}`;
   }
+
+  /**
+   * The key the current review is stored under: a PR's synthetic `pr/<provider>/<number>` when a
+   * pull request is loaded, otherwise the git branch. This is the single hinge that routes threads,
+   * autosave, the current-review pointer, and MCP reads to the right review.
+   */
+  private branchKey(repoRoot: string): string {
+    const pref = this.state.getPref();
+    if (pref.source === 'pr' && pref.pr) return prBranchKey(pref.pr);
+    return this.localBranchKey(repoRoot);
+  }
+
   private headShaFor(repoRoot: string): string | null {
+    const pref = this.state.getPref();
+    if (pref.source === 'pr' && pref.pr) return pref.pr.headSha;
     return this.repos.find((r) => r.repoRoot === repoRoot)?.headSha ?? null;
+  }
+
+  /** The viewed-flag namespace for the current source: per-PR when a PR is loaded, else the source itself. */
+  private viewedNs(pref: Pref): string {
+    return pref.source === 'pr' && pref.pr ? prViewedNamespace(pref.pr) : pref.source;
   }
 
   /** The current review's threads, re-anchored against the currently loaded diff. */
@@ -147,12 +185,27 @@ export class ReviewController {
     this.afterThreadChange();
   }
 
-  /** Make a review the current one (for its own branch). */
+  /**
+   * Make a review the current one. Switching to a remote review enters PR mode (restoring its diff);
+   * switching to a local review while in PR mode returns to a local diff source. The choice persists,
+   * so the selection survives a reload.
+   */
   async switchReview(id: string): Promise<void> {
     const repoRoot = this.repoRootOrThrow();
     const review = this.reviewStore.get(repoRoot, id);
     if (!review) return;
     await this.reviewStore.setCurrent(repoRoot, review.branch, id);
+    if (review.kind === 'remote' && review.remote.number != null) {
+      await this.state.setPref({ source: 'pr', pr: prRefOf(review.remote, review.remote.number) });
+      await this.refresh();
+      return;
+    }
+    if (this.state.getPref().source === 'pr') {
+      // Leaving a PR for a local review: fall back to the default local diff source.
+      await this.state.setPref({ source: 'worktree-vs-head' });
+      await this.refresh();
+      return;
+    }
     this.afterThreadChange();
   }
 
@@ -205,6 +258,26 @@ export class ReviewController {
     return this.repos.find((r) => r.repoRoot === repoRoot)?.name ?? 'repo';
   }
 
+  /**
+   * The review provider + repo for the current repo's `origin`, or undefined when there is no supported
+   * review host (no origin, or a host that is neither github.com nor the configured GHE). Cached per
+   * repo + enterprise setting so repeated reads (context key, the Pull Requests view) do not re-shell git.
+   */
+  async currentRemote(): Promise<{ repo: RemoteRepoRef; provider: ReviewProvider } | undefined> {
+    const repoRoot = this.state.getPref().repoRoot;
+    if (!repoRoot) return undefined;
+    const enterpriseUri =
+      vscode.workspace.getConfiguration('agenticReview').get<string>('github.enterpriseUri') || undefined;
+    const cached = this.remoteCache;
+    if (cached && cached.repoRoot === repoRoot && cached.enterpriseUri === enterpriseUri) return cached.value;
+    const url = await getRemoteUrl(repoRoot);
+    const repo = url ? parseRemoteUrl(url) : undefined;
+    const provider = repo ? resolveProvider(repo, enterpriseUri) : undefined;
+    const value = repo && provider ? { repo, provider } : undefined;
+    this.remoteCache = { repoRoot, enterpriseUri, value };
+    return value;
+  }
+
   private refreshing = false;
   private refreshPending = false;
   /** Public entry: coalesces overlapping refreshes (watcher bursts, manual Refresh, config change). */
@@ -242,17 +315,24 @@ export class ReviewController {
         this.userName = await getUserName(repoRoot);
         this.userNameRepo = repoRoot;
       }
-      await this.reviewStore.migrateLegacy(repoRoot, this.branchKey(repoRoot), this.headShaFor(repoRoot));
-      const includeUntracked = vscode.workspace
-        .getConfiguration('agenticReview')
-        .get<boolean>('includeUntracked', true);
-      this.current = await getDiff({
-        repoRoot,
-        source: pref.source,
-        baseRef: pref.baseRef,
-        includeUntracked,
-        whitespace: pref.whitespace,
-      });
+      // Legacy active threads always migrate onto the real git branch, never a loaded PR.
+      const localHead = this.repos.find((r) => r.repoRoot === repoRoot)?.headSha ?? null;
+      await this.reviewStore.migrateLegacy(repoRoot, this.localBranchKey(repoRoot), localHead);
+      if (pref.source === 'pr') {
+        // Diff the already-fetched PR refs; the network fetch happens when the PR is loaded, not on every refresh.
+        this.current = await getDiff({ repoRoot, source: 'pr', pr: pref.pr, whitespace: pref.whitespace });
+      } else {
+        const includeUntracked = vscode.workspace
+          .getConfiguration('agenticReview')
+          .get<boolean>('includeUntracked', true);
+        this.current = await getDiff({
+          repoRoot,
+          source: pref.source,
+          baseRef: pref.baseRef,
+          includeUntracked,
+          whitespace: pref.whitespace,
+        });
+      }
       if (this.current.state === 'ok' && this.current.diff) {
         this.current.diff.files = orderByTree(this.current.diff.files);
       }
@@ -266,6 +346,65 @@ export class ReviewController {
   async setSource(source: DiffSource, baseRef?: string): Promise<void> {
     await this.state.setPref({ source, baseRef });
     await this.refresh();
+  }
+
+  /**
+   * Load a pull request for review: fetch its head + base into hidden refs (no working-tree change),
+   * enter PR mode, diff `base...head`, and import its review threads. Local-draft threads (those with no
+   * remote id) are preserved across a re-open/re-fetch; the imported (posted) set is replaced wholesale.
+   */
+  async openPullRequest(req: {
+    provider: ReviewProvider;
+    repo: RemoteRepoRef;
+    number: number;
+    remote: string;
+  }): Promise<void> {
+    const repoRoot = this.repoRootOrThrow();
+    const detail = await req.provider.getRequest(req.repo, req.number);
+    await fetchPr({
+      repoRoot,
+      remote: req.remote,
+      number: req.number,
+      baseSha: detail.baseSha,
+      headSha: detail.headSha,
+      baseRef: detail.baseRef,
+      headRefspec: req.provider.headRefspec(req.number),
+    });
+    const pr: PrRef = {
+      provider: req.provider.id,
+      number: req.number,
+      baseSha: detail.baseSha,
+      headSha: detail.headSha,
+      baseRef: detail.baseRef,
+      headRef: detail.headRef,
+    };
+    const remote: RemoteRef = {
+      provider: req.provider.id,
+      id: String(req.number),
+      number: req.number,
+      url: detail.url,
+      owner: req.repo.owner,
+      repo: req.repo.repo,
+      title: detail.title,
+      author: detail.author,
+      state: detail.state,
+      body: detail.body,
+      baseRef: detail.baseRef,
+      baseSha: detail.baseSha,
+      headRef: detail.headRef,
+      headSha: detail.headSha,
+    };
+    await this.state.setPref({ source: 'pr', pr });
+    const branch = prBranchKey(pr);
+    const review = await this.reviewStore.ensureCurrent(repoRoot, branch, detail.headSha, remote);
+    await this.refresh(); // computes the PR diff into this.current
+    const diff = this.currentDiff();
+    if (diff) {
+      const imported = await req.provider.getThreads(req.repo, req.number, diff);
+      const drafts = review.threads.filter((t) => !t.remoteThreadId); // keep local-only work
+      await this.reviewStore.updateThreads(repoRoot, review.id, [...imported, ...drafts]);
+      this.afterThreadChange();
+    }
   }
 
   async setRepo(repoRoot: string): Promise<void> {
@@ -287,10 +426,11 @@ export class ReviewController {
   async setViewed(filePath: string, viewed: boolean): Promise<void> {
     const pref = this.state.getPref();
     if (!pref.repoRoot) return;
-    await this.state.setViewed(pref.repoRoot, pref.source, filePath, viewed);
+    const ns = this.viewedNs(pref);
+    await this.state.setViewed(pref.repoRoot, ns, filePath, viewed);
     this._onDidChange.fire();
     const paths = this.files().map((f) => f.path);
-    this.panelPost?.('viewedUpdated', { viewed: this.state.viewedFor(pref.repoRoot, pref.source, paths) });
+    this.panelPost?.('viewedUpdated', { viewed: this.state.viewedFor(pref.repoRoot, ns, paths) });
   }
 
   reveal(filePath: string, threadId?: string): void {
@@ -426,6 +566,7 @@ export class ReviewController {
       repoRoot: pref.repoRoot,
       source: pref.source,
       baseRef: pref.baseRef,
+      pr: pref.pr,
       files,
     });
     return { texts };
@@ -463,4 +604,16 @@ export class ReviewController {
       resolve: (a) => this.resolveThread(a.threadId, a.resolved),
     };
   }
+}
+
+/** The diff-side PR coordinates carried by a remote review's metadata. */
+function prRefOf(remote: RemoteRef, number: number): PrRef {
+  return {
+    provider: remote.provider,
+    number,
+    baseSha: remote.baseSha,
+    headSha: remote.headSha,
+    baseRef: remote.baseRef,
+    headRef: remote.headRef,
+  };
 }

@@ -12,6 +12,16 @@ export interface Message {
 }
 
 /** Full snapshot the panel renders from (returned by getState and pushed on stateChanged). */
+/** Display metadata for the pull request under review; present only when source === 'pr'. */
+export interface PrDisplay {
+  number?: number;
+  title?: string;
+  author?: string; // login
+  state?: string; // 'open' | 'closed' | 'merged'
+  url?: string;
+  body?: string; // description (markdown); empty string when there is none
+}
+
 export interface ReviewStatePayload {
   result: DiffResult;
   repoRoot?: string;
@@ -23,6 +33,7 @@ export interface ReviewStatePayload {
   whitespace: boolean; // hide whitespace
   wrap: boolean; // wrap long lines instead of scrolling horizontally
   threads: CommentThread[]; // active review, re-anchored against the current diff
+  pr?: PrDisplay; // the PR being reviewed (source === 'pr')
   config: { largeFileThreshold: number };
 }
 

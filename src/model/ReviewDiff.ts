@@ -1,6 +1,6 @@
 // Core, dependency-free data model shared by the extension host and the webview.
 
-export type DiffSource = 'worktree-vs-head' | 'unstaged' | 'staged' | 'vs-base';
+export type DiffSource = 'worktree-vs-head' | 'unstaged' | 'staged' | 'vs-base' | 'pr';
 export type Side = 'old' | 'new';
 export type ViewMode = 'unified' | 'split';
 
@@ -41,6 +41,16 @@ export interface FileDiff {
   note?: string; // e.g. "Binary file", "Submodule abc→def", "mode 100644→100755"
 }
 
+/** Identifies a remote pull/merge request under review (provider-neutral). Present when source === 'pr'. */
+export interface PrRef {
+  provider: string; // e.g. 'github'
+  number: number;
+  baseSha: string; // diff base of the three-dot base...head
+  headSha: string; // the reviewed head commit
+  baseRef?: string; // base branch name (display)
+  headRef?: string; // local head ref name (display)
+}
+
 export interface ReviewDiff {
   repoRoot: string;
   source: DiffSource;
@@ -48,6 +58,20 @@ export interface ReviewDiff {
   headSha: string | null; // null on unborn HEAD
   files: FileDiff[];
   generatedAt: string; // ISO
+  pr?: PrRef; // present when source === 'pr'
+}
+
+/**
+ * The synthetic branch key a remote pull/merge-request review is stored under. Mirrors the
+ * `detached@<sha8>` convention for local reviews; the provider segment keeps two hosts from colliding.
+ */
+export function prBranchKey(pr: Pick<PrRef, 'provider' | 'number'>): string {
+  return `pr/${pr.provider}/${pr.number}`;
+}
+
+/** The viewed-flag namespace for a PR, so viewed state never collides across different PRs. */
+export function prViewedNamespace(pr: Pick<PrRef, 'number'>): string {
+  return `pr#${pr.number}`;
 }
 
 export interface RepoInfo {

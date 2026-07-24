@@ -22,6 +22,7 @@ import { CommentThreadView, type ThreadOps } from '../comments/CommentThread';
 import { CommentForm } from '../comments/CommentForm';
 import { FileHeader } from '../components/FileHeader';
 import { SummaryBar } from '../components/SummaryBar';
+import { PrDescription } from '../components/PrDescription';
 import { EmptyState } from '../components/EmptyState';
 
 type OverrideMap = Record<string, 'expanded' | 'collapsed'>;
@@ -39,6 +40,8 @@ function noChangesDetail(source: DiffSource, baseRef?: string): string {
       return 'No unstaged changes.';
     case 'vs-base':
       return `No changes compared with ${baseRef ?? 'the base branch'}.`;
+    case 'pr':
+      return 'This pull request has no file changes.';
     default:
       return 'No uncommitted changes.';
   }
@@ -266,6 +269,7 @@ export function DiffView({
             ops={ops(t.id)}
             suggestBase={suggestBaseFor(t)}
             tokenize={tokenizeCode(t.anchor.filePath)}
+            pendingOnRemote={state?.source === 'pr' && !t.remoteThreadId}
           />
         ))}
         {showComposer && composer && (
@@ -381,6 +385,7 @@ export function DiffView({
         onSetWhitespace={(w) => setViewPref({ whitespace: w })}
         onSetWrap={(w) => setViewPref({ wrap: w })}
       />
+      {state.pr && <PrDescription pr={state.pr} />}
       {error && (
         <div className="lr-error-banner">
           {error}
@@ -493,6 +498,7 @@ export function DiffView({
                       ops={ops(t.id)}
                       suggestBase={suggestBaseFor(t)}
                       tokenize={tokenizeCode(t.anchor.filePath)}
+                      pendingOnRemote={state.source === 'pr' && !t.remoteThreadId}
                     />
                   </div>
                 </div>
