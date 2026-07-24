@@ -17,7 +17,7 @@
 
 ## Goal
 
-From the **Active review comments** panel (or a Reviews item), run **Generate export** → pick a scope → the review renders as Markdown grouped by file, each comment carrying its location, its diff context, its text, and any suggestion → copy it / open it / save it, and paste into an agent.
+From the **Current review** panel (or a Reviews item), run **Generate export** → pick a scope → the review renders as Markdown grouped by file, each comment carrying its location, its diff context, its text, and any suggestion → copy it / open it / save it, and paste into an agent.
 
 ## Acceptance criteria (tick in place)
 

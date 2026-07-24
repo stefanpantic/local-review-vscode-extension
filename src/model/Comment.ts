@@ -23,6 +23,9 @@ export interface Comment {
   author: string; // who wrote it: the human's git username, "AI Agent" for MCP-posted comments, or "unknown"
   // A proposed replacement for the anchored range (capture-and-export only; never written to disk).
   suggestion?: { original: string; replacement: string };
+  // Set when this comment mirrors one posted on a remote (populated on import; used for write-back).
+  remoteId?: string; // the comment id on the remote (edit/delete target) — opaque string
+  remoteUrl?: string; // link to the comment on the remote
 }
 
 /** Fallback author when the writer is unknown (git user.name unset, or a legacy comment). */
@@ -34,6 +37,11 @@ export interface CommentThread {
   comments: Comment[]; // comments[0] is the root; the rest are replies
   resolved: boolean;
 
+  // Opaque provider ids for a thread mirrored from a remote (populated on import; used for write-back).
+  // Absent on local-draft threads. Strings so non-numeric provider ids fit the same fields.
+  remoteThreadId?: string; // the thread/discussion id on the remote (resolve/unresolve target)
+  remoteRootId?: string; // the root comment id on the remote (the reply target)
+
   // Resolved against the currently loaded diff on every read — NOT persisted:
   status?: AnchorStatus;
   resolvedLine?: number | null; // where it currently renders (null when outdated)
@@ -41,10 +49,33 @@ export interface CommentThread {
 }
 
 /**
- * A review session: a named set of comment threads tied to a `(repoRoot, branch)`. The "current"
- * review for a branch is the one being edited (autosaved). Uniform — there is no separate active type.
+ * Metadata for a review of a remote pull/merge request, stored on a `kind: 'remote'` review
+ * (provider-neutral). Ids are opaque strings so non-GitHub providers fit the same shape.
  */
-export interface Review {
+export interface RemoteRef {
+  provider: string; // 'github' (extensible to 'gitlab', etc.)
+  id: string; // opaque request id — the GitHub PR number as a string
+  number?: number; // numeric request number when the provider has one (GitHub)
+  url?: string; // web URL of the request
+  owner: string; // repo owner / org (GitLab: namespace)
+  repo: string; // repo name (GitLab: project)
+  title?: string;
+  author?: string; // request author login
+  state?: string; // provider state string, e.g. 'open' | 'closed' | 'merged'
+  body?: string; // the request description (markdown)
+  baseRef?: string; // base branch name
+  baseSha: string; // three-dot diff base
+  headRef?: string; // local pinned head ref
+  headSha: string; // reviewed head commit
+}
+
+/**
+ * A review session: a named set of comment threads tied to a `(repoRoot, branch)`. The "current"
+ * review for a branch is the one being edited (autosaved). A discriminated union on `kind`: a
+ * `'local'` review is a working-tree/branch diff; a `'remote'` review is a fetched pull/merge request,
+ * keyed to a synthetic branch and always carrying its `remote` block.
+ */
+interface ReviewBase {
   repoRoot: string;
   branch: string; // branch the review belongs to; `detached@<sha8>` when HEAD is detached
   threads: CommentThread[];
@@ -54,10 +85,25 @@ export interface Review {
   updatedAt: string; // ISO
   headSha: string | null; // HEAD when the review was created (null on unborn HEAD)
 }
+export interface LocalReview extends ReviewBase {
+  kind: 'local';
+}
+export interface RemoteReview extends ReviewBase {
+  kind: 'remote';
+  remote: RemoteRef; // the pull/merge request this review mirrors — required, not optional
+}
+export type Review = LocalReview | RemoteReview;
 
 /** The durable subset of a thread (drops runtime-only anchoring fields) — what we persist. */
 export function durableThread(t: CommentThread): CommentThread {
-  return { id: t.id, anchor: t.anchor, comments: t.comments, resolved: t.resolved };
+  return {
+    id: t.id,
+    anchor: t.anchor,
+    comments: t.comments,
+    resolved: t.resolved,
+    ...(t.remoteThreadId !== undefined ? { remoteThreadId: t.remoteThreadId } : {}),
+    ...(t.remoteRootId !== undefined ? { remoteRootId: t.remoteRootId } : {}),
+  };
 }
 
 /** Structural guard for a persisted comment (guarded reads of stale/corrupt state). */

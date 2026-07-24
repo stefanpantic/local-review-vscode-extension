@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react';
-import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkBreaks from 'remark-breaks';
+import { Markdown } from '../components/Markdown';
 import type { CommentThread } from '../../src/model/Comment';
 import { TokenText } from '../render/UnifiedRows';
 import type { Tok } from '../render/highlight';
@@ -61,11 +59,13 @@ export function CommentThreadView({
   ops,
   suggestBase,
   tokenize,
+  pendingOnRemote = false,
 }: {
   thread: CommentThread;
   ops: ThreadOps;
   suggestBase: string;
   tokenize: Tokenize;
+  pendingOnRemote?: boolean; // a local draft on a PR review, not yet posted to the remote
 }) {
   const [replying, setReplying] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -94,6 +94,11 @@ export function CommentThreadView({
         {thread.status === 'moved' && <span className="lr-badge lr-badge-moved">moved</span>}
         {thread.status === 'outdated' && <span className="lr-badge lr-badge-outdated">outdated</span>}
         {thread.resolved && <span className="lr-badge lr-badge-resolved">resolved</span>}
+        {pendingOnRemote && (
+          <span className="lr-badge lr-badge-pending" title="A local draft, not posted to GitHub">
+            not on GitHub
+          </span>
+        )}
       </span>
     </div>
   );
@@ -141,7 +146,7 @@ export function CommentThreadView({
                 )}
                 {c.body && (
                   <div className="lr-comment-body lr-markdown">
-                    <Markdown remarkPlugins={[remarkGfm, remarkBreaks]}>{c.body}</Markdown>
+                    <Markdown>{c.body}</Markdown>
                   </div>
                 )}
                 {c.suggestion && (

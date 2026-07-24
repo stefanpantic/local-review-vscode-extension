@@ -54,11 +54,16 @@
         },
         {
           "id": "agenticReview.comments",
-          "name": "Active Review Comments"
+          "name": "Current Review"
         },
         {
           "id": "agenticReview.reviews",
           "name": "Saved Reviews"
+        },
+        {
+          "id": "agenticReview.pullRequests",
+          "name": "Pull Requests",
+          "when": "agenticReview.hasRemote"
         }
       ]
     },
@@ -131,6 +136,23 @@
         "title": "Select Repository",
         "category": "Agentic Review",
         "icon": "$(repo)"
+      },
+      {
+        "command": "agenticReview.reviewPullRequest",
+        "title": "Review Pull Request",
+        "category": "Agentic Review",
+        "icon": "$(git-pull-request)"
+      },
+      {
+        "command": "agenticReview.refreshPullRequests",
+        "title": "Refresh Pull Requests",
+        "category": "Agentic Review",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "agenticReview.openPullRequestFromList",
+        "title": "Open Pull Request",
+        "category": "Agentic Review"
       },
       {
         "command": "agenticReview.revealFile",
@@ -263,6 +285,11 @@
           "command": "agenticReview.exportReview",
           "when": "view == agenticReview.comments",
           "group": "navigation@1"
+        },
+        {
+          "command": "agenticReview.refreshPullRequests",
+          "when": "view == agenticReview.pullRequests",
+          "group": "navigation@1"
         }
       ],
       "view/item/context": [
@@ -318,6 +345,10 @@
         },
         {
           "command": "agenticReview.moveReviewToCurrentBranch",
+          "when": "false"
+        },
+        {
+          "command": "agenticReview.openPullRequestFromList",
           "when": "false"
         }
       ]
@@ -411,6 +442,11 @@
           "type": "number",
           "default": 0,
           "description": "Port for the MCP server. 0 assigns this workspace a stable, unique port, tracked across windows so multiple VS Code instances never collide, and reuses it across restarts. Set a fixed number to force a specific port."
+        },
+        "agenticReview.github.enterpriseUri": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Base URL of your GitHub Enterprise Server (for example `https://github.your-company.com`). Leave empty to use github.com. Reviewing a pull request whose remote is on this host signs in via VS Code's GitHub Enterprise provider, which also needs `github-enterprise.uri` set to the same host."
         }
       }
     }
@@ -430,7 +466,10 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@octokit/rest": "^22.0.1",
     "parse-diff": "^0.12.0",
+    "rehype-raw": "^7.0.0",
+    "rehype-sanitize": "^6.0.0",
     "shiki": "^4.3.1",
     "zod": "^4.4.3"
   },

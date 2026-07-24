@@ -2,16 +2,17 @@ import * as vscode from 'vscode';
 import type { ReviewController } from '../reviewController';
 import type { Review } from '../model/Comment';
 
-interface BranchGroup {
-  groupBranch: string;
-  archived: boolean;
+interface ReviewGroup {
+  groupKey: string; // the git branch, or a PR's synthetic `pr/<provider>/<number>` key
+  variant: 'branch' | 'pr';
+  archived: boolean; // branch no longer exists (branch groups only; PR groups are never archived)
   reviews: Review[];
 }
-/** Tree element: a branch group or a review under it. */
-export type ReviewNode = BranchGroup | Review;
+/** Tree element: a group (branch or pull request) or a review under it. */
+export type ReviewNode = ReviewGroup | Review;
 
-function isGroup(n: ReviewNode): n is BranchGroup {
-  return 'groupBranch' in n;
+function isGroup(n: ReviewNode): n is ReviewGroup {
+  return 'groupKey' in n;
 }
 
 function relativeTime(iso: string): string {
@@ -39,19 +40,7 @@ export class ReviewsView implements vscode.TreeDataProvider<ReviewNode> {
   }
 
   getTreeItem(node: ReviewNode): vscode.TreeItem {
-    if (isGroup(node)) {
-      const state = node.archived
-        ? vscode.TreeItemCollapsibleState.Collapsed
-        : vscode.TreeItemCollapsibleState.Expanded;
-      const item = new vscode.TreeItem(node.groupBranch, state);
-      item.id = `branch:${node.groupBranch}`;
-      item.iconPath = new vscode.ThemeIcon(node.archived ? 'archive' : 'git-branch');
-      item.description = node.archived ? 'archived' : `${node.reviews.length}`;
-      if (node.archived)
-        item.tooltip = 'This branch no longer exists. Move a review to your current branch to reuse it.';
-      item.contextValue = 'agenticReview.branchGroup';
-      return item;
-    }
+    if (isGroup(node)) return node.variant === 'pr' ? prGroupItem(node) : branchGroupItem(node);
     const review = node;
     const isCurrent =
       review.id === this.controller.currentReviewId() && review.branch === this.controller.currentBranch();
@@ -74,18 +63,52 @@ export class ReviewsView implements vscode.TreeDataProvider<ReviewNode> {
     if (node) return isGroup(node) ? node.reviews : [];
     const currentBranch = this.controller.currentBranch();
     const existing = new Set(this.controller.existingBranches());
-    const byBranch = new Map<string, Review[]>();
+    const byKey = new Map<string, Review[]>();
     for (const r of this.controller.reviewsForRepo()) {
-      const arr = byBranch.get(r.branch);
+      const arr = byKey.get(r.branch);
       if (arr) arr.push(r);
-      else byBranch.set(r.branch, [r]);
+      else byKey.set(r.branch, [r]);
     }
-    const groups: BranchGroup[] = [...byBranch.entries()].map(([branch, reviews]) => ({
-      groupBranch: branch,
-      archived: branch !== currentBranch && !existing.has(branch),
-      reviews,
-    }));
-    const rank = (g: BranchGroup) => (g.groupBranch === currentBranch ? 0 : g.archived ? 2 : 1);
-    return groups.sort((a, b) => rank(a) - rank(b) || a.groupBranch.localeCompare(b.groupBranch));
+    const groups: ReviewGroup[] = [...byKey.entries()].map(([key, reviews]) => {
+      const isPr = reviews.some((r) => r.kind === 'remote');
+      return {
+        groupKey: key,
+        variant: isPr ? 'pr' : 'branch',
+        archived: !isPr && key !== currentBranch && !existing.has(key),
+        reviews,
+      };
+    });
+    // Current group first, then pull requests, then other branches, then archived branches.
+    const rank = (g: ReviewGroup) => (g.groupKey === currentBranch ? 0 : g.variant === 'pr' ? 1 : g.archived ? 3 : 2);
+    return groups.sort((a, b) => rank(a) - rank(b) || a.groupKey.localeCompare(b.groupKey));
   }
+}
+
+function branchGroupItem(group: ReviewGroup): vscode.TreeItem {
+  const state = group.archived ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.Expanded;
+  const item = new vscode.TreeItem(group.groupKey, state);
+  item.id = `branch:${group.groupKey}`;
+  item.iconPath = new vscode.ThemeIcon(group.archived ? 'archive' : 'git-branch');
+  item.description = group.archived ? 'archived' : `${group.reviews.length}`;
+  if (group.archived) item.tooltip = 'This branch no longer exists. Move a review to your current branch to reuse it.';
+  item.contextValue = 'agenticReview.branchGroup';
+  return item;
+}
+
+function prGroupItem(group: ReviewGroup): vscode.TreeItem {
+  const first = group.reviews[0];
+  const remote = first?.kind === 'remote' ? first.remote : undefined;
+  const title = remote?.title ?? group.groupKey;
+  const item = new vscode.TreeItem(title, vscode.TreeItemCollapsibleState.Expanded);
+  item.id = `pr:${group.groupKey}`;
+  item.iconPath = new vscode.ThemeIcon('git-pull-request');
+  const bits: string[] = [];
+  if (remote?.number != null) bits.push(`#${remote.number}`);
+  if (remote?.state) bits.push(remote.state);
+  item.description = bits.join(' · ') || `${group.reviews.length}`;
+  item.tooltip = remote?.url
+    ? new vscode.MarkdownString(`[**${title}**](${remote.url})\n\n${bits.join(' · ')}`)
+    : title;
+  item.contextValue = 'agenticReview.prGroup';
+  return item;
 }

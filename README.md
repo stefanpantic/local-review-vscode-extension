@@ -5,15 +5,16 @@
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-fe5196.svg)](https://www.conventionalcommits.org)
 [![code style: Prettier](https://img.shields.io/badge/code_style-Prettier-ff69b4.svg)](https://prettier.io)
 
-Review your local git changes like a pull request, without opening one. Then hand the review to a coding agent, or let the agent post its own.
+Review your local git changes like a pull request, without opening one, or review a real GitHub PR in the same UI. Then hand the review to a coding agent, or let the agent post its own.
 
-> **Everything stays on your machine.** No remote, no PR, no account, no telemetry.
+> **Local-first.** Reviewing your git diff is entirely on-machine. Nothing leaves your box unless you explicitly open a GitHub pull request to review; no account, no telemetry.
 
 ![Agentic Review: a local git diff reviewed like a pull request in VS Code, with an inline comment and a suggested change, and a sidebar of changed files, active comments, and saved reviews. You and your coding agent comment in the same review over MCP.](docs/images/review-panel.png)
 
 ## What it does
 
 - Renders your working-tree diff as a continuous, PR-style review inside VS Code (unified or side-by-side, syntax-highlighted).
+- Reviews a **GitHub pull request** in the same UI: point it at a PR and it fetches the PR in place (no checkout, your working tree untouched) and imports every review thread. Works with github.com and GitHub Enterprise.
 - Lets you comment on any line or range, on added or removed lines, with reply, resolve, and code suggestions.
 - Keeps comments anchored as code shifts. They drift with their lines, or go "outdated", never silently lost.
 - Saves a review per branch automatically.
@@ -61,8 +62,20 @@ Pick what you review from **Select Diff Source**:
 | **Unstaged changes**      | not yet staged                         |
 | **Staged changes**        | staged for commit                      |
 | **Compare with a branch** | diff against another local branch      |
+| **Pull request**          | a fetched GitHub PR (`base…head`)      |
 
 Switching source changes only what you see. Comments re-anchor against whatever is loaded, so staging a hunk or switching source never orphans one.
+
+## Review a GitHub pull request
+
+When the current repo's `origin` is a GitHub remote, a **Pull Requests** section appears in the Agentic Review sidebar listing the open PRs; click one to review it. You can also run **Agentic Review: Review Pull Request** (or pick it from **Select Diff Source**), which signs you in with VS Code's built-in GitHub sign-in the first time, lists the open PRs, and also accepts a PR URL or number. Either way it:
+
+- fetches the PR head and base **in place** (into hidden refs under `refs/agentic-review/`), so your working tree, index, and current branch are never touched;
+- renders `base…head` in the usual diff UI, with a header pill showing the source and target branches and a card with the PR title, state, and description;
+- imports all review threads at their correct file, side, and line, including resolved and outdated ones, with suggestions;
+- lists the PR as its own group in the **Reviews** sidebar, separate from your local branch reviews, and tracks "viewed" state per PR.
+
+For **GitHub Enterprise**, set `agenticReview.github.enterpriseUri` to your server (for example `https://github.your-company.com`); VS Code's `github-enterprise.uri` must point at the same host. Posting your review back to GitHub is coming in a follow-up; for now, hand it off with **Export Review** or your agent over MCP.
 
 ## Install
 

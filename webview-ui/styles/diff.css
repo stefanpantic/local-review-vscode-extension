@@ -183,7 +183,8 @@ body {
 .lr-summary {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap; /* overflow wraps to a second line rather than squeezing the controls */
+  gap: 8px 12px;
 }
 .lr-summary-files {
   font-weight: 600;
@@ -200,6 +201,12 @@ body {
   color: var(--vscode-foreground);
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 11px;
+}
+.lr-pr-pill {
+  white-space: nowrap; /* the branch names are pre-truncated; keep the pill on one line */
+}
+.lr-pr-arrow {
+  color: var(--vscode-descriptionForeground);
 }
 
 .lr-file {
@@ -264,6 +271,7 @@ body {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
+  flex: none; /* never shrink: the segmented control must not warp when the bar is tight */
   gap: 12px;
   font-family: var(--vscode-font-family);
 }
@@ -279,6 +287,7 @@ body {
   background: transparent;
   color: var(--vscode-foreground);
   font-size: 11px;
+  white-space: nowrap;
   cursor: pointer;
 }
 .lr-segmented button.lr-seg-active {
@@ -290,9 +299,68 @@ body {
   align-items: center;
   gap: 4px;
   font-size: 11px;
+  white-space: nowrap;
   color: var(--vscode-descriptionForeground);
   cursor: pointer;
   user-select: none;
+}
+
+/* pull request description card (between the summary bar and the file list) */
+.lr-pr-card {
+  margin: 12px 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--lr-card-border);
+  border-radius: var(--lr-radius);
+  background: var(--vscode-editor-background);
+}
+.lr-pr-card-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.lr-pr-card-title {
+  font-weight: 600;
+}
+.lr-pr-card-num {
+  color: var(--vscode-descriptionForeground);
+}
+.lr-pr-card-author {
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+.lr-pr-card-link {
+  margin-left: auto;
+}
+.lr-pr-card-clamp {
+  max-height: 168px;
+  overflow: hidden;
+  mask-image: linear-gradient(#000 68%, transparent);
+  -webkit-mask-image: linear-gradient(#000 68%, transparent);
+}
+.lr-pr-card-empty {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+}
+.lr-pr-card-toggle {
+  margin-top: 6px;
+}
+.lr-pr-state {
+  padding: 0 8px;
+  border: 1px solid currentColor;
+  border-radius: 10px;
+  font-size: 11px;
+  text-transform: capitalize;
+}
+.lr-pr-state-open {
+  color: var(--vscode-charts-green, #3fb950);
+}
+.lr-pr-state-merged {
+  color: var(--vscode-charts-purple, #a371f7);
+}
+.lr-pr-state-closed {
+  color: var(--vscode-errorForeground, #f85149);
 }
 .lr-ws input {
   margin: 0;
@@ -619,6 +687,10 @@ body {
 }
 .lr-badge-resolved {
   color: var(--vscode-charts-green, #4ec9b0);
+  border-color: currentColor;
+}
+.lr-badge-pending {
+  color: var(--vscode-charts-blue, #3794ff);
   border-color: currentColor;
 }
 

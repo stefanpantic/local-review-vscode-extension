@@ -14,7 +14,19 @@ type DiffSource =
   | 'worktree-vs-head' // all uncommitted changes vs HEAD (default)   [it.1]
   | 'unstaged' // git diff                                     [it.2]
   | 'staged' // git diff --cached                            [it.2]
-  | 'vs-base'; // git diff <baseRef>...HEAD                    [it.2]
+  | 'vs-base' // git diff <baseRef>...HEAD                    [it.2]
+  | 'pr'; // git diff baseSha...headSha of a fetched PR      [it.11]
+
+// A remote pull/merge request under review (provider-neutral). Present on ReviewDiff when source === 'pr'.
+// The head is fetched into a hidden ref and the base into the object store; the working tree is untouched.
+interface PrRef {
+  provider: string; // e.g. 'github'
+  number: number;
+  baseSha: string; // three-dot diff base
+  headSha: string; // reviewed head commit
+  baseRef?: string; // base branch name (display)
+  headRef?: string; // head branch name (display)
+}
 
 // Which version of the file a row / comment belongs to.
 type Side = 'old' | 'new'; // old = base/left, new = head/right
@@ -43,6 +55,7 @@ interface ReviewDiff {
   headSha: string | null; // null on unborn HEAD (fresh repo, no commits)
   files: FileDiff[];
   generatedAt: string; // ISO timestamp, stamped by the host
+  pr?: PrRef; // [it.11] set when source === 'pr'
 }
 
 interface FileDiff {
@@ -94,7 +107,18 @@ interface ReviewStatePayload {
   viewMode: ViewMode; // [it.3]
   whitespace: boolean; // [it.3] hide whitespace (git diff -w)
   threads: CommentThread[]; // [it.4] active review, re-anchored against the current diff
+  pr?: PrDisplay; // [it.11] the PR under review (source === 'pr'): title, state, author, url, description
   config: { largeFileThreshold: number };
+}
+
+// [it.11] Display metadata for the PR under review (from the remote review's stored request).
+interface PrDisplay {
+  number?: number;
+  title?: string;
+  author?: string; // login
+  state?: string; // 'open' | 'closed' | 'merged'
+  url?: string;
+  body?: string; // description (markdown); empty string when there is none
 }
 ```
 
@@ -141,11 +165,15 @@ interface Comment {
   body: string;
   createdAt: string; // ISO
   updatedAt: string; // ISO
+  author: string; // git username, "AI Agent" (MCP), a remote login (imported), or "unknown"  [it.9/it.11]
   suggestion?: {
     // [it.4b] proposed replacement for the anchored range (capture + export only)
     original: string; // the range's code at creation (captured by the host from its diff)
     replacement: string; // the proposed new code
   };
+  // [it.11] set when this comment mirrors one on a remote (populated on import; used for write-back):
+  remoteId?: string; // opaque provider comment id (edit/delete target)
+  remoteUrl?: string; // permalink to the comment on the remote
 }
 
 interface CommentThread {
@@ -153,6 +181,10 @@ interface CommentThread {
   anchor: Anchor;
   comments: Comment[]; // comments[0] is the root; the rest are replies
   resolved: boolean;
+
+  // [it.11] opaque provider ids for an imported thread (absent on local-draft threads); in durableThread():
+  remoteThreadId?: string; // resolve/unresolve target on the remote
+  remoteRootId?: string; // root comment id on the remote (the reply target)
 
   // Runtime-resolved against the currently loaded diff — NOT persisted:
   status?: AnchorStatus;
@@ -175,16 +207,37 @@ Anchoring is intentionally **scoped to lines present in the current diff**: a li
 
 Durable data lives in the host's `workspaceState`, namespaced `localReview.*`, keyed by **`(repoRoot, branch)`** (branch joins the key in it.5; source never does — see [§7 of spec.md](./spec.md#7-data--storage-model-overview)). A `Review` is a **branch-tied session**; per `(repoRoot, branch)` one review is **current** and autosaves as you comment. See [ADR-0004](./decisions/0004-state-ownership.md), [ADR-0009](./decisions/0009-review-sessions-vs-export.md).
 
+`[it.11]` A `Review` is a **discriminated union on `kind`**: a `'local'` review is a working-tree/branch diff; a `'remote'` review mirrors a fetched pull request and always carries a `remote` block. A remote review is keyed under the synthetic branch **`pr/<provider>/<number>`** (mirroring `detached@<sha8>`), so it lists distinctly and never becomes a git branch's autosave target. The store sanitizer defaults a legacy record with no `kind` to `'local'` (backward compatibility). "Viewed" flags are namespaced **`pr#<number>`** for a PR, so they never collide across PRs or with local sources.
+
 ```ts
-interface Review {
+interface ReviewBase {
   id: string;
   name: string;
   repoRoot: string;
-  branch: string; // the branch this review belongs to; `detached@<sha8>` when HEAD is detached
+  branch: string; // the branch, or `pr/<provider>/<number>` for a remote review; `detached@<sha8>` when detached
   createdAt: string; // ISO
   updatedAt: string; // ISO (bumped on every autosave)
-  headSha: string | null; // HEAD when created (null on unborn HEAD)
+  headSha: string | null; // HEAD (local) or the reviewed PR head (remote); null on unborn HEAD
   threads: CommentThread[];
+}
+type Review = (ReviewBase & { kind: 'local' }) | (ReviewBase & { kind: 'remote'; remote: RemoteRef }); // [it.11]
+
+// [it.11] The pull/merge request a remote review mirrors (provider-neutral; ids are opaque strings).
+interface RemoteRef {
+  provider: string; // 'github' (extensible to 'gitlab', etc.)
+  id: string; // opaque request id — the GitHub PR number as a string
+  number?: number; // numeric request number when the provider has one (GitHub)
+  url?: string;
+  owner: string;
+  repo: string;
+  title?: string;
+  author?: string; // request author login
+  state?: string; // 'open' | 'closed' | 'merged'
+  body?: string; // request description (markdown); empty string when there is none
+  baseRef?: string;
+  baseSha: string;
+  headRef?: string;
+  headSha: string;
 }
 // Storage keys (all workspaceState):
 //   localReview.reviews        → Record<repoRoot, Review[]>

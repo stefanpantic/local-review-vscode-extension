@@ -145,6 +145,7 @@ test('get_review returns the current review, or errors when none', async () => {
     createdAt: '',
     updatedAt: '',
     headSha: null,
+    kind: 'local',
     threads: [makeThread('a.ts', 'new', 2, 'hi', 'tester')],
   };
   const out = await tool('get_review').handler(new FakeApi(DIFF, [review]), {});

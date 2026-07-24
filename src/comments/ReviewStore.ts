@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { CommentThread, Review } from '../model/Comment';
+import type { CommentThread, RemoteRef, RemoteReview, Review } from '../model/Comment';
 import { durableThread, isCommentThread, UNKNOWN_AUTHOR } from '../model/Comment';
 
 const REVIEWS_KEY = 'agenticReview.reviews';
@@ -51,10 +51,14 @@ export class ReviewStore {
     await this.store.update(CURRENT_KEY, map);
   }
 
-  /** Create a new empty review on the branch and make it current. */
-  async create(repoRoot: string, branch: string, headSha: string | null): Promise<Review> {
+  /**
+   * Create a new empty review on the branch and make it current. Passing `remote` marks it a
+   * remote-kind review (a fetched pull/merge request) carrying that request's metadata.
+   */
+  async create(repoRoot: string, branch: string, headSha: string | null, remote?: RemoteRef): Promise<Review> {
     const n = this.forBranch(repoRoot, branch).length + 1;
-    const review = newReview(repoRoot, branch, `Review ${n}`, headSha);
+    const name = remote ? remoteName(remote) : `Review ${n}`;
+    const review = newReview(repoRoot, branch, name, headSha, remote);
     const map = this.allMap();
     map[repoRoot] = [...(map[repoRoot] ?? []), review];
     await this.store.update(REVIEWS_KEY, map);
@@ -62,9 +66,26 @@ export class ReviewStore {
     return review;
   }
 
-  /** The current review for the branch, creating one if none exists yet. */
-  async ensureCurrent(repoRoot: string, branch: string, headSha: string | null): Promise<Review> {
-    return this.current(repoRoot, branch) ?? (await this.create(repoRoot, branch, headSha));
+  /**
+   * The current review for the branch, creating one if none exists yet. Passing `remote` both marks a
+   * newly created review as remote-kind and refreshes the metadata of the existing one (re-fetch).
+   */
+  async ensureCurrent(repoRoot: string, branch: string, headSha: string | null, remote?: RemoteRef): Promise<Review> {
+    const existing = this.current(repoRoot, branch);
+    if (existing) return remote ? await this.setRemote(repoRoot, existing.id, remote) : existing;
+    return this.create(repoRoot, branch, headSha, remote);
+  }
+
+  /** Refresh a remote review's request metadata (e.g. after a re-fetch that advanced the head). */
+  async setRemote(repoRoot: string, id: string, remote: RemoteRef): Promise<Review> {
+    const map = this.allMap();
+    const list = map[repoRoot];
+    const idx = list?.findIndex((r) => r.id === id) ?? -1;
+    if (!list || idx < 0) throw new Error(`review ${id} not found`);
+    const updated: RemoteReview = { ...list[idx], kind: 'remote', remote, updatedAt: new Date().toISOString() };
+    list[idx] = updated;
+    await this.store.update(REVIEWS_KEY, map);
+    return updated;
   }
 
   /** Replace a review's threads (durable subset) and bump `updatedAt` — the autosave path. */
@@ -128,9 +149,24 @@ export class ReviewStore {
   }
 }
 
-function newReview(repoRoot: string, branch: string, name: string, headSha: string | null): Review {
+/** A display name for a remote review: the request title, falling back to `#<number>`. */
+function remoteName(remote: RemoteRef): string {
+  return remote.title ?? `#${remote.number ?? remote.id}`;
+}
+
+function newReview(repoRoot: string, branch: string, name: string, headSha: string | null, remote?: RemoteRef): Review {
   const now = new Date().toISOString();
-  return { id: randomUUID(), name, repoRoot, branch, createdAt: now, updatedAt: now, headSha, threads: [] };
+  const base = {
+    id: randomUUID(),
+    name,
+    repoRoot,
+    branch,
+    createdAt: now,
+    updatedAt: now,
+    headSha,
+    threads: [] as CommentThread[],
+  };
+  return remote ? { ...base, kind: 'remote', remote } : { ...base, kind: 'local' };
 }
 
 function sanitizeReviews(raw: unknown): Record<string, Review[]> {
@@ -138,31 +174,37 @@ function sanitizeReviews(raw: unknown): Record<string, Review[]> {
   const out: Record<string, Review[]> = {};
   for (const [repoRoot, list] of Object.entries(raw as Record<string, unknown>)) {
     if (!Array.isArray(list)) continue;
-    const reviews = list.filter(isReview).map(withAuthors);
+    const reviews = list.filter(isReview).map(normalizeReview);
     if (reviews.length) out[repoRoot] = reviews;
   }
   return out;
 }
 
-/** Default a missing comment author (legacy data) to `unknown`, so the field is always populated. */
-function withAuthors(r: Review): Review {
-  return {
-    ...r,
-    threads: r.threads.map((t) => ({
-      ...t,
-      comments: t.comments.map((c) => (c.author ? c : { ...c, author: UNKNOWN_AUTHOR })),
-    })),
-  };
+/**
+ * Fill in fields absent from legacy records so downstream code never branches on their absence:
+ * a missing `kind` defaults to `'local'` (all pre-remote reviews), and a missing comment author to `unknown`.
+ */
+function normalizeReview(r: Review): Review {
+  const threads = r.threads.map((t) => ({
+    ...t,
+    comments: t.comments.map((c) => (c.author ? c : { ...c, author: UNKNOWN_AUTHOR })),
+  }));
+  // A legacy record's `kind` is absent at runtime; anything not explicitly 'remote' becomes a local review.
+  return r.kind === 'remote' ? { ...r, threads } : { ...r, kind: 'local', threads };
 }
 
 function isReview(r: unknown): r is Review {
   if (!r || typeof r !== 'object') return false;
   const o = r as Record<string, unknown>;
+  // A record claiming to be remote must actually carry its `remote` block, so the union invariant holds.
+  const remoteOk = o.kind !== 'remote' || (typeof o.remote === 'object' && o.remote !== null);
   return (
     typeof o.id === 'string' &&
     typeof o.name === 'string' &&
     typeof o.repoRoot === 'string' &&
     typeof o.branch === 'string' &&
+    (o.kind === undefined || o.kind === 'local' || o.kind === 'remote') &&
+    remoteOk &&
     Array.isArray(o.threads) &&
     o.threads.every(isCommentThread)
   );

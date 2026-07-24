@@ -14,6 +14,10 @@ import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import type { DiffSource } from './model/ReviewDiff';
 import type { Review } from './model/Comment';
+import { parsePrReference, type GithubProviderId } from './github/remote';
+import { githubTokenSource } from './github/auth';
+import { PullRequestsView } from './webview/pullRequestsView';
+import type { ReviewProvider, RemoteRepoRef } from './review/provider';
 
 /** Narrow a command argument (tree node or selection) to a Review. */
 function asReview(x: unknown): Review | undefined {
@@ -39,11 +43,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const reviewsView = new ReviewsView(controller);
   const reviewsTree = vscode.window.createTreeView('agenticReview.reviews', { treeDataProvider: reviewsView });
 
+  const pullRequestsView = new PullRequestsView(controller);
+  const pullRequestsTree = vscode.window.createTreeView('agenticReview.pullRequests', {
+    treeDataProvider: pullRequestsView,
+  });
+
   // Badge the activity-bar icon with the number of changed files still to review; the count drops as
   // files are marked viewed and rises when unmarked (like the SCM count).
   const updateBadge = (): void => {
     const n = controller.files().filter((f) => !controller.isViewed(f.path)).length;
     tree.badge = n > 0 ? { value: n, tooltip: `${n} file${n === 1 ? '' : 's'} left to review` } : undefined;
+  };
+
+  // Show the Pull Requests section only when the current repo's origin is a supported review host.
+  const updateHasRemote = async (): Promise<void> => {
+    const remote = await controller.currentRemote();
+    await vscode.commands.executeCommand('setContext', 'agenticReview.hasRemote', remote != null);
   };
 
   // --- MCP server lifecycle (binds to 127.0.0.1 only). Runs on launch when agenticReview.mcp.autoStart,
@@ -174,7 +189,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     tree,
     commentsTree,
     reviewsTree,
+    pullRequestsTree,
     controller.onDidChange(updateBadge),
+    controller.onDidChange(() => void updateHasRemote()),
     vscode.commands.registerCommand('agenticReview.newReview', () => controller.newReview()),
     vscode.commands.registerCommand('agenticReview.switchReview', (r) => {
       const rev = asReview(r);
@@ -207,6 +224,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     vscode.commands.registerCommand('agenticReview.selectSource', () => pickSource(controller)),
     vscode.commands.registerCommand('agenticReview.selectRepo', () => pickRepo(controller)),
+    vscode.commands.registerCommand('agenticReview.reviewPullRequest', () =>
+      reviewPullRequest(controller, context.extensionUri),
+    ),
+    vscode.commands.registerCommand('agenticReview.refreshPullRequests', () => pullRequestsView.refresh()),
+    vscode.commands.registerCommand('agenticReview.openPullRequestFromList', (n: number) =>
+      openPullRequestFromList(controller, context.extensionUri, n),
+    ),
     vscode.commands.registerCommand('agenticReview.toggleViewMode', () =>
       controller.setViewPref({ viewMode: controller.viewMode === 'split' ? 'unified' : 'split' }),
     ),
@@ -228,6 +252,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   await controller.refresh();
+  void updateHasRemote();
   void syncMcp();
 }
 
@@ -323,16 +348,26 @@ const SOURCES: { label: string; description: string; source: DiffSource }[] = [
 
 async function pickSource(controller: ReviewController): Promise<void> {
   const current = controller.source;
+  const pr = {
+    label: '$(git-pull-request) Review a GitHub pull request…',
+    description: 'fetch a PR and review it here',
+    source: 'open-pr' as const,
+  };
   const picked = await vscode.window.showQuickPick(
-    SOURCES.map((s) => ({
-      label: s.label,
-      description: s.source === current ? `${s.description} · current` : s.description,
-      source: s.source,
-    })),
+    [
+      ...SOURCES.map((s) => ({
+        label: s.label,
+        description: s.source === current ? `${s.description} · current` : s.description,
+        source: s.source as DiffSource | 'open-pr',
+      })),
+      pr,
+    ],
     { placeHolder: 'Select the diff source to review' },
   );
   if (!picked) return;
-  if (picked.source === 'vs-base') {
+  if (picked.source === 'open-pr') {
+    await vscode.commands.executeCommand('agenticReview.reviewPullRequest');
+  } else if (picked.source === 'vs-base') {
     const branches = controller.repoRoot ? await listBranches(controller.repoRoot) : [];
     if (branches.length === 0) {
       void vscode.window.showWarningMessage('Agentic Review: no local branches to compare against.');
@@ -344,6 +379,110 @@ async function pickSource(controller: ReviewController): Promise<void> {
   } else {
     await controller.setSource(picked.source);
   }
+}
+
+/**
+ * Detect the repo's review host, sign in via VS Code if needed, let the user pick an open PR (or type a
+ * URL/number), then fetch and open it. Errors surface as clear messages; an unsupported host is skipped.
+ */
+async function reviewPullRequest(controller: ReviewController, extensionUri: vscode.Uri): Promise<void> {
+  const remote = await controller.currentRemote();
+  if (!remote) {
+    void vscode.window.showWarningMessage(
+      'Agentic Review: this repo\'s origin isn\'t a supported review host. Use github.com, or set "agenticReview.github.enterpriseUri" for GitHub Enterprise.',
+    );
+    return;
+  }
+  // Sign in once (interactive); later reads reuse the session silently.
+  const token = await githubTokenSource(remote.provider.id as GithubProviderId)(true);
+  if (!token) {
+    void vscode.window.showInformationMessage('Agentic Review: sign in to GitHub to review a pull request.');
+    return;
+  }
+  const number = await pickPullRequest(remote.provider, remote.repo);
+  if (number == null) return;
+  await openPr(controller, extensionUri, remote.provider, remote.repo, number);
+}
+
+/** Open a PR chosen from the Pull Requests sidebar list (already detected + signed in). */
+async function openPullRequestFromList(
+  controller: ReviewController,
+  extensionUri: vscode.Uri,
+  number: number,
+): Promise<void> {
+  const remote = await controller.currentRemote();
+  if (remote) await openPr(controller, extensionUri, remote.provider, remote.repo, number);
+}
+
+/** Fetch + open a PR with progress, then reveal the panel; surface any failure as a clear message. */
+async function openPr(
+  controller: ReviewController,
+  extensionUri: vscode.Uri,
+  provider: ReviewProvider,
+  repo: RemoteRepoRef,
+  number: number,
+): Promise<void> {
+  try {
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: `Loading pull request #${number}…` },
+      () => controller.openPullRequest({ provider, repo, number, remote: 'origin' }),
+    );
+  } catch (err) {
+    void vscode.window.showErrorMessage(`Agentic Review: could not open PR #${number}. ${errorText(err)}`);
+    return;
+  }
+  ReviewPanel.show(extensionUri, controller);
+}
+
+/** A QuickPick of open PRs that also accepts a typed number or full PR URL. */
+async function pickPullRequest(provider: ReviewProvider, repo: RemoteRepoRef): Promise<number | undefined> {
+  const qp = vscode.window.createQuickPick<vscode.QuickPickItem & { number?: number }>();
+  qp.title = 'Review a pull request';
+  qp.placeholder = 'Pick an open pull request, or type a number or URL';
+  qp.busy = true;
+  qp.show();
+
+  let open: (vscode.QuickPickItem & { number?: number })[] = [];
+  const render = (): void => {
+    const typed = parsePrReference(qp.value);
+    const head =
+      typed != null ? [{ label: `$(arrow-right) Open #${typed.number}`, alwaysShow: true, number: typed.number }] : [];
+    qp.items = [...head, ...open];
+  };
+  qp.onDidChangeValue(render);
+
+  provider
+    .listRequests(repo)
+    .then((prs) => {
+      open = prs.map((p) => ({
+        label: `#${p.number} ${p.title}`,
+        description: `${p.author} · ${p.state}${p.isDraft ? ' · draft' : ''}`,
+        number: p.number,
+      }));
+      render();
+    })
+    .catch(() => {
+      /* listing may fail (permissions); the user can still type a number or URL */
+    })
+    .finally(() => {
+      qp.busy = false;
+    });
+
+  return new Promise((resolve) => {
+    qp.onDidAccept(() => {
+      const picked = qp.selectedItems[0]?.number ?? parsePrReference(qp.value)?.number;
+      resolve(picked);
+      qp.hide();
+    });
+    qp.onDidHide(() => {
+      resolve(undefined);
+      qp.dispose();
+    });
+  });
+}
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 async function exportReview(controller: ReviewController, arg?: Review): Promise<void> {

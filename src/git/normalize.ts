@@ -1,10 +1,10 @@
 // Turn a raw unified diff into a normalized ReviewDiff. Pure & synchronous — unit-tested with fixtures.
 import parse from 'parse-diff';
-import type { DiffRow, DiffSource, FileDiff, FileStatus, Hunk, ReviewDiff } from '../model/ReviewDiff';
+import type { DiffRow, DiffSource, FileDiff, FileStatus, Hunk, PrRef, ReviewDiff } from '../model/ReviewDiff';
 
 export function normalize(
   raw: string,
-  meta: { repoRoot: string; source: DiffSource; headSha: string | null; baseRef?: string },
+  meta: { repoRoot: string; source: DiffSource; headSha: string | null; baseRef?: string; pr?: PrRef },
 ): ReviewDiff {
   const files = splitFileBlocks(raw).map(parseFileBlock);
   return {
@@ -14,6 +14,7 @@ export function normalize(
     headSha: meta.headSha,
     files,
     generatedAt: new Date().toISOString(),
+    pr: meta.pr,
   };
 }
 
@@ -23,7 +24,7 @@ export function normalize(
  */
 export function synthesizeUntracked(
   raw: string,
-  meta: { repoRoot: string; source: DiffSource; headSha: string | null; baseRef?: string },
+  meta: { repoRoot: string; source: DiffSource; headSha: string | null; baseRef?: string; pr?: PrRef },
 ): FileDiff[] {
   return normalize(raw, meta).files.map((f) => ({
     ...f,
