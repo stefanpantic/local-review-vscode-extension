@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.9](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.0.8...agentic-review-v0.0.9) (2026-07-24)
+
+
+### Features
+
+* review GitHub pull requests locally ([#34](https://github.com/stefanpantic/local-review-vscode-extension/issues/34)) ([e4e5b30](https://github.com/stefanpantic/local-review-vscode-extension/commit/e4e5b3001252ae277b553ed1804111b80333cf0d))
+
 ## [0.0.8](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.0.7...agentic-review-v0.0.8) (2026-07-10)
 
 
