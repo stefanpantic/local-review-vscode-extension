@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Markdown } from '../components/Markdown';
 import type { CommentThread } from '../../src/model/Comment';
+import { AGENT_AUTHOR, canEditComment } from '../../src/model/Comment';
 import { TokenText } from '../render/UnifiedRows';
 import type { Tok } from '../render/highlight';
 import { CommentForm } from './CommentForm';
@@ -60,12 +61,16 @@ export function CommentThreadView({
   suggestBase,
   tokenize,
   pendingOnRemote = false,
+  viewer,
+  prMode = false,
 }: {
   thread: CommentThread;
   ops: ThreadOps;
   suggestBase: string;
   tokenize: Tokenize;
   pendingOnRemote?: boolean; // a local draft on a PR review, not yet posted to the remote
+  viewer?: string; // the current user's identity; comments not by them (in a PR) are read-only
+  prMode?: boolean; // a PR review, where others' comments exist and are read-only
 }) {
   const [replying, setReplying] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -121,6 +126,7 @@ export function CommentThreadView({
       <div className="lr-comments">
         {thread.comments.map((c, i) => {
           const cls = `lr-comment${i > 0 ? ' lr-reply' : ''}`;
+          const canEdit = canEditComment(c, viewer, prMode);
           return editingId === c.id ? (
             <div className={`${cls} lr-comment-editing`} key={c.id}>
               <CommentForm
@@ -140,8 +146,16 @@ export function CommentThreadView({
             <div className={cls} key={c.id}>
               <div className="lr-comment-main">
                 {c.author && (
-                  <div className={`lr-comment-author${c.author === 'AI Agent' ? ' lr-author-agent' : ''}`}>
+                  <div className={`lr-comment-author${c.author === AGENT_AUTHOR ? ' lr-author-agent' : ''}`}>
                     {c.author}
+                    {c.localOnly && (
+                      <span
+                        className="lr-badge lr-badge-localonly"
+                        title="Deleted on GitHub; kept locally. Submit to repost, or delete to discard."
+                      >
+                        only local
+                      </span>
+                    )}
                   </div>
                 )}
                 {c.body && (
@@ -158,12 +172,20 @@ export function CommentThreadView({
                 )}
               </div>
               <div className="lr-comment-tools">
-                <button className="lr-ghost-btn" onClick={() => setEditingId(c.id)}>
-                  Edit
-                </button>
-                <button className="lr-ghost-btn" onClick={() => ops.onDelete(c.id)}>
-                  Delete
-                </button>
+                {canEdit ? (
+                  <>
+                    <button className="lr-ghost-btn" onClick={() => setEditingId(c.id)}>
+                      Edit
+                    </button>
+                    <button className="lr-ghost-btn" onClick={() => ops.onDelete(c.id)}>
+                      Delete
+                    </button>
+                  </>
+                ) : (
+                  <span className="lr-badge lr-badge-readonly" title="Authored by someone else">
+                    read-only
+                  </span>
+                )}
               </div>
             </div>
           );

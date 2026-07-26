@@ -16,6 +16,8 @@ import type { DiffSource } from './model/ReviewDiff';
 import type { Review } from './model/Comment';
 import { parsePrReference, type GithubProviderId } from './github/remote';
 import { githubTokenSource } from './github/auth';
+import type { SubmitEvent, SubmitCounts } from './review/submit';
+import type { OrphanReport } from './review/reconcile';
 import { PullRequestsView } from './webview/pullRequestsView';
 import type { ReviewProvider, RemoteRepoRef } from './review/provider';
 
@@ -53,6 +55,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const updateBadge = (): void => {
     const n = controller.files().filter((f) => !controller.isViewed(f.path)).length;
     tree.badge = n > 0 ? { value: n, tooltip: `${n} file${n === 1 ? '' : 's'} left to review` } : undefined;
+  };
+
+  // Name the current source in the Changes view header (e.g. "Pull request #117"); the compare icon in
+  // that title bar switches it.
+  const updateSourceHeader = (): void => {
+    tree.description = controller.repoRoot ? controller.sourceLabel() : undefined;
   };
 
   // Show the Pull Requests section only when the current repo's origin is a supported review host.
@@ -191,6 +199,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     reviewsTree,
     pullRequestsTree,
     controller.onDidChange(updateBadge),
+    controller.onDidChange(updateSourceHeader),
     controller.onDidChange(() => void updateHasRemote()),
     vscode.commands.registerCommand('agenticReview.newReview', () => controller.newReview()),
     vscode.commands.registerCommand('agenticReview.switchReview', (r) => {
@@ -212,12 +221,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('agenticReview.prevChange', () => controller.navigate('file', 'prev')),
     vscode.commands.registerCommand('agenticReview.nextComment', () => controller.navigate('comment', 'next')),
     vscode.commands.registerCommand('agenticReview.prevComment', () => controller.navigate('comment', 'prev')),
-    watchRepoChanges(() => void controller.refresh()),
+    // A PR diff is pinned to fetched refs, so working-tree / git-state changes (including our own fetch)
+    // must not re-diff it — that would reset the "loading" state mid-review. Local sources still live-refresh.
+    watchRepoChanges(() => {
+      if (controller.source !== 'pr') void controller.refresh();
+    }),
     vscode.commands.registerCommand('agenticReview.startReview', async () => {
       await controller.refresh();
       ReviewPanel.show(context.extensionUri, controller);
     }),
-    vscode.commands.registerCommand('agenticReview.refresh', () => controller.refresh()),
+    vscode.commands.registerCommand('agenticReview.refresh', () =>
+      // In PR mode, Refresh is a full sync: re-fetch the head + re-import threads (this is where an upstream
+      // deletion is reflected). For local sources it just re-diffs.
+      controller.source === 'pr' ? refreshOpenPullRequest(controller) : controller.refresh(),
+    ),
     vscode.commands.registerCommand('agenticReview.revealFile', (filePath?: string, threadId?: string) => {
       ReviewPanel.show(context.extensionUri, controller); // create or reveal (focuses the tab)
       if (typeof filePath === 'string') controller.reveal(filePath, threadId);
@@ -230,6 +247,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('agenticReview.refreshPullRequests', () => pullRequestsView.refresh()),
     vscode.commands.registerCommand('agenticReview.openPullRequestFromList', (n: number) =>
       openPullRequestFromList(controller, context.extensionUri, n),
+    ),
+    vscode.commands.registerCommand('agenticReview.github.submitReview', () => submitPullRequest(controller)),
+    vscode.commands.registerCommand('agenticReview.github.refreshPullRequest', () =>
+      refreshOpenPullRequest(controller),
     ),
     vscode.commands.registerCommand('agenticReview.toggleViewMode', () =>
       controller.setViewPref({ viewMode: controller.viewMode === 'split' ? 'unified' : 'split' }),
@@ -251,7 +272,39 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     new vscode.Disposable(() => mcpHandle?.dispose()),
   );
 
+  // Background poll while a PR is open: pick up upstream comment changes live and flag an advanced head.
+  // Runs only in PR mode, skips if a tick is still in flight, and is disabled when the interval is 0.
+  let polling = false;
+  let pollTimer: ReturnType<typeof setInterval> | undefined;
+  const pollTick = async (): Promise<void> => {
+    if (polling || controller.source !== 'pr') return;
+    polling = true;
+    try {
+      const { orphans } = await controller.pollPullRequest();
+      if (orphans)
+        void vscode.window.showInformationMessage(`Agentic Review: synced upstream changes.${orphanNote(orphans)}`);
+    } catch {
+      /* transient (offline, rate limit); the next tick retries */
+    } finally {
+      polling = false;
+    }
+  };
+  const restartPoll = (): void => {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = undefined;
+    const secs = vscode.workspace.getConfiguration('agenticReview').get<number>('github.pollInterval', 60);
+    if (secs > 0) pollTimer = setInterval(() => void pollTick(), secs * 1000);
+  };
+  restartPoll();
+  context.subscriptions.push(
+    new vscode.Disposable(() => pollTimer && clearInterval(pollTimer)),
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('agenticReview.github.pollInterval')) restartPoll();
+    }),
+  );
+
   await controller.refresh();
+  updateSourceHeader();
   void updateHasRemote();
   void syncMcp();
 }
@@ -339,24 +392,34 @@ function rememberPort(context: vscode.ExtensionContext, port: number): void {
   }
 }
 
-const SOURCES: { label: string; description: string; source: DiffSource }[] = [
-  { label: 'Uncommitted changes', description: 'everything not yet committed', source: 'worktree-vs-head' },
-  { label: 'Unstaged changes', description: 'not yet staged', source: 'unstaged' },
-  { label: 'Staged changes', description: 'staged for commit', source: 'staged' },
-  { label: 'Compare with a branch…', description: 'diff against another branch', source: 'vs-base' },
+const SOURCES: { label: string; icon: string; description: string; source: DiffSource }[] = [
+  {
+    label: 'Uncommitted changes',
+    icon: 'git-commit',
+    description: 'everything not yet committed',
+    source: 'worktree-vs-head',
+  },
+  { label: 'Unstaged changes', icon: 'diff-modified', description: 'not yet staged', source: 'unstaged' },
+  { label: 'Staged changes', icon: 'diff-added', description: 'staged for commit', source: 'staged' },
+  {
+    label: 'Compare with a branch',
+    icon: 'git-compare',
+    description: 'diff against another branch',
+    source: 'vs-base',
+  },
 ];
 
 async function pickSource(controller: ReviewController): Promise<void> {
   const current = controller.source;
   const pr = {
-    label: '$(git-pull-request) Review a GitHub pull request…',
+    label: '$(git-pull-request) Review a GitHub pull request',
     description: 'fetch a PR and review it here',
     source: 'open-pr' as const,
   };
   const picked = await vscode.window.showQuickPick(
     [
       ...SOURCES.map((s) => ({
-        label: s.label,
+        label: `$(${s.icon}) ${s.label}`,
         description: s.source === current ? `${s.description} · current` : s.description,
         source: s.source as DiffSource | 'open-pr',
       })),
@@ -432,6 +495,112 @@ async function openPr(
     return;
   }
   ReviewPanel.show(extensionUri, controller);
+}
+
+/**
+ * Submit the open PR's staged change set: pick the review event, confirm the counts, then post it as one
+ * review and reconcile. All UI (picker, confirmation, result) lives here; errors surface as messages.
+ */
+async function submitPullRequest(controller: ReviewController): Promise<void> {
+  const preview = controller.submitPreview();
+  if (!preview) {
+    void vscode.window.showInformationMessage('Agentic Review: open a pull request to submit a review.');
+    return;
+  }
+  if (preview.counts.total === 0) {
+    void vscode.window.showInformationMessage(
+      'Agentic Review: nothing to submit yet. Add a comment, reply, resolve, or edit first.',
+    );
+    return;
+  }
+  const event = await pickReviewEvent(preview.state);
+  if (!event) return;
+  if (!(await confirmSubmit(preview.counts, event))) return;
+  try {
+    const { counts, orphans } = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'Submitting review to GitHub…' },
+      () => controller.submitPullRequest(event),
+    );
+    const note = orphanNote(orphans);
+    void vscode.window.showInformationMessage(`Agentic Review: submitted ${summarizeCounts(counts)}.${note}`);
+  } catch (err) {
+    void vscode.window.showErrorMessage(`Agentic Review: could not submit the review. ${errorText(err)}`);
+  }
+}
+
+/**
+ * Choose the GitHub review event for a Submit. A closed or merged PR only accepts Comment (GitHub rejects
+ * Approve / Request changes), so those are omitted with a note rather than failing on submit.
+ */
+async function pickReviewEvent(state?: string): Promise<SubmitEvent | undefined> {
+  const closed = state === 'closed' || state === 'merged';
+  const items: (vscode.QuickPickItem & { event: SubmitEvent })[] = [
+    { label: 'Comment', description: 'Submit comments without explicit approval', event: 'comment' },
+  ];
+  if (!closed) {
+    items.push(
+      { label: 'Approve', description: 'Approve the pull request', event: 'approve' },
+      { label: 'Request changes', description: 'Submit feedback that must be addressed', event: 'request-changes' },
+    );
+  }
+  const placeHolder = closed
+    ? `This pull request is ${state}; only Comment can be submitted`
+    : 'Choose the review event to submit';
+  const picked = await vscode.window.showQuickPick(items, { placeHolder });
+  return picked?.event;
+}
+
+/** Apply the "new commits" banner: re-fetch the open PR's advanced head, re-diff, and re-import in place. */
+async function refreshOpenPullRequest(controller: ReviewController): Promise<void> {
+  try {
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'Refreshing pull request…' },
+      () => controller.reloadPullRequest(),
+    );
+  } catch (err) {
+    void vscode.window.showErrorMessage(`Agentic Review: could not refresh the pull request. ${errorText(err)}`);
+  }
+}
+
+/** A trailing sentence describing content whose upstream target vanished during a re-fetch, or empty. */
+function orphanNote(o: OrphanReport): string {
+  const parts: string[] = [];
+  if (o.localOnly > 0)
+    parts.push(
+      `${o.localOnly} of your comment${o.localOnly === 1 ? ' was' : 's were'} deleted on GitHub and kept local-only (repost on Submit, or delete to discard)`,
+    );
+  if (o.deletes > 0) parts.push(`${o.deletes} staged delete${o.deletes === 1 ? '' : 's'} already gone upstream`);
+  return parts.length ? ` (${parts.join('; ')}.)` : '';
+}
+
+/** Modal confirmation showing what the Submit will post, including how many comments are AI-authored. */
+async function confirmSubmit(counts: SubmitCounts, event: SubmitEvent): Promise<boolean> {
+  const eventLabel = event === 'approve' ? 'Approve' : event === 'request-changes' ? 'Request changes' : 'Comment';
+  const agent =
+    counts.agentComments > 0
+      ? ` Includes ${counts.agentComments} AI Agent comment${counts.agentComments === 1 ? '' : 's'}, posted under your account.`
+      : '';
+  const detail = `${summarizeCounts(counts)} will be posted to GitHub as "${eventLabel}".${agent}`;
+  const choice = await vscode.window.showWarningMessage(
+    'Submit this review to GitHub?',
+    { modal: true, detail },
+    'Submit',
+  );
+  return choice === 'Submit';
+}
+
+/** A human-readable tally of a submit's counts, e.g. "2 comments, 1 reply, 1 resolution". */
+function summarizeCounts(c: SubmitCounts): string {
+  const parts: string[] = [];
+  const add = (n: number, one: string, many: string): void => {
+    if (n > 0) parts.push(`${n} ${n === 1 ? one : many}`);
+  };
+  add(c.newComments, 'comment', 'comments');
+  add(c.replies, 'reply', 'replies');
+  add(c.edits, 'edit', 'edits');
+  add(c.deletes, 'deletion', 'deletions');
+  add(c.resolves, 'resolution', 'resolutions');
+  return parts.length ? parts.join(', ') : 'no changes';
 }
 
 /** A QuickPick of open PRs that also accepts a typed number or full PR URL. */

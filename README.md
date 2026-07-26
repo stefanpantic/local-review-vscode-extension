@@ -7,7 +7,7 @@
 
 Review your local git changes like a pull request, without opening one, or review a real GitHub PR in the same UI. Then hand the review to a coding agent, or let the agent post its own.
 
-> **Local-first.** Reviewing your git diff is entirely on-machine. Nothing leaves your box unless you explicitly open a GitHub pull request to review; no account, no telemetry.
+> **Local-first.** Reviewing your git diff happens entirely on your machine. Nothing leaves your box unless you open a GitHub pull request to review. No account. No telemetry.
 
 ![Agentic Review: a local git diff reviewed like a pull request in VS Code, with an inline comment and a suggested change, and a sidebar of changed files, active comments, and saved reviews. You and your coding agent comment in the same review over MCP.](docs/images/review-panel.png)
 
@@ -16,7 +16,7 @@ Review your local git changes like a pull request, without opening one, or revie
 - Renders your working-tree diff as a continuous, PR-style review inside VS Code (unified or side-by-side, syntax-highlighted).
 - Reviews a **GitHub pull request** in the same UI: point it at a PR and it fetches the PR in place (no checkout, your working tree untouched) and imports every review thread. Works with github.com and GitHub Enterprise.
 - Lets you comment on any line or range, on added or removed lines, with reply, resolve, and code suggestions.
-- Keeps comments anchored as code shifts. They drift with their lines, or go "outdated", never silently lost.
+- Keeps comments anchored as code shifts. They follow their lines, or go "outdated". They are never silently lost.
 - Saves a review per branch automatically.
 - Hands off to a coding agent two ways: a structured Markdown export, or a live MCP connection.
 
@@ -31,13 +31,13 @@ Review your local git changes like a pull request, without opening one, or revie
 
 ## Agent integration (MCP)
 
-Agentic Review runs a standard, local MCP server (bound to `127.0.0.1`, token-guarded, off by default) that any MCP client can use. The handoff goes both ways: you comment and the agent actions it, and the agent can post its own comments, replies, and suggestions that show up in the panel attributed to "AI Agent", anchored like yours.
+Agentic Review runs a standard, local MCP server (bound to `127.0.0.1`, token-guarded, off by default) that any MCP client can use. You comment and the agent acts on it. The agent can also post its own comments, replies, and suggestions. They show up in the panel attributed to "AI Agent", anchored like yours.
 
 1. Run **Agentic Review: Set up MCP**. Pick a port and whether to start it on launch.
 2. It generates an mcp.json (URL, token, and ready-to-run connect commands: Claude Code, plus a generic `mcpServers` config for other clients) and opens it. Reopen it anytime with **Open MCP Config**. It lives in the extension's per-workspace storage, not in your repo.
 3. Connect your client. Use **Start MCP Server** / **Stop MCP Server** to control it anytime.
 
-Tools the agent gets: `get_diff`, `get_review`, `list_reviews`, `post_comment`, `reply`, `resolve`. It never writes to your files. It posts comments, and actions them by editing code itself.
+Tools the agent gets: `get_diff`, `get_review`, `list_reviews`, `post_comment`, `reply`, `resolve`. It never writes to your files. It posts comments and makes the changes by editing code itself.
 
 ## Features
 
@@ -48,8 +48,8 @@ Tools the agent gets: `get_diff`, `get_review`, `list_reviews`, `post_comment`, 
 - **Inline comments** on single lines or ranges, old or new side, with edit, delete, reply, resolve.
 - **Suggestions:** propose replacement code in a comment, rendered as a before/after diff and captured in the export. Never written to disk.
 - **Markdown comments**, rendered in the panel.
-- **Line drift:** comments follow their lines, and go "outdated" instead of vanishing when they can't be matched.
-- **Branch-tied reviews:** saved automatically per branch. Reviews for deleted or merged branches are archived, not lost, and can be moved to the current branch.
+- **Line drift:** comments follow their lines. When they can't be matched they go "outdated" and stay in the review.
+- **Branch-tied reviews:** saved automatically per branch. Reviews for deleted or merged branches are archived and can be moved to the current branch.
 - **Structured Markdown export:** grouped by file, scoped to all, unresolved, or one file, at current or as-reviewed line positions.
 
 ## Diff sources
@@ -62,20 +62,26 @@ Pick what you review from **Select Diff Source**:
 | **Unstaged changes**      | not yet staged                         |
 | **Staged changes**        | staged for commit                      |
 | **Compare with a branch** | diff against another local branch      |
-| **Pull request**          | a fetched GitHub PR (`base…head`)      |
+| **Pull request**          | a fetched GitHub PR (`base...head`)    |
 
 Switching source changes only what you see. Comments re-anchor against whatever is loaded, so staging a hunk or switching source never orphans one.
 
 ## Review a GitHub pull request
 
-When the current repo's `origin` is a GitHub remote, a **Pull Requests** section appears in the Agentic Review sidebar listing the open PRs; click one to review it. You can also run **Agentic Review: Review Pull Request** (or pick it from **Select Diff Source**), which signs you in with VS Code's built-in GitHub sign-in the first time, lists the open PRs, and also accepts a PR URL or number. Either way it:
+When the current repo's `origin` is a GitHub remote, a **Pull Requests** section appears in the Agentic Review sidebar listing the open PRs. Click one to review it. You can also run **Agentic Review: Review Pull Request** (or pick it from **Select Diff Source**), which signs you in with VS Code's built-in GitHub sign-in the first time, lists the open PRs, and also accepts a PR URL or number. Either way it:
 
-- fetches the PR head and base **in place** (into hidden refs under `refs/agentic-review/`), so your working tree, index, and current branch are never touched;
-- renders `base…head` in the usual diff UI, with a header pill showing the source and target branches and a card with the PR title, state, and description;
-- imports all review threads at their correct file, side, and line, including resolved and outdated ones, with suggestions;
+- fetches the PR head and base **in place** (into hidden refs under `refs/agentic-review/`), so your working tree, index, and current branch are never touched.
+- renders `base...head` in the usual diff UI, with a header pill showing the source and target branches and a card with the PR title, state, and description.
+- imports all review threads at their correct file, side, and line, including resolved and outdated ones, with suggestions.
 - lists the PR as its own group in the **Reviews** sidebar, separate from your local branch reviews, and tracks "viewed" state per PR.
 
-For **GitHub Enterprise**, set `agenticReview.github.enterpriseUri` to your server (for example `https://github.your-company.com`); VS Code's `github-enterprise.uri` must point at the same host. Posting your review back to GitHub is coming in a follow-up; for now, hand it off with **Export Review** or your agent over MCP.
+### Write your review back
+
+Comment, reply, resolve, and edit or delete your own and your agent's comments. These changes stay on your machine and show how many are pending. Use the **Submit review** button in the review toolbar, or the **Agentic Review: Submit Review to GitHub** command. Choose one event: **Comment**, **Approve**, or **Request changes**. Your changes post as one GitHub review, pinned to the commit you reviewed. Submit is the only network write.
+
+A PR polls GitHub while it is open. New, edited, and resolved comments from other people appear in your review. Set the interval with `agenticReview.github.pollInterval`. Use `0` to turn polling off. New commits on the PR show a **Refresh** banner. Your review stays on the commit you loaded until you refresh. Other people's comments are read-only. You can edit or delete only your own and your agent's comments. If you delete one of your comments on GitHub, it stays in your review with an **only local** flag. Submit reposts it. Delete it to discard.
+
+For **GitHub Enterprise**, set `agenticReview.github.enterpriseUri` to your server, for example `https://github.your-company.com`. VS Code's `github-enterprise.uri` must point at the same host.
 
 ## Install
 
@@ -93,17 +99,20 @@ Prefer a packaged `.vsix`? Download `agentic-review-<version>.vsix` from [Releas
 
 ## Settings
 
-| Setting                             | Default            | Description                                                    |
-| ----------------------------------- | ------------------ | -------------------------------------------------------------- |
-| `localReview.defaultSource`         | `worktree-vs-head` | Diff source when a review is first opened.                     |
-| `localReview.defaultViewMode`       | `unified`          | Default rendering mode (`unified` or `split`).                 |
-| `localReview.defaultHideWhitespace` | `false`            | Hide whitespace-only changes by default.                       |
-| `localReview.includeUntracked`      | `true`             | Include untracked files (ignores `.gitignore`d files).         |
-| `localReview.largeFileThreshold`    | `1000`             | Files with more changed lines than this start collapsed.       |
-| `localReview.contextLines`          | `3`                | Lines of surrounding context captured for comments and export. |
-| `localReview.mcp.autoStart`         | `false`            | Start the MCP server when VS Code launches.                    |
-| `localReview.mcp.port`              | `0`                | MCP server port (`0` picks a free port and reuses it).         |
-| `localReview.log`                   | `false`            | Write diagnostic logs to the "Agentic Review" output channel.  |
+| Setting                               | Default            | Description                                                                 |
+| ------------------------------------- | ------------------ | --------------------------------------------------------------------------- |
+| `agenticReview.defaultSource`         | `worktree-vs-head` | Diff source when a review is first opened.                                  |
+| `agenticReview.defaultViewMode`       | `unified`          | Default rendering mode (`unified` or `split`).                              |
+| `agenticReview.defaultHideWhitespace` | `false`            | Hide whitespace-only changes by default.                                    |
+| `agenticReview.defaultWrap`           | `false`            | Wrap long lines instead of scrolling horizontally.                          |
+| `agenticReview.includeUntracked`      | `true`             | Include untracked files (ignores `.gitignore`d files).                      |
+| `agenticReview.largeFileThreshold`    | `1000`             | Files with more changed lines than this start collapsed.                    |
+| `agenticReview.contextLines`          | `3`                | Lines of surrounding context captured for comments and export.              |
+| `agenticReview.github.enterpriseUri`  | `""`               | GitHub Enterprise Server base URL. Empty uses github.com.                   |
+| `agenticReview.github.pollInterval`   | `60`               | Seconds between polls of an open PR for upstream changes. `0` turns it off. |
+| `agenticReview.mcp.autoStart`         | `false`            | Start the MCP server when VS Code launches.                                 |
+| `agenticReview.mcp.port`              | `0`                | MCP server port (`0` picks a free port and reuses it).                      |
+| `agenticReview.log`                   | `false`            | Write diagnostic logs to the "Agentic Review" output channel.               |
 
 ## Contributing
 

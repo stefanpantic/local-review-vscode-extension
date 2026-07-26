@@ -178,6 +178,29 @@ body {
   font-weight: 600;
   color: var(--vscode-foreground);
 }
+.lr-spinner {
+  width: 26px;
+  height: 26px;
+  margin: 0 auto 14px;
+  border: 3px solid var(--lr-border);
+  border-top-color: var(--vscode-progressBar-background, var(--vscode-foreground));
+  border-radius: 50%;
+  animation: lr-spin 0.8s linear infinite;
+  /* Promote to its own layer so the rotation keeps running on the compositor while the main thread is
+     busy building a large diff — the spinner stays smooth instead of freezing mid-turn. */
+  will-change: transform;
+}
+@keyframes lr-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* Spinner shown in place of the file diffs while they are being built (the toolbar/header stay visible). */
+.lr-diff-loading {
+  display: flex;
+  justify-content: center;
+  padding: 64px 24px;
+}
 
 /* summary bar, per-file sections, collapse chevron, viewed control */
 .lr-summary {
@@ -202,6 +225,29 @@ body {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 11px;
 }
+.lr-pending {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid currentColor;
+  border-radius: 10px;
+  font-size: 11px;
+  color: var(--vscode-charts-blue, #3794ff);
+}
+.lr-submit-btn {
+  flex: none;
+  padding: 2px 10px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 4px;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.lr-submit-btn:hover {
+  background: var(--vscode-button-hoverBackground, var(--vscode-button-background));
+}
 .lr-pr-pill {
   white-space: nowrap; /* the branch names are pre-truncated; keep the pill on one line */
 }
@@ -216,6 +262,7 @@ body {
   border-left: 2px solid var(--lr-diff-accent);
   border-radius: var(--lr-radius);
   background: var(--vscode-editor-background);
+  scroll-margin-top: 40px; /* clear the sticky summary bar when revealed */
 }
 /* Body wrapper clips hunks to the card's rounded bottom (sticky header is its sibling, not inside it). */
 .lr-file-body {
@@ -362,23 +409,39 @@ body {
 .lr-pr-state-closed {
   color: var(--vscode-errorForeground, #f85149);
 }
+.lr-pr-state-draft {
+  color: var(--vscode-descriptionForeground);
+}
 .lr-ws input {
   margin: 0;
 }
 
 /* Split view */
-.lr-srow {
-  display: flex;
-  align-items: stretch;
+/* Both sides share one grid so each column has a single width across every row: aligned columns, no
+   staircase. Each column fits the longest line on its side (min: max-content) and shares any slack when
+   the diff is narrower than the pane (1fr), so short files fill the width and wide ones scroll as one unit.
+   The rows themselves (.lr-srow) are display: contents so their two cells become the grid's column items. */
+.lr-hscroll.lr-split {
+  display: grid;
+  grid-template-columns: minmax(max-content, 1fr) minmax(max-content, 1fr);
+}
+.lr-split .lr-srow {
+  display: contents;
+}
+/* Non-code rows (hunk headers, expand bars, comment threads/composer) span both columns. */
+.lr-split .lr-hunk-header,
+.lr-split .lr-expand,
+.lr-split .lr-below {
+  grid-column: 1 / -1;
 }
 .lr-scell {
-  flex: 1 1 50%;
   min-width: max-content;
   display: flex;
   align-items: baseline;
   white-space: pre;
 }
-.lr-scell:first-child {
+/* The column divider sits on the right edge of every old-side cell, so it stays continuous down the grid. */
+.lr-scell-old {
   border-right: 1px solid var(--lr-border);
 }
 .lr-scell.lr-add {
@@ -395,6 +458,10 @@ body {
 .lr-wrap .lr-hscroll {
   width: auto;
   min-width: 0;
+}
+/* Split columns must be shrinkable to wrap (max-content tracks would keep forcing a scroll otherwise). */
+.lr-wrap .lr-hscroll.lr-split {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 .lr-wrap .lr-row,
 .lr-wrap .lr-scell,
@@ -472,6 +539,9 @@ body {
 .lr-thread {
   max-width: 820px;
   margin: 4px 0;
+  /* clear the two stacked sticky headers (summary bar + file header) when a thread is revealed, so its
+     top lands below them instead of scrolled underneath (which showed the footer actions at the top). */
+  scroll-margin-top: 80px;
   border: 1px solid var(--lr-card-border);
   border-radius: var(--lr-radius);
   background: var(--vscode-editor-background);
@@ -693,6 +763,15 @@ body {
   color: var(--vscode-charts-blue, #3794ff);
   border-color: currentColor;
 }
+.lr-badge-readonly {
+  color: var(--vscode-descriptionForeground);
+  border-color: currentColor;
+}
+.lr-badge-localonly {
+  margin-left: 6px;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  border-color: currentColor;
+}
 
 /* Comment form */
 .lr-comment-form {
@@ -843,6 +922,18 @@ body {
   border: 1px solid var(--vscode-errorForeground, #f85149);
   border-radius: 4px;
   color: var(--vscode-errorForeground, #f85149);
+  font-family: var(--vscode-font-family);
+}
+/* "This PR has new commits" notice: informational (not an error), with a Refresh action. */
+.lr-headstale-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 12px 0;
+  padding: 6px 12px;
+  border: 1px solid var(--vscode-charts-blue, #3794ff);
+  border-radius: 4px;
+  color: var(--vscode-foreground);
   font-family: var(--vscode-font-family);
 }
 

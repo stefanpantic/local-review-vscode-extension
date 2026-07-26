@@ -55,6 +55,18 @@ export class ReviewPanel {
         editComment: (p) => this.controller.editComment(p.threadId, p.commentId, p.body, p.suggestion),
         deleteComment: (p) => this.controller.deleteComment(p.threadId, p.commentId),
         resolveThread: (p) => this.controller.resolveThread(p.threadId, p.resolved),
+        submitReview: async () => {
+          await vscode.commands.executeCommand('agenticReview.github.submitReview');
+          return { ok: true as const };
+        },
+        refreshPullRequest: async () => {
+          await vscode.commands.executeCommand('agenticReview.github.refreshPullRequest');
+          return { ok: true as const };
+        },
+        panelRendered: () => {
+          this.controller.markPanelRendered();
+          return { ok: true as const };
+        },
       },
       this.disposables,
       (parts) => log('[webview]', ...parts),

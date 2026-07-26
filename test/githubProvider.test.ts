@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GithubReviewProvider } from '../src/github/provider';
-import type { GithubReadClient } from '../src/github/client';
+import type { GhNewComment, GhPostedComment, GithubWriteClient } from '../src/github/client';
 import type { PullRequestDetail, PullRequestSummary } from '../src/review/provider';
+import type { SubmitReviewInput } from '../src/review/submit';
 import type { GhReviewThread } from '../src/github/types';
 import type { DiffRow, FileDiff, Hunk, ReviewDiff } from '../src/model/ReviewDiff';
 
@@ -20,10 +21,49 @@ function diff(rows: DiffRow[]): ReviewDiff {
   return { repoRoot: '/r', source: 'pr', headSha: 'head', files: [file], generatedAt: 'x' };
 }
 
-class FakeClient implements GithubReadClient {
-  constructor(private readonly threads: GhReviewThread[]) {}
+class FakeClient implements GithubWriteClient {
+  // Recorded write calls, so a submit's translation + sequencing can be asserted without the network.
+  reviews: { event: string; commitId: string; body: string; comments: GhNewComment[] }[] = [];
+  posted: GhPostedComment[] = []; // comments createReview created, returned by listReviewComments
+  replies: { inReplyTo: number; body: string }[] = [];
+  edits: { commentId: number; body: string }[] = [];
+  deletes: number[] = [];
+  resolves: { threadId: string; resolved: boolean }[] = [];
+  private nextId = 500;
+  constructor(private readonly threads: GhReviewThread[] = []) {}
   async viewer(): Promise<string> {
     return 'octocat';
+  }
+  async createReview(
+    _repo: unknown,
+    _number: number,
+    input: {
+      commitId: string;
+      event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
+      body: string;
+      comments: GhNewComment[];
+    },
+  ): Promise<{ id: number }> {
+    this.reviews.push(input);
+    for (const c of input.comments) {
+      this.posted.push({ id: this.nextId++, path: c.path, line: c.line, side: c.side, body: c.body });
+    }
+    return { id: 1 };
+  }
+  async listReviewComments(): Promise<GhPostedComment[]> {
+    return this.posted;
+  }
+  async reply(_repo: unknown, _number: number, input: { inReplyTo: number; body: string }): Promise<void> {
+    this.replies.push(input);
+  }
+  async editComment(_repo: unknown, input: { commentId: number; body: string }): Promise<void> {
+    this.edits.push(input);
+  }
+  async deleteComment(_repo: unknown, input: { commentId: number }): Promise<void> {
+    this.deletes.push(input.commentId);
+  }
+  async resolveThread(input: { threadId: string; resolved: boolean }): Promise<void> {
+    this.resolves.push(input);
   }
   async listPullRequests(): Promise<PullRequestSummary[]> {
     return [{ number: 1, title: 'PR', author: 'a', state: 'open', url: 'u', updatedAt: 't', isDraft: false }];
@@ -94,4 +134,95 @@ test('viewer and listRequests delegate to the client', async () => {
   const p = new GithubReviewProvider('github', async () => new FakeClient([]));
   assert.equal(await p.viewer(), 'octocat');
   assert.equal((await p.listRequests(repo))[0].number, 1);
+});
+
+test('submitReview translates the neutral batch into GitHub calls', async () => {
+  const client = new FakeClient();
+  const p = new GithubReviewProvider('github', async () => client);
+  const input: SubmitReviewInput = {
+    event: 'request-changes',
+    commitId: 'HEAD',
+    body: '',
+    newThreads: [
+      { root: { path: 'a.ts', side: 'old', line: 8, startLine: 5, body: 'multi' }, replies: [] },
+      { root: { path: 'b.ts', side: 'new', line: 3, body: 'single' }, replies: [] },
+    ],
+    replies: [{ rootId: '100', body: 'reply' }],
+    edits: [{ commentId: '200', body: 'edited' }],
+    deletes: ['300'],
+    resolves: [{ threadId: 'T1', resolved: true }],
+  };
+  await p.submitReview(repo, 7, input);
+  assert.deepEqual(client.edits, [{ commentId: 200, body: 'edited' }]);
+  assert.deepEqual(client.deletes, [300]);
+  assert.deepEqual(client.replies, [{ inReplyTo: 100, body: 'reply' }]);
+  assert.deepEqual(client.resolves, [{ threadId: 'T1', resolved: true }]);
+  assert.equal(client.reviews.length, 1);
+  const rv = client.reviews[0];
+  assert.equal(rv.event, 'REQUEST_CHANGES');
+  assert.equal(rv.commitId, 'HEAD');
+  assert.deepEqual(rv.comments[0], {
+    path: 'a.ts',
+    body: 'multi',
+    line: 8,
+    side: 'LEFT',
+    start_line: 5,
+    start_side: 'LEFT',
+  });
+  assert.deepEqual(rv.comments[1], { path: 'b.ts', body: 'single', line: 3, side: 'RIGHT' });
+});
+
+test('submitReview skips the review batch for a bare comment with nothing to say', async () => {
+  const client = new FakeClient();
+  const p = new GithubReviewProvider('github', async () => client);
+  await p.submitReview(repo, 7, {
+    event: 'comment',
+    commitId: 'H',
+    body: '',
+    newThreads: [],
+    replies: [{ rootId: '1', body: 'x' }],
+    edits: [],
+    deletes: [],
+    resolves: [],
+  });
+  assert.equal(client.reviews.length, 0); // no new threads + comment event + empty body -> no review
+  assert.equal(client.replies.length, 1); // the imported-thread reply still posts on its own
+});
+
+test('submitReview posts an approve even with no inline comments', async () => {
+  const client = new FakeClient();
+  const p = new GithubReviewProvider('github', async () => client);
+  await p.submitReview(repo, 7, {
+    event: 'approve',
+    commitId: 'H',
+    body: '',
+    newThreads: [],
+    replies: [],
+    edits: [],
+    deletes: [],
+    resolves: [],
+  });
+  assert.equal(client.reviews.length, 1);
+  assert.equal(client.reviews[0].event, 'APPROVE');
+});
+
+test('submitReview posts a new draft thread root and its follow-up reply in the same call', async () => {
+  const client = new FakeClient();
+  const p = new GithubReviewProvider('github', async () => client);
+  await p.submitReview(repo, 7, {
+    event: 'comment',
+    commitId: 'H',
+    body: '',
+    newThreads: [{ root: { path: 'a.ts', side: 'new', line: 4, body: 'first' }, replies: ['second'] }],
+    replies: [],
+    edits: [],
+    deletes: [],
+    resolves: [],
+  });
+  assert.equal(client.reviews.length, 1);
+  assert.equal(client.reviews[0].comments[0].body, 'first');
+  // The follow-up posts as a reply to the root the review just created (matched by position + body).
+  assert.equal(client.replies.length, 1);
+  assert.equal(client.replies[0].body, 'second');
+  assert.equal(client.replies[0].inReplyTo, 500); // the id FakeClient assigned to the created root
 });

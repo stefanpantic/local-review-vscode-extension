@@ -27,3 +27,14 @@ This reframes the vision to **local-first with opt-in GitHub PR review**: nothin
 - Imported comments whose original head differs from the fetched head anchor by content and render **outdated** more often than local ones. Accepted, consistent with ADR-0003 (outdated ≠ deleted).
 - Octokit and its transitive deps enlarge the host bundle (~240 KB); acceptable, and the lean runtime-dep count grows by one.
 - A remote review is keyed under a synthetic `pr/<provider>/<number>` branch and viewed-tracked per PR, so it lists distinctly, never becomes a git branch's autosave target, and its viewed state never collides with local sources or other PRs.
+
+## Addendum — write-back & sync (iteration 12)
+
+Implementing the write half settled a few mechanics on top of the decision above:
+
+- **One review, posted last, pinned.** Submit performs the housekeeping calls (edits, deletes, imported-thread replies, resolves) and then a single create-review batch carrying the new comments and the chosen event, pinned to the reviewed `commit_id`. The neutral `SubmitReviewInput` (built by a pure `buildSubmitPlan`) is what the GitHub provider translates into these calls, so the batch logic is host-agnostic and unit-tested.
+- **A draft you replied to before submitting posts in one press.** A reply needs its root's id, which only exists once the review is created, so the provider posts the batch, reads back the created comments, matches each root, and posts its follow-up replies — all within the one Submit. No "submit twice".
+- **Reconcile is the single merge primitive.** Open, the poll, refresh, and the pre-submit re-fetch all merge a fresh posted set over local pending through one function: upstream content refreshes, local pending re-applies, a vanished reply target re-homes to a draft (never a 404), and **your own comment deleted upstream is kept `localOnly` and repostable rather than removed**. Ids reconcile by re-import after Submit, so a re-run can't double-post.
+- **Sync is gentle and non-surprising.** A background poll (PR-mode only, configurable interval) live-updates comment changes; an advanced head is never swapped in automatically — it raises a Refresh banner. Concurrent edits are last-write-wins for now.
+- **Identity.** A new comment is attributed to your GitHub login when signed in, else `git config user.name`; edit/delete is allowed only on your own or the AI Agent's comments.
+- **Deferred to iteration 13 (hardening).** Honoring a staged delete across a poll, safe retry after a partial submit, a mutation lock between poll and submit, durable-ref restart restore, a review summary body, concurrent-edit surfacing, and permission/auth edges were pressure-test findings batched into a follow-up so iteration 12 shipped without scope creep.

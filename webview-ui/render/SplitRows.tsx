@@ -20,7 +20,7 @@ function SplitCell({
   commented?: boolean;
   changes?: Range[];
 }) {
-  if (!row) return <div className="lr-scell lr-scell-empty" />;
+  if (!row) return <div className={`lr-scell lr-scell-${side} lr-scell-empty`} />;
   const lineNo = side === 'old' ? row.oldLineNo : row.newLineNo;
   const change = side === 'old' ? (row.type === 'del' ? 'lr-del' : '') : row.type === 'add' ? 'lr-add' : '';
   const canAdd = add && lineNo != null;
@@ -28,7 +28,7 @@ function SplitCell({
   const changeClass = row.type === 'add' ? 'lr-ch-add' : row.type === 'del' ? 'lr-ch-del' : undefined;
   return (
     <div
-      className={`lr-scell ${change}${selected ? ' lr-selected' : ''}${commented ? ' lr-commented' : ''}`}
+      className={`lr-scell lr-scell-${side} ${change}${selected ? ' lr-selected' : ''}${commented ? ' lr-commented' : ''}`}
       onMouseEnter={canAdd ? () => add!.onEnter(side, lineNo) : undefined}
     >
       {canAdd && (

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { ReviewController } from '../reviewController';
 import type { PullRequestSummary } from '../review/provider';
+import { prStateLabel } from '../protocol/messages';
 import { hasGithubSession } from '../github/auth';
 import type { GithubProviderId } from '../github/remote';
 
@@ -57,9 +58,11 @@ export class PullRequestsView implements vscode.TreeDataProvider<PrNode> {
     }
     const pr = node.pr;
     const item = new vscode.TreeItem(`#${pr.number} ${pr.title}`);
-    item.description = `${pr.author}${pr.isDraft ? ' · draft' : ''}`;
+    item.description = `${pr.author}${pr.isDraft ? ' · Draft' : ''}`;
     item.iconPath = new vscode.ThemeIcon('git-pull-request');
-    item.tooltip = new vscode.MarkdownString(`**#${pr.number} ${pr.title}**\n\n${pr.author} · ${pr.state}`);
+    item.tooltip = new vscode.MarkdownString(
+      `**#${pr.number} ${pr.title}**\n\n${pr.author} · ${prStateLabel(pr.state, pr.isDraft)}`,
+    );
     item.contextValue = 'agenticReview.pullRequest';
     item.command = {
       command: 'agenticReview.openPullRequestFromList',

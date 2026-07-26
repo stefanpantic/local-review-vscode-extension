@@ -57,13 +57,13 @@
           "name": "Current Review"
         },
         {
-          "id": "agenticReview.reviews",
-          "name": "Saved Reviews"
-        },
-        {
           "id": "agenticReview.pullRequests",
           "name": "Pull Requests",
           "when": "agenticReview.hasRemote"
+        },
+        {
+          "id": "agenticReview.reviews",
+          "name": "Saved Reviews"
         }
       ]
     },
@@ -153,6 +153,18 @@
         "command": "agenticReview.openPullRequestFromList",
         "title": "Open Pull Request",
         "category": "Agentic Review"
+      },
+      {
+        "command": "agenticReview.github.submitReview",
+        "title": "Submit Review to GitHub",
+        "category": "Agentic Review",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "agenticReview.github.refreshPullRequest",
+        "title": "Refresh Pull Request",
+        "category": "Agentic Review",
+        "icon": "$(sync)"
       },
       {
         "command": "agenticReview.revealFile",
@@ -257,12 +269,12 @@
     "menus": {
       "view/title": [
         {
-          "command": "agenticReview.startReview",
+          "command": "agenticReview.selectSource",
           "when": "view == agenticReview.files",
           "group": "navigation@1"
         },
         {
-          "command": "agenticReview.selectSource",
+          "command": "agenticReview.startReview",
           "when": "view == agenticReview.files",
           "group": "navigation@2"
         },
@@ -350,6 +362,14 @@
         {
           "command": "agenticReview.openPullRequestFromList",
           "when": "false"
+        },
+        {
+          "command": "agenticReview.github.submitReview",
+          "when": "agenticReview.source == pr"
+        },
+        {
+          "command": "agenticReview.github.refreshPullRequest",
+          "when": "agenticReview.source == pr"
         }
       ]
     },
@@ -447,6 +467,12 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Base URL of your GitHub Enterprise Server (for example `https://github.your-company.com`). Leave empty to use github.com. Reviewing a pull request whose remote is on this host signs in via VS Code's GitHub Enterprise provider, which also needs `github-enterprise.uri` set to the same host."
+        },
+        "agenticReview.github.pollInterval": {
+          "type": "number",
+          "default": 60,
+          "minimum": 0,
+          "markdownDescription": "How often (in seconds) to poll an open pull request for upstream changes. New, edited, and resolved comments update live; a new head commit surfaces a Refresh banner (never applied automatically). Polling runs only while a pull request is open. Set to `0` to disable it."
         }
       }
     }

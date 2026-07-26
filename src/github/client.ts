@@ -14,6 +14,45 @@ export interface GithubReadClient {
   getReviewThreads(repo: RemoteRepoRef, number: number): Promise<GhReviewThread[]>;
 }
 
+/** One new inline comment in a create-review batch, in GitHub's shape (side is LEFT/RIGHT; lines pinned). */
+export interface GhNewComment {
+  path: string;
+  body: string;
+  line: number; // last line of the range (or the only line)
+  side: 'LEFT' | 'RIGHT';
+  start_line?: number; // first line for a multi-line comment
+  start_side?: 'LEFT' | 'RIGHT';
+}
+
+/** A review comment as posted, enough to match it back to the local thread that created it. */
+export interface GhPostedComment {
+  id: number; // databaseId — the reply target
+  path: string;
+  line: number | null;
+  side?: 'LEFT' | 'RIGHT';
+  body: string;
+}
+
+/** The write operations Submit needs, on top of the read surface. All egress runs through these. */
+export interface GithubWriteClient extends GithubReadClient {
+  createReview(
+    repo: RemoteRepoRef,
+    number: number,
+    input: {
+      commitId: string;
+      event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
+      body: string;
+      comments: GhNewComment[];
+    },
+  ): Promise<{ id: number }>;
+  /** The comments a review created, so a just-posted root can be found to reply to it in the same Submit. */
+  listReviewComments(repo: RemoteRepoRef, number: number, reviewId: number): Promise<GhPostedComment[]>;
+  reply(repo: RemoteRepoRef, number: number, input: { inReplyTo: number; body: string }): Promise<void>;
+  editComment(repo: RemoteRepoRef, input: { commentId: number; body: string }): Promise<void>;
+  deleteComment(repo: RemoteRepoRef, input: { commentId: number }): Promise<void>;
+  resolveThread(input: { threadId: string; resolved: boolean }): Promise<void>;
+}
+
 const THREADS_QUERY = `
 query ($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
@@ -64,9 +103,13 @@ interface ThreadsResponse {
   };
 }
 
+// Resolve state has no REST equivalent, so it goes through GraphQL by thread node id.
+const RESOLVE_MUTATION = `mutation ($threadId: ID!) { resolveReviewThread(input: { threadId: $threadId }) { thread { id } } }`;
+const UNRESOLVE_MUTATION = `mutation ($threadId: ID!) { unresolveReviewThread(input: { threadId: $threadId }) { thread { id } } }`;
+
 type GraphqlFn = <T>(query: string, params: Record<string, unknown>) => Promise<T>;
 
-class OctokitClient implements GithubReadClient {
+class OctokitClient implements GithubWriteClient {
   constructor(
     private readonly kit: Octokit,
     private readonly gql: GraphqlFn,
@@ -156,14 +199,80 @@ class OctokitClient implements GithubReadClient {
     } while (cursor);
     return out;
   }
+
+  async createReview(
+    repo: RemoteRepoRef,
+    number: number,
+    input: {
+      commitId: string;
+      event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
+      body: string;
+      comments: GhNewComment[];
+    },
+  ): Promise<{ id: number }> {
+    const { data } = await this.kit.rest.pulls.createReview({
+      owner: repo.owner,
+      repo: repo.repo,
+      pull_number: number,
+      commit_id: input.commitId,
+      event: input.event,
+      body: input.body || undefined,
+      comments: input.comments,
+    });
+    return { id: data.id };
+  }
+
+  async listReviewComments(repo: RemoteRepoRef, number: number, reviewId: number): Promise<GhPostedComment[]> {
+    const data = await this.kit.paginate(this.kit.rest.pulls.listCommentsForReview, {
+      owner: repo.owner,
+      repo: repo.repo,
+      pull_number: number,
+      review_id: reviewId,
+      per_page: 100,
+    });
+    return data.map((c) => ({
+      id: c.id,
+      path: c.path,
+      line: c.line ?? c.original_line ?? null,
+      side: c.side === 'LEFT' || c.side === 'RIGHT' ? c.side : undefined,
+      body: c.body,
+    }));
+  }
+
+  async reply(repo: RemoteRepoRef, number: number, input: { inReplyTo: number; body: string }): Promise<void> {
+    await this.kit.rest.pulls.createReplyForReviewComment({
+      owner: repo.owner,
+      repo: repo.repo,
+      pull_number: number,
+      comment_id: input.inReplyTo,
+      body: input.body,
+    });
+  }
+
+  async editComment(repo: RemoteRepoRef, input: { commentId: number; body: string }): Promise<void> {
+    await this.kit.rest.pulls.updateReviewComment({
+      owner: repo.owner,
+      repo: repo.repo,
+      comment_id: input.commentId,
+      body: input.body,
+    });
+  }
+
+  async deleteComment(repo: RemoteRepoRef, input: { commentId: number }): Promise<void> {
+    await this.kit.rest.pulls.deleteReviewComment({ owner: repo.owner, repo: repo.repo, comment_id: input.commentId });
+  }
+
+  async resolveThread(input: { threadId: string; resolved: boolean }): Promise<void> {
+    await this.gql(input.resolved ? RESOLVE_MUTATION : UNRESOLVE_MUTATION, { threadId: input.threadId });
+  }
 }
 
-/** Build a read client for a host, authenticated with `token`. GHE derives its own REST + GraphQL bases. */
+/** Build a client for a host, authenticated with `token`. GHE derives its own REST + GraphQL bases. */
 export function createGithubClient(opts: {
   token: string;
   providerId: GithubProviderId;
   enterpriseUri?: string;
-}): GithubReadClient {
+}): GithubWriteClient {
   const bases = apiBaseUrls(opts.providerId, opts.enterpriseUri);
   const kit = new Octokit({ auth: opts.token, baseUrl: bases.rest });
   // Octokit derives the GraphQL endpoint as `${baseUrl}/graphql`; on GHE the GraphQL root differs from the

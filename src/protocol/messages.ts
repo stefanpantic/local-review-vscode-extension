@@ -3,6 +3,7 @@
 
 import type { DiffSource, RepoInfo, DiffResult, ViewMode, Side } from '../model/ReviewDiff';
 import type { CommentThread } from '../model/Comment';
+import type { PendingSummary } from '../review/pending';
 
 export interface Message {
   id?: number; // present → request or its matching response; absent → a broadcast event
@@ -12,12 +13,20 @@ export interface Message {
 }
 
 /** Full snapshot the panel renders from (returned by getState and pushed on stateChanged). */
+/** Display label for a PR's state: 'Draft' for a draft, else the capitalized state ('Open'/'Closed'/'Merged'). */
+export function prStateLabel(state: string | undefined, isDraft?: boolean): string {
+  if (isDraft) return 'Draft';
+  if (!state) return '';
+  return state.charAt(0).toUpperCase() + state.slice(1);
+}
+
 /** Display metadata for the pull request under review; present only when source === 'pr'. */
 export interface PrDisplay {
   number?: number;
   title?: string;
   author?: string; // login
   state?: string; // 'open' | 'closed' | 'merged'
+  isDraft?: boolean; // draft PR: show a Draft badge instead of the Open one
   url?: string;
   body?: string; // description (markdown); empty string when there is none
 }
@@ -34,6 +43,9 @@ export interface ReviewStatePayload {
   wrap: boolean; // wrap long lines instead of scrolling horizontally
   threads: CommentThread[]; // active review, re-anchored against the current diff
   pr?: PrDisplay; // the PR being reviewed (source === 'pr')
+  pending?: PendingSummary; // staged, not-yet-submitted changes on the PR review (source === 'pr')
+  headStale?: boolean; // the open PR advanced upstream; show a Refresh banner (never auto-applied)
+  viewer?: string; // the current user's identity (GitHub login or git user.name); who "your" comments belong to
   config: { largeFileThreshold: number };
 }
 
@@ -65,6 +77,14 @@ export interface Requests {
     response: { threadId: string; threadDeleted: boolean };
   };
   resolveThread: { payload: { threadId: string; resolved: boolean }; response: CommentThread };
+  // Post the PR's staged change set to GitHub. The host owns the event picker + confirmation, so the
+  // webview just triggers it; the host pushes the refreshed state when it completes.
+  submitReview: { payload: Record<string, never>; response: { ok: true } };
+  // Re-fetch the open PR's new head (the "new commits" banner action); re-diffs and re-imports in place.
+  refreshPullRequest: { payload: Record<string, never>; response: { ok: true } };
+  // The webview has painted the current diff (threads are in the DOM). Lets the sidebar mark comments
+  // clickable only once they can actually be revealed on the diff.
+  panelRendered: { payload: Record<string, never>; response: { ok: true } };
 }
 export type RequestType = keyof Requests;
 
@@ -72,7 +92,7 @@ export type RequestType = keyof Requests;
 export interface Events {
   stateChanged: ReviewStatePayload; // after a recompute (refresh / source / repo switch)
   viewedUpdated: { viewed: Record<string, boolean> }; // lightweight: only viewed flags changed
-  threadsUpdated: { threads: CommentThread[] }; // lightweight: after a comment mutation (diff not re-sent)
+  threadsUpdated: { threads: CommentThread[]; pending?: PendingSummary }; // lightweight: after a comment mutation (diff not re-sent)
   revealFile: { filePath: string; threadId?: string }; // scroll the panel to a file, or to a specific comment thread
   navigate: { target: 'file' | 'comment'; dir: 'next' | 'prev' }; // scroll to next/prev change or comment
   showError: { message: string };

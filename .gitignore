@@ -6,3 +6,6 @@ out/
 coverage/
 *.log
 .DS_Store
+
+# Claude Code: share skills, keep per-user settings local
+.claude/settings.local.json

@@ -8,10 +8,14 @@ import { orderByTree } from './fileTree';
 import type { DiffResult, DiffSource, FileDiff, PrRef, RepoInfo, ReviewDiff, ViewMode } from './model/ReviewDiff';
 import { prBranchKey, prViewedNamespace } from './model/ReviewDiff';
 import type { Comment, CommentThread, RemoteRef, Review } from './model/Comment';
-import { UNKNOWN_AUTHOR } from './model/Comment';
+import { durableThread, UNKNOWN_AUTHOR } from './model/Comment';
 import type { RemoteRepoRef, ReviewProvider } from './review/provider';
-import { parseRemoteUrl } from './github/remote';
+import { parseRemoteUrl, type GithubProviderId } from './github/remote';
+import { getViewerLogin } from './github/auth';
 import { resolveProvider } from './review/resolveProvider';
+import { pendingChangeSet, type PendingSummary } from './review/pending';
+import { buildSubmitPlan, type SubmitCounts, type SubmitEvent } from './review/submit';
+import { reconcile, type OrphanReport } from './review/reconcile';
 import type { McpReviewApi } from './mcp/tools';
 import type { Events, EventType, PrDisplay, ReviewStatePayload } from './protocol/messages';
 
@@ -32,6 +36,11 @@ export class ReviewController {
   };
   private userName: string | undefined; // git config user.name of the current repo — attributes your comments
   private userNameRepo: string | undefined; // repoRoot the cached userName belongs to
+  private viewerLogin: string | undefined; // signed-in GitHub login, when a session exists — the preferred author
+  private headStale = false; // the open PR advanced upstream; surfaced as a Refresh banner, never auto-applied
+  private panelRendered = false; // the webview has painted the current diff (threads are in the DOM)
+  private pendingReveal?: { filePath: string; threadId?: string }; // a reveal held until the panel has painted
+  private renderSettle?: ReturnType<typeof setTimeout>; // debounces the panel's paint burst before "ready"
   private readonly _onDidChange = new vscode.EventEmitter<void>();
   /** Fires when the trees should refresh. */
   readonly onDidChange = this._onDidChange.event;
@@ -44,9 +53,17 @@ export class ReviewController {
 
   bindPanel(post: PanelPost): void {
     this.panelPost = post;
+    this._onDidChange.fire(); // a panel is opening but hasn't painted yet — refresh the sidebar's ready state
   }
   unbindPanel(): void {
     this.panelPost = undefined;
+    this.panelRendered = false;
+    this.pendingReveal = undefined;
+    if (this.renderSettle) {
+      clearTimeout(this.renderSettle);
+      this.renderSettle = undefined;
+    }
+    this._onDidChange.fire();
   }
 
   get repositories(): RepoInfo[] {
@@ -93,6 +110,9 @@ export class ReviewController {
       wrap: pref.wrap,
       threads: this.threads(),
       pr: this.prDisplay(pref),
+      pending: this.pendingSummary(pref),
+      headStale: pref.source === 'pr' ? this.headStale : undefined,
+      viewer: this.authorIdentity(),
       config: { largeFileThreshold },
     };
   }
@@ -101,13 +121,28 @@ export class ReviewController {
     return this.current.state === 'ok' ? this.current.diff : undefined;
   }
 
+  /** The staged, not-yet-submitted change count for the PR under review (undefined outside PR mode). */
+  private pendingSummary(pref: Pref): PendingSummary | undefined {
+    if (pref.source !== 'pr' || !pref.repoRoot) return undefined;
+    const review = this.reviewStore.current(pref.repoRoot, this.branchKey(pref.repoRoot));
+    return review?.kind === 'remote' ? pendingChangeSet(review) : undefined;
+  }
+
   /** Display metadata for the PR under review, from the current remote review's stored request. */
   private prDisplay(pref: Pref): PrDisplay | undefined {
     if (pref.source !== 'pr' || !pref.repoRoot) return undefined;
     const review = this.reviewStore.current(pref.repoRoot, this.branchKey(pref.repoRoot));
     if (review?.kind !== 'remote') return undefined;
     const r = review.remote;
-    return { number: r.number, title: r.title, author: r.author, state: r.state, url: r.url, body: r.body };
+    return {
+      number: r.number,
+      title: r.title,
+      author: r.author,
+      state: r.state,
+      isDraft: r.isDraft,
+      url: r.url,
+      body: r.body,
+    };
   }
 
   /** The git branch a local review belongs to; `detached@<sha8>` when HEAD is detached. */
@@ -150,6 +185,43 @@ export class ReviewController {
   /** The current review's threads (re-anchored) for the sidebar Comments view. */
   activeThreads(): CommentThread[] {
     return this.threads();
+  }
+
+  /**
+   * Whether the sidebar's comments can be revealed on the diff yet. A PR renders asynchronously after it
+   * loads, so its comments are shown as loading (not clickable) until the panel reports it has painted;
+   * local diffs (and the case with no panel open) are ready immediately.
+   */
+  commentsReady(): boolean {
+    return this.state.getPref().source !== 'pr' || !this.panelPost || this.panelRendered;
+  }
+
+  /**
+   * The panel paints in a burst as a diff loads: the diff first, then its threads (and, for a PR, imported
+   * threads arrive a beat later). Marking ready on the first paint would flip comments clickable before
+   * they are all on the diff, so clicking mid-load causes a jump. Instead wait until the paints settle
+   * (no further paint for a short window), then mark ready once.
+   */
+  markPanelRendered(): void {
+    if (this.panelRendered) {
+      this.flushPendingReveal();
+      return;
+    }
+    if (this.renderSettle) clearTimeout(this.renderSettle);
+    this.renderSettle = setTimeout(() => {
+      this.renderSettle = undefined;
+      this.panelRendered = true;
+      this._onDidChange.fire();
+      this.flushPendingReveal();
+    }, RENDER_SETTLE_MS);
+  }
+
+  private flushPendingReveal(): void {
+    if (this.pendingReveal && this.panelPost) {
+      const target = this.pendingReveal;
+      this.pendingReveal = undefined;
+      this.panelPost('revealFile', target);
+    }
   }
 
   // --- Review sessions (branch-tied). The current review autosaves; these manage the set. ---
@@ -258,6 +330,14 @@ export class ReviewController {
     return this.repos.find((r) => r.repoRoot === repoRoot)?.name ?? 'repo';
   }
 
+  /** A short label for the current diff source — for the Changes-view source switcher. */
+  sourceLabel(): string {
+    const pref = this.state.getPref();
+    if (pref.source === 'pr' && pref.pr) return `Pull request #${pref.pr.number}`;
+    if (pref.source === 'vs-base') return `Compared with ${pref.baseRef ?? 'base branch'}`;
+    return SOURCE_LABELS[pref.source];
+  }
+
   /**
    * The review provider + repo for the current repo's `origin`, or undefined when there is no supported
    * review host (no origin, or a host that is neither github.com nor the configured GHE). Cached per
@@ -276,6 +356,19 @@ export class ReviewController {
     const value = repo && provider ? { repo, provider } : undefined;
     this.remoteCache = { repoRoot, enterpriseUri, value };
     return value;
+  }
+
+  /** The provider to resolve the signed-in identity against: the loaded PR's host, else the configured default. */
+  private authProviderId(): GithubProviderId {
+    const pref = this.state.getPref();
+    if (pref.source === 'pr' && pref.pr) return pref.pr.provider as GithubProviderId;
+    const ent = vscode.workspace.getConfiguration('agenticReview').get<string>('github.enterpriseUri');
+    return ent ? 'github-enterprise' : 'github';
+  }
+
+  /** Who a comment you write is attributed to: your GitHub login when signed in, else git user.name. */
+  private authorIdentity(): string {
+    return this.viewerLogin ?? this.userName ?? UNKNOWN_AUTHOR;
   }
 
   private refreshing = false;
@@ -299,6 +392,11 @@ export class ReviewController {
   }
 
   private async doRefresh(): Promise<void> {
+    this.panelRendered = false; // a fresh diff is coming; the panel re-signals once it has painted it
+    if (this.renderSettle) {
+      clearTimeout(this.renderSettle);
+      this.renderSettle = undefined;
+    }
     this.repos = await getRepositories();
     const pref = this.state.getPref();
     let repoRoot = pref.repoRoot;
@@ -315,6 +413,9 @@ export class ReviewController {
         this.userName = await getUserName(repoRoot);
         this.userNameRepo = repoRoot;
       }
+      // Prefer the signed-in GitHub login as the comment author; silent (no prompt/API call), so re-resolve
+      // each refresh to stay current with sign-in/out.
+      this.viewerLogin = await getViewerLogin(this.authProviderId());
       // Legacy active threads always migrate onto the real git branch, never a loaded PR.
       const localHead = this.repos.find((r) => r.repoRoot === repoRoot)?.headSha ?? null;
       await this.reviewStore.migrateLegacy(repoRoot, this.localBranchKey(repoRoot), localHead);
@@ -388,12 +489,14 @@ export class ReviewController {
       title: detail.title,
       author: detail.author,
       state: detail.state,
+      isDraft: detail.isDraft,
       body: detail.body,
       baseRef: detail.baseRef,
       baseSha: detail.baseSha,
       headRef: detail.headRef,
       headSha: detail.headSha,
     };
+    this.headStale = false; // a freshly (re)fetched head is current by definition
     await this.state.setPref({ source: 'pr', pr });
     const branch = prBranchKey(pr);
     const review = await this.reviewStore.ensureCurrent(repoRoot, branch, detail.headSha, remote);
@@ -401,10 +504,145 @@ export class ReviewController {
     const diff = this.currentDiff();
     if (diff) {
       const imported = await req.provider.getThreads(req.repo, req.number, diff);
-      const drafts = review.threads.filter((t) => !t.remoteThreadId); // keep local-only work
-      await this.reviewStore.updateThreads(repoRoot, review.id, [...imported, ...drafts]);
+      // Merge the fetched posted set over any local pending work: keep drafts/edits/replies/resolves,
+      // refresh posted content, re-home a reply whose thread vanished, drop staged deletes already gone.
+      const priorDeletes = review.kind === 'remote' ? (review.pendingDeletes ?? []) : [];
+      const rec = reconcile(review.threads, priorDeletes, imported, { viewer: this.authorIdentity() });
+      await this.reviewStore.updateThreads(repoRoot, review.id, rec.threads);
+      await this.reviewStore.setPendingDeletes(repoRoot, review.id, rec.pendingDeletes);
       this.afterThreadChange();
     }
+  }
+
+  /** The staged-change counts for the open PR (for the event picker / confirmation), or undefined outside PR mode. */
+  submitPreview(): { counts: SubmitCounts; state?: string; isDraft?: boolean } | undefined {
+    const pref = this.state.getPref();
+    if (pref.source !== 'pr' || !pref.repoRoot) return undefined;
+    const review = this.reviewStore.current(pref.repoRoot, this.branchKey(pref.repoRoot));
+    if (review?.kind !== 'remote') return undefined;
+    const { counts } = buildSubmitPlan(review, 'comment');
+    return { counts, state: review.remote.state, isDraft: review.remote.isDraft };
+  }
+
+  /**
+   * Post the open PR's staged change set to GitHub as one review with the chosen event, then reconcile by
+   * re-importing the posted set. A pre-submit re-fetch runs first: it reconciles local work against current
+   * upstream so a reply whose target vanished can't 404 (it becomes a new top-level comment) and a stale
+   * delete is dropped. One Submit posts everything staged (including replies you made to your own
+   * not-yet-posted drafts), so the fresh import afterwards fully represents the PR and replaces the local
+   * threads wholesale, stamping every remote id. Ids reconcile by construction, and a re-run cannot
+   * double-post because nothing is pending anymore. Returns the counts plus any orphaned targets handled.
+   */
+  async submitPullRequest(event: SubmitEvent): Promise<{ counts: SubmitCounts; orphans: OrphanReport }> {
+    const pref = this.state.getPref();
+    if (pref.source !== 'pr' || !pref.repoRoot) throw new Error('No pull request is open.');
+    const repoRoot = pref.repoRoot;
+    let review = this.reviewStore.current(repoRoot, this.branchKey(repoRoot));
+    if (review?.kind !== 'remote') throw new Error('No pull request review to submit.');
+    const remote = await this.currentRemote();
+    if (!remote) throw new Error("This repository's origin is not a supported review host.");
+    const number = review.remote.number ?? Number(review.remote.id);
+    const noOrphans: OrphanReport = { localOnly: 0, deletes: 0 };
+
+    // Pre-submit re-fetch: reconcile against current upstream, then rebuild the plan from the reconciled
+    // review so the batch never targets a comment/thread that is gone.
+    const diff = this.currentDiff();
+    let orphans = noOrphans;
+    if (diff) {
+      const imported = await remote.provider.getThreads(remote.repo, number, diff);
+      const rec = reconcile(review.threads, review.pendingDeletes ?? [], imported, { viewer: this.authorIdentity() });
+      orphans = rec.orphans;
+      await this.reviewStore.updateThreads(repoRoot, review.id, rec.threads);
+      await this.reviewStore.setPendingDeletes(repoRoot, review.id, rec.pendingDeletes);
+      const refreshed = this.reviewStore.current(repoRoot, this.branchKey(repoRoot));
+      if (refreshed?.kind === 'remote') review = refreshed;
+    }
+
+    const { input, counts } = buildSubmitPlan(review, event);
+    if (counts.total === 0) {
+      this.afterThreadChange();
+      return { counts, orphans };
+    }
+
+    await remote.provider.submitReview(remote.repo, number, input);
+
+    // Post-submit: everything staged was posted, so take the fresh import wholesale.
+    const postDiff = this.currentDiff();
+    if (postDiff) {
+      const imported = await remote.provider.getThreads(remote.repo, number, postDiff);
+      await this.reviewStore.updateThreads(repoRoot, review.id, imported);
+    }
+    await this.reviewStore.clearPendingDeletes(repoRoot, review.id);
+    this._onDidChange.fire();
+    this.panelPost?.('stateChanged', this.buildState());
+    return { counts, orphans };
+  }
+
+  /**
+   * A background tick while a PR is open: re-fetch its head and posted threads. A changed head sets the
+   * "new commits" flag (surfaced as a Refresh banner, never auto-applied). Changed comments are reconciled
+   * in — upstream new/edited/resolved/deleted comments show live, local pending work is preserved. Errors
+   * (offline, rate limit) are swallowed; the next tick retries.
+   */
+  async pollPullRequest(): Promise<{ orphans?: OrphanReport; headChanged?: boolean }> {
+    const pref = this.state.getPref();
+    if (pref.source !== 'pr' || !pref.repoRoot) return {};
+    const repoRoot = pref.repoRoot;
+    const review = this.reviewStore.current(repoRoot, this.branchKey(repoRoot));
+    if (review?.kind !== 'remote') return {};
+    const diff = this.currentDiff();
+    if (!diff) return {};
+    const remote = await this.currentRemote();
+    if (!remote) return {};
+    const number = review.remote.number ?? Number(review.remote.id);
+
+    let headChanged = false;
+    try {
+      const detail = await remote.provider.getRequest(remote.repo, number);
+      if (detail.headSha !== review.remote.headSha && !this.headStale) {
+        this.headStale = true;
+        headChanged = true;
+      }
+    } catch {
+      /* transient; retry next tick */
+    }
+
+    let orphans: OrphanReport | undefined;
+    try {
+      const imported = await remote.provider.getThreads(remote.repo, number, diff);
+      // A poll surfaces upstream additions/edits/resolves and removes others' deleted comments, but keeps
+      // yours as local-only (repostable) rather than deleting your content out from under you.
+      const rec = reconcile(review.threads, review.pendingDeletes ?? [], imported, { viewer: this.authorIdentity() });
+      const before = JSON.stringify(review.threads.map(durableThread));
+      const after = JSON.stringify(rec.threads.map(durableThread));
+      const deletesChanged = (review.pendingDeletes ?? []).length !== rec.pendingDeletes.length;
+      if (before !== after || deletesChanged) {
+        await this.reviewStore.updateThreads(repoRoot, review.id, rec.threads);
+        await this.reviewStore.setPendingDeletes(repoRoot, review.id, rec.pendingDeletes);
+        this.afterThreadChange();
+        if (rec.orphans.localOnly || rec.orphans.deletes) orphans = rec.orphans;
+      }
+    } catch {
+      /* transient; retry next tick */
+    }
+
+    if (headChanged) {
+      this._onDidChange.fire();
+      this.panelPost?.('stateChanged', this.buildState());
+    }
+    return { orphans, headChanged };
+  }
+
+  /** Apply the upstream head change the banner announced: re-fetch the new head, re-diff, re-import. */
+  async reloadPullRequest(): Promise<void> {
+    const pref = this.state.getPref();
+    if (pref.source !== 'pr' || !pref.repoRoot) return;
+    const remote = await this.currentRemote();
+    if (!remote) return;
+    const review = this.reviewStore.current(pref.repoRoot, this.branchKey(pref.repoRoot));
+    const number = review?.kind === 'remote' ? (review.remote.number ?? Number(review.remote.id)) : pref.pr?.number;
+    if (number == null) return;
+    await this.openPullRequest({ provider: remote.provider, repo: remote.repo, number, remote: 'origin' });
   }
 
   async setRepo(repoRoot: string): Promise<void> {
@@ -434,7 +672,10 @@ export class ReviewController {
   }
 
   reveal(filePath: string, threadId?: string): void {
-    this.panelPost?.('revealFile', { filePath, threadId });
+    // If the panel hasn't painted the diff yet (just opened, or still rendering a PR), hold the reveal and
+    // fire it once it signals ready — otherwise the message reaches a webview that isn't listening yet.
+    if (this.panelPost && this.panelRendered) this.panelPost('revealFile', { filePath, threadId });
+    else this.pendingReveal = { filePath, threadId };
   }
 
   /** Ask the panel to scroll to the next/previous changed file or comment. */
@@ -453,7 +694,9 @@ export class ReviewController {
 
   private afterThreadChange(): void {
     this._onDidChange.fire();
-    this.panelPost?.('threadsUpdated', { threads: this.threads() });
+    // Carry the recomputed pending summary so the PR's pending count + Submit button stay live after a
+    // comment mutation, without re-sending the whole diff (that is the heavier stateChanged path).
+    this.panelPost?.('threadsUpdated', { threads: this.threads(), pending: this.pendingSummary(this.state.getPref()) });
   }
 
   /** Build a suggestion for a thread's current (re-anchored) range, capturing the original from the diff. */
@@ -473,7 +716,7 @@ export class ReviewController {
       body: loc.body,
       createdAt: now,
       updatedAt: now,
-      author: loc.author ?? this.userName ?? UNKNOWN_AUTHOR,
+      author: loc.author ?? this.authorIdentity(),
     };
     if (loc.suggestion != null) {
       const original = rangeText(diff, loc.filePath, loc.side, loc.startLine, loc.endLine ?? loc.startLine);
@@ -502,7 +745,7 @@ export class ReviewController {
       body,
       createdAt: now,
       updatedAt: now,
-      author: author ?? this.userName ?? UNKNOWN_AUTHOR,
+      author: author ?? this.authorIdentity(),
     };
     if (suggestion != null) reply.suggestion = this.suggestionFor(thread, diff, suggestion);
     thread.comments.push(reply);
@@ -537,6 +780,9 @@ export class ReviewController {
     const review = this.reviewStore.current(repoRoot, branch);
     const thread = review?.threads.find((t) => t.id === threadId);
     if (!review || !thread) return { threadId, threadDeleted: false };
+    // A comment already posted on the remote must be deleted there on Submit — stage its id before removing.
+    const removed = thread.comments.find((c) => c.id === commentId);
+    if (removed?.remoteId) await this.reviewStore.addPendingDelete(repoRoot, review.id, removed.remoteId);
     thread.comments = thread.comments.filter((c) => c.id !== commentId);
     const threadDeleted = thread.comments.length === 0;
     const next = threadDeleted ? review.threads.filter((t) => t.id !== threadId) : review.threads;
@@ -605,6 +851,18 @@ export class ReviewController {
     };
   }
 }
+
+/** Quiet window after the last panel paint before the sidebar treats the diff as fully loaded. */
+const RENDER_SETTLE_MS = 300;
+
+/** Display labels for each diff source (vs-base and pr are elaborated with their ref/number at the call site). */
+const SOURCE_LABELS: Record<DiffSource, string> = {
+  'worktree-vs-head': 'Uncommitted changes',
+  unstaged: 'Unstaged changes',
+  staged: 'Staged changes',
+  'vs-base': 'Compared with',
+  pr: 'Pull request',
+};
 
 /** The diff-side PR coordinates carried by a remote review's metadata. */
 function prRefOf(remote: RemoteRef, number: number): PrRef {

@@ -3,15 +3,37 @@
 // tokens stay short-lived and current. github.com and GitHub Enterprise share this class (only the base
 // URLs differ), so both hosts are first-class.
 import type { CommentThread } from '../model/Comment';
-import type { ReviewDiff } from '../model/ReviewDiff';
+import type { ReviewDiff, Side } from '../model/ReviewDiff';
 import type { PullRequestDetail, PullRequestSummary, RemoteRepoRef, ReviewProvider } from '../review/provider';
+import type { NewInlineComment, SubmitReviewInput } from '../review/submit';
 import type { TokenSource } from './auth';
-import { createGithubClient, type GithubReadClient } from './client';
+import { createGithubClient, type GhNewComment, type GhPostedComment, type GithubWriteClient } from './client';
 import { mapThreads } from './mapThreads';
 import type { GithubProviderId } from './remote';
 
-/** How the provider builds a read client. Overridable in tests with a fake; production uses Octokit. */
-export type ClientFactory = (interactive: boolean) => Promise<GithubReadClient>;
+const ghSide = (side: Side): 'LEFT' | 'RIGHT' => (side === 'old' ? 'LEFT' : 'RIGHT');
+
+/** A new-thread root in GitHub's create-review comment shape. */
+function ghComment(root: NewInlineComment): GhNewComment {
+  const side = ghSide(root.side);
+  return {
+    path: root.path,
+    body: root.body,
+    line: root.line,
+    side,
+    ...(root.startLine != null ? { start_line: root.startLine, start_side: side } : {}),
+  };
+}
+
+/** Find the id of a just-posted root among a review's created comments (exact position + body match). */
+function matchPostedId(posted: GhPostedComment[], root: NewInlineComment): number | undefined {
+  const side = ghSide(root.side);
+  return posted.find((c) => c.path === root.path && c.side === side && c.line === root.line && c.body === root.body)
+    ?.id;
+}
+
+/** How the provider builds a client. Overridable in tests with a fake; production uses Octokit. */
+export type ClientFactory = (interactive: boolean) => Promise<GithubWriteClient>;
 
 class GithubReviewProvider implements ReviewProvider {
   constructor(
@@ -38,6 +60,45 @@ class GithubReviewProvider implements ReviewProvider {
 
   async viewer(): Promise<string> {
     return (await this.clientFor(false)).viewer();
+  }
+
+  /**
+   * Post the staged batch as one review. Housekeeping (edits, deletes, imported-thread replies, resolves)
+   * goes first via their own REST/GraphQL calls; the create-review batch (new roots + the chosen event)
+   * lands next, pinned to the reviewed head sha. A new thread you replied to before submitting can't be
+   * threaded up front (the reply needs the root's id, which only exists once the review posts), so after the
+   * batch we read back the created comments, match each root, and post its follow-ups — all in this one
+   * call. Uses an interactive token: a write is a deliberate human action, so a sign-in prompt fits here.
+   */
+  async submitReview(repo: RemoteRepoRef, number: number, input: SubmitReviewInput): Promise<void> {
+    const client = await this.clientFor(true);
+    for (const e of input.edits) await client.editComment(repo, { commentId: Number(e.commentId), body: e.body });
+    for (const id of input.deletes) await client.deleteComment(repo, { commentId: Number(id) });
+    for (const r of input.replies) await client.reply(repo, number, { inReplyTo: Number(r.rootId), body: r.body });
+    for (const rs of input.resolves) await client.resolveThread({ threadId: rs.threadId, resolved: rs.resolved });
+
+    const event =
+      input.event === 'approve' ? 'APPROVE' : input.event === 'request-changes' ? 'REQUEST_CHANGES' : 'COMMENT';
+    // A bare COMMENT with no new roots and no body is not a valid review; skip the batch when there is
+    // nothing to say. Approve / request-changes always post, even with no inline comments.
+    if (input.newThreads.length === 0 && input.event === 'comment' && input.body === '') return;
+
+    const review = await client.createReview(repo, number, {
+      commitId: input.commitId,
+      event,
+      body: input.body,
+      comments: input.newThreads.map((t) => ghComment(t.root)),
+    });
+
+    if (input.newThreads.some((t) => t.replies.length > 0)) {
+      const posted = await client.listReviewComments(repo, number, review.id);
+      for (const t of input.newThreads) {
+        if (t.replies.length === 0) continue;
+        const rootId = matchPostedId(posted, t.root);
+        if (rootId == null) continue; // exact match; a miss would leave the reply for the next Submit
+        for (const body of t.replies) await client.reply(repo, number, { inReplyTo: rootId, body });
+      }
+    }
   }
 }
 

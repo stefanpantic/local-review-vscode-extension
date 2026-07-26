@@ -3,7 +3,9 @@ import type { ReviewController } from '../reviewController';
 import type { CommentThread } from '../model/Comment';
 
 type CommentsNode =
-  { kind: 'file'; filePath: string; threads: CommentThread[] } | { kind: 'thread'; thread: CommentThread };
+  | { kind: 'file'; filePath: string; threads: CommentThread[] }
+  | { kind: 'thread'; thread: CommentThread }
+  | { kind: 'loading' };
 
 function preview(t: CommentThread): string {
   const firstLine = (t.comments[0]?.body ?? '').split('\n', 1)[0].trim();
@@ -37,6 +39,12 @@ export class CommentsView implements vscode.TreeDataProvider<CommentsNode> {
   }
 
   getTreeItem(node: CommentsNode): vscode.TreeItem {
+    if (node.kind === 'loading') {
+      const item = new vscode.TreeItem('Loading comments…');
+      item.id = 'comments-loading';
+      item.iconPath = new vscode.ThemeIcon('loading~spin');
+      return item;
+    }
     if (node.kind === 'file') {
       const item = new vscode.TreeItem(node.filePath, vscode.TreeItemCollapsibleState.Expanded);
       item.id = `cfile:${node.filePath}`;
@@ -65,8 +73,12 @@ export class CommentsView implements vscode.TreeDataProvider<CommentsNode> {
 
   getChildren(node?: CommentsNode): CommentsNode[] {
     if (node) return node.kind === 'file' ? node.threads.map((thread) => ({ kind: 'thread', thread })) : [];
+    const threads = this.controller.activeThreads();
+    // While a PR's diff is still painting, show one honest placeholder rather than comments that can't yet
+    // be revealed on it.
+    if (threads.length > 0 && !this.controller.commentsReady()) return [{ kind: 'loading' }];
     const byFile = new Map<string, CommentThread[]>();
-    for (const t of this.controller.activeThreads()) {
+    for (const t of threads) {
       const arr = byFile.get(t.anchor.filePath);
       if (arr) arr.push(t);
       else byFile.set(t.anchor.filePath, [t]);

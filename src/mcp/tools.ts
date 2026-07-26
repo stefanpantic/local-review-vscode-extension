@@ -3,9 +3,10 @@
 import { z } from 'zod';
 import type { ReviewDiff, Side } from '../model/ReviewDiff';
 import type { CommentThread, Review } from '../model/Comment';
+import { AGENT_AUTHOR } from '../model/Comment';
 
-/** Author stamped on everything the agent posts through MCP. */
-export const AGENT_AUTHOR = 'AI Agent';
+// Re-exported for existing importers; the definition now lives in the shared model.
+export { AGENT_AUTHOR };
 
 /** The narrow host surface the MCP tools need. Implemented by `ReviewController`; faked in tests. */
 export interface McpReviewApi {

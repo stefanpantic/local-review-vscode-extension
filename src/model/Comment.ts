@@ -26,10 +26,26 @@ export interface Comment {
   // Set when this comment mirrors one posted on a remote (populated on import; used for write-back).
   remoteId?: string; // the comment id on the remote (edit/delete target) — opaque string
   remoteUrl?: string; // link to the comment on the remote
+  remoteBody?: string; // the body as imported; a difference from `body` is a pending edit to submit
+  // Was posted on the remote by you, then deleted there: its remote link is dropped so it can repost, and
+  // this marks it "local only" so the UI can flag it and you can repost on Submit or delete to discard.
+  localOnly?: boolean;
 }
 
 /** Fallback author when the writer is unknown (git user.name unset, or a legacy comment). */
 export const UNKNOWN_AUTHOR = 'unknown';
+
+/** Author stamped on comments posted by a coding agent through MCP. Shared by host and webview. */
+export const AGENT_AUTHOR = 'AI Agent';
+
+/**
+ * Whether the current user may edit/delete a comment. In a local review everything is theirs; in a remote
+ * (pull-request) review only their own and agent-authored comments are, so imported comments by others are
+ * read-only. `viewer` is the current identity (GitHub login or git user.name).
+ */
+export function canEditComment(comment: Comment, viewer: string | undefined, remote: boolean): boolean {
+  return !remote || comment.author === viewer || comment.author === AGENT_AUTHOR;
+}
 
 export interface CommentThread {
   id: string;
@@ -41,6 +57,7 @@ export interface CommentThread {
   // Absent on local-draft threads. Strings so non-numeric provider ids fit the same fields.
   remoteThreadId?: string; // the thread/discussion id on the remote (resolve/unresolve target)
   remoteRootId?: string; // the root comment id on the remote (the reply target)
+  remoteResolved?: boolean; // resolved state as imported; a difference from `resolved` is a pending toggle
 
   // Resolved against the currently loaded diff on every read — NOT persisted:
   status?: AnchorStatus;
@@ -61,7 +78,8 @@ export interface RemoteRef {
   repo: string; // repo name (GitLab: project)
   title?: string;
   author?: string; // request author login
-  state?: string; // provider state string, e.g. 'open' | 'closed' | 'merged'
+  state?: string; // provider state string, e.g. 'open' | 'closed' | 'merged' (draft is a separate flag)
+  isDraft?: boolean; // a draft PR is still state 'open'; shown as a distinct Draft badge
   body?: string; // the request description (markdown)
   baseRef?: string; // base branch name
   baseSha: string; // three-dot diff base
@@ -91,6 +109,7 @@ export interface LocalReview extends ReviewBase {
 export interface RemoteReview extends ReviewBase {
   kind: 'remote';
   remote: RemoteRef; // the pull/merge request this review mirrors — required, not optional
+  pendingDeletes?: string[]; // remote ids of imported comments deleted locally, to delete on Submit
 }
 export type Review = LocalReview | RemoteReview;
 
@@ -103,6 +122,7 @@ export function durableThread(t: CommentThread): CommentThread {
     resolved: t.resolved,
     ...(t.remoteThreadId !== undefined ? { remoteThreadId: t.remoteThreadId } : {}),
     ...(t.remoteRootId !== undefined ? { remoteRootId: t.remoteRootId } : {}),
+    ...(t.remoteResolved !== undefined ? { remoteResolved: t.remoteResolved } : {}),
   };
 }
 

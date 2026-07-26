@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Markdown } from './Markdown';
-import type { PrDisplay } from '../../src/protocol/messages';
+import { prStateLabel, type PrDisplay } from '../../src/protocol/messages';
 
 // Longer descriptions start clamped with a Show more/less toggle; short ones render in full.
 const CLAMP_CHARS = 280;
@@ -28,7 +28,11 @@ export function PrDescription({ pr }: { pr: PrDisplay }) {
         </button>
         <span className="lr-pr-card-title">{pr.title || 'Pull request'}</span>
         {pr.number != null && <span className="lr-pr-card-num">#{pr.number}</span>}
-        {pr.state && <span className={`lr-pr-state lr-pr-state-${pr.state}`}>{pr.state}</span>}
+        {(pr.isDraft || pr.state) && (
+          <span className={`lr-pr-state lr-pr-state-${pr.isDraft ? 'draft' : pr.state}`}>
+            {prStateLabel(pr.state, pr.isDraft)}
+          </span>
+        )}
         {pr.author && <span className="lr-pr-card-author">by {pr.author}</span>}
         {pr.url && (
           <a className="lr-link lr-pr-card-link" href={pr.url}>
