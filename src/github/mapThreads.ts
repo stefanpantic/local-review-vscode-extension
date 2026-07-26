@@ -24,6 +24,7 @@ export function mapThreads(threads: GhReviewThread[], diff: ReviewDiff): Comment
       comments: t.comments.map((c) => mapComment(c, diff, t.path, side, firstLine, lastLine)),
       resolved: t.isResolved,
       remoteThreadId: t.id,
+      remoteResolved: t.isResolved, // baseline: a later change to `resolved` is a pending toggle
     };
     if (root.databaseId != null) thread.remoteRootId = String(root.databaseId);
     out.push(thread);
@@ -83,6 +84,7 @@ function mapComment(
   };
   if (c.databaseId != null) comment.remoteId = String(c.databaseId);
   if (c.url) comment.remoteUrl = c.url;
+  comment.remoteBody = comment.body; // baseline: a later change to `body` is a pending edit
   if (parsed) {
     const original = rangeText(diff, path, side, firstLine, lastLine);
     comment.suggestion = { original, replacement: parsed.replacement };

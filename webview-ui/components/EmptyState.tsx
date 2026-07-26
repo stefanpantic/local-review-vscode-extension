@@ -1,5 +1,5 @@
 const MESSAGES: Record<string, { title: string; detail: string }> = {
-  loading: { title: 'Loading…', detail: 'Reading the working tree.' },
+  loading: { title: 'Loading…', detail: 'Preparing the diff.' },
   'no-repo': {
     title: 'No Git repository',
     detail: 'Open a folder that is a git repository to review its local changes.',
@@ -16,6 +16,7 @@ export function EmptyState({ state, message }: { state: string; message?: string
   const m = MESSAGES[state] ?? { title: state, detail: '' };
   return (
     <div className="lr-empty">
+      {state === 'loading' && <div className="lr-spinner" />}
       <div className="lr-empty-title">{m.title}</div>
       <div className="lr-empty-detail">{message || m.detail}</div>
     </div>

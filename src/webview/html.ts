@@ -28,7 +28,12 @@ export function buildHtml(webview: vscode.Webview, extensionUri: vscode.Uri): st
   <title>Agentic Review</title>
 </head>
 <body>
-  <div id="root"></div>
+  <div id="root">
+    <div class="lr-empty">
+      <div class="lr-spinner"></div>
+      <div class="lr-empty-title">Loading…</div>
+    </div>
+  </div>
   <script nonce="${n}" src="${scriptUri}"></script>
 </body>
 </html>`;

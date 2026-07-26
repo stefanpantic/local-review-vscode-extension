@@ -11,23 +11,38 @@ function cssEscape(v: string): string {
 }
 
 /**
- * Scroll to a specific comment thread when a threadId is given, else to the file section. If the target
- * thread isn't in the DOM (its "Outdated comments" section is collapsed), open that section, then scroll.
+ * Scroll to a comment thread (or the file section when no threadId). A thread may not be in the DOM
+ * because its file is collapsed (large files / viewed files render header-only) or it sits in a collapsed
+ * "Outdated comments" section; in either case expand that first, then scroll. scroll-margin-top keeps the
+ * target clear of the sticky summary + file headers.
  */
-function revealFile(filePath: string, threadId?: string): void {
-  const find = (): Element | null =>
-    (threadId ? document.querySelector(`[data-lr-thread="${cssEscape(threadId)}"]`) : null) ??
-    document.querySelector(`[data-lr-path="${cssEscape(filePath)}"]`);
-  const el = find();
-  if (!el && threadId) {
+function revealFile(filePath: string, threadId?: string, attempt = 0, expanded = false): void {
+  const fileEl = document.querySelector(`[data-lr-path="${cssEscape(filePath)}"]`);
+  if (threadId) {
+    const thread = document.querySelector(`[data-lr-thread="${cssEscape(threadId)}"]`);
+    if (thread) {
+      thread.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    // The thread's file is collapsed, so its body (and the thread) isn't rendered — expand it, then retry.
+    if (!expanded && fileEl?.classList.contains('lr-collapsed')) {
+      fileEl.querySelector<HTMLElement>('.lr-file-header .lr-chevron')?.click();
+      requestAnimationFrame(() => revealFile(filePath, threadId, attempt, true));
+      return;
+    }
     const head = document.querySelector<HTMLElement>('.lr-outdated-section.lr-collapsed .lr-outdated-head');
     if (head) {
-      head.click(); // expand the outdated section, then scroll once it renders
-      requestAnimationFrame(() => find()?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      head.click(); // expand the outdated section, then try again once it renders
+      requestAnimationFrame(() => revealFile(filePath, threadId, attempt, expanded));
+      return;
+    }
+    // Still not on the diff yet (e.g. the PR is rendering) — wait a few frames for it.
+    if (attempt < 120) {
+      requestAnimationFrame(() => revealFile(filePath, threadId, attempt + 1, expanded));
       return;
     }
   }
-  el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  fileEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 /** Scroll to the next/previous changed file (section) or comment (thread) relative to the viewport. */
@@ -79,7 +94,9 @@ function App() {
 
     const offState = on('stateChanged', (s) => setState(s));
     const offViewed = on('viewedUpdated', ({ viewed }) => setState((prev) => (prev ? { ...prev, viewed } : prev)));
-    const offThreads = on('threadsUpdated', ({ threads }) => setState((prev) => (prev ? { ...prev, threads } : prev)));
+    const offThreads = on('threadsUpdated', ({ threads, pending }) =>
+      setState((prev) => (prev ? { ...prev, threads, pending } : prev)),
+    );
     const offReveal = on('revealFile', ({ filePath, threadId }) => revealFile(filePath, threadId));
     const offNav = on('navigate', ({ target, dir }) => navigateTo(target, dir));
     return () => {
@@ -91,6 +108,20 @@ function App() {
       offNav();
     };
   }, []);
+
+  // Tell the host once the current diff has painted (threads are in the DOM), so the sidebar can flip its
+  // comments from a loading spinner to clickable. Double rAF waits for layout + paint after the render.
+  useEffect(() => {
+    if (!state) return;
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => void request('panelRendered', {}));
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [state]);
 
   const setViewed = (filePath: string, viewed: boolean): void => {
     void request('setViewed', { filePath, viewed });

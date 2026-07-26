@@ -88,6 +88,35 @@ export class ReviewStore {
     return updated;
   }
 
+  /** Record that an imported comment (already on the remote) was deleted locally, so Submit removes it too. */
+  async addPendingDelete(repoRoot: string, id: string, remoteId: string): Promise<void> {
+    const map = this.allMap();
+    const review = map[repoRoot]?.find((r) => r.id === id);
+    if (review?.kind !== 'remote') return;
+    if (!review.pendingDeletes?.includes(remoteId)) {
+      review.pendingDeletes = [...(review.pendingDeletes ?? []), remoteId];
+      await this.store.update(REVIEWS_KEY, map);
+    }
+  }
+
+  /** Drop all staged deletes for a review (after a Submit has applied them). */
+  async clearPendingDeletes(repoRoot: string, id: string): Promise<void> {
+    const map = this.allMap();
+    const review = map[repoRoot]?.find((r) => r.id === id);
+    if (review?.kind !== 'remote' || !review.pendingDeletes?.length) return;
+    review.pendingDeletes = [];
+    await this.store.update(REVIEWS_KEY, map);
+  }
+
+  /** Replace the staged deletes for a review (reconciliation drops those whose target is gone upstream). */
+  async setPendingDeletes(repoRoot: string, id: string, remoteIds: string[]): Promise<void> {
+    const map = this.allMap();
+    const review = map[repoRoot]?.find((r) => r.id === id);
+    if (review?.kind !== 'remote') return;
+    review.pendingDeletes = [...remoteIds];
+    await this.store.update(REVIEWS_KEY, map);
+  }
+
   /** Replace a review's threads (durable subset) and bump `updatedAt` — the autosave path. */
   async updateThreads(repoRoot: string, id: string, threads: CommentThread[]): Promise<void> {
     const map = this.allMap();

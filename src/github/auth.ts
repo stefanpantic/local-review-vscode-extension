@@ -24,3 +24,13 @@ export async function hasGithubSession(providerId: GithubProviderId): Promise<bo
   const session = await vscode.authentication.getSession(providerId, SCOPES, { silent: true });
   return session != null;
 }
+
+/**
+ * The signed-in user's login, from an existing session only (no prompt, no API call): VS Code exposes it
+ * as the session account label. Undefined when signed out. Used to attribute comments and to decide which
+ * comments the user may edit.
+ */
+export async function getViewerLogin(providerId: GithubProviderId): Promise<string | undefined> {
+  const session = await vscode.authentication.getSession(providerId, SCOPES, { silent: true });
+  return session?.account.label || undefined;
+}

@@ -79,6 +79,7 @@ export function DiffView({
   const [error, setError] = useState<string | null>(null);
   const [outdatedOpen, setOutdatedOpen] = useState(true);
   const [expandState, setExpandState] = useState<Record<string, { up: number; down: number }>>({});
+  const [renderedKey, setRenderedKey] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -109,6 +110,25 @@ export function DiffView({
   const diff = state && state.result.state === 'ok' ? state.result.diff : undefined;
   const threadList = state?.threads;
 
+  // Tokenizing and building the rows of a large diff blocks the main thread; showing that half-built diff
+  // reads as a frozen, unscrollable page. Instead, when the diff itself or the view mode/wrap changes, drop
+  // to a spinner for two frames so it paints first (its transform animation keeps spinning on the compositor
+  // even while the build blocks the main thread), then mount the diff once and reveal it ready to scroll.
+  // The key ignores thread/viewed updates, so replying or resolving never flashes the spinner.
+  const heavyKey = `${diff?.generatedAt ?? ''}|${state?.viewMode ?? ''}|${state?.wrap ?? ''}`;
+  const busy = renderedKey !== heavyKey;
+  useEffect(() => {
+    if (!busy) return;
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setRenderedKey(heavyKey));
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [busy, heavyKey]);
+
   useEffect(() => {
     let alive = true;
     const files = (diff?.files ?? [])
@@ -128,7 +148,7 @@ export function DiffView({
 
   const tokens = useMemo<Map<DiffRow, Tok[] | null>>(() => {
     const map = new Map<DiffRow, Tok[] | null>();
-    if (!hl || !diff) return map;
+    if (busy || !hl || !diff) return map;
     const theme = activeTheme();
     for (const f of diff.files) {
       const t = fileTexts[f.path];
@@ -137,25 +157,38 @@ export function DiffView({
       for (const [row, tok] of fileMap) map.set(row, tok);
     }
     return map;
-  }, [hl, diff, fileTexts]);
+  }, [busy, hl, diff, fileTexts]);
 
-  // Per-file new-side line tokens, for highlighting the context revealed by "expand".
+  // Files with context currently expanded (keys are `${path}#${hunkIndex}`); only these need whole-new-file
+  // tokens for the revealed lines. On first paint nothing is expanded, so this is empty.
+  const expandedPaths = useMemo<Set<string>>(() => {
+    const s = new Set<string>();
+    for (const [key, v] of Object.entries(expandState)) {
+      if (v.up > 0 || v.down > 0) s.add(key.slice(0, key.lastIndexOf('#')));
+    }
+    return s;
+  }, [expandState]);
+
+  // Per-file new-side line tokens, for highlighting the context revealed by "expand". Tokenizing a whole
+  // file is expensive, and this feeds only the expand feature — so do it lazily, per file, once a file has
+  // context expanded, instead of tokenizing every file up front (a wasted full pass over the whole diff).
   const newLineToks = useMemo<Map<string, Tok[][]>>(() => {
     const map = new Map<string, Tok[][]>();
-    if (!hl) return map;
+    if (busy || !hl || expandedPaths.size === 0) return map;
     const theme = activeTheme();
-    for (const [path, t] of Object.entries(fileTexts)) {
+    for (const path of expandedPaths) {
+      const t = fileTexts[path];
       const lang = langForPath(path);
-      if (lang && t.new && t.new.length < 400_000) map.set(path, highlightLines(hl, lang, theme, t.new));
+      if (lang && t?.new && t.new.length < 400_000) map.set(path, highlightLines(hl, lang, theme, t.new));
     }
     return map;
-  }, [hl, fileTexts]);
+  }, [busy, hl, fileTexts, expandedPaths]);
 
   // Intra-line word diff: within each hunk, pair a run of removed lines with the following added lines
   // and mark the changed spans on each side. Recomputes only when the diff changes.
   const changesByRow = useMemo<Map<DiffRow, Range[]>>(() => {
     const map = new Map<DiffRow, Range[]>();
-    if (!diff) return map;
+    if (busy || !diff) return map;
     for (const f of diff.files) {
       for (const h of f.hunks) {
         const rows = h.rows;
@@ -178,7 +211,7 @@ export function DiffView({
       }
     }
     return map;
-  }, [diff]);
+  }, [busy, diff]);
 
   // Anchored/moved threads render inline against their row; outdated ones render at the end.
   // A multi-line (block) comment also highlights every row in its resolved range.
@@ -186,7 +219,7 @@ export function DiffView({
     const byRow = new Map<DiffRow, CommentThread[]>();
     const commented = new Set<DiffRow>();
     const stale: CommentThread[] = [];
-    if (diff) {
+    if (diff && !busy) {
       for (const t of threadList ?? []) {
         if (t.resolvedLine == null) {
           stale.push(t);
@@ -210,7 +243,7 @@ export function DiffView({
       }
     }
     return { threadsByRow: byRow, outdated: stale, commentedRows: commented };
-  }, [threadList, diff]);
+  }, [threadList, diff, busy]);
 
   const ops = (threadId: string): ThreadOps => ({
     onReply: (body, suggestion) => mutate(request('replyComment', { threadId, body, suggestion })),
@@ -270,6 +303,8 @@ export function DiffView({
             suggestBase={suggestBaseFor(t)}
             tokenize={tokenizeCode(t.anchor.filePath)}
             pendingOnRemote={state?.source === 'pr' && !t.remoteThreadId}
+            viewer={state?.viewer}
+            prMode={state?.source === 'pr'}
           />
         ))}
         {showComposer && composer && (
@@ -384,8 +419,18 @@ export function DiffView({
         onSetViewMode={(m) => setViewPref({ viewMode: m })}
         onSetWhitespace={(w) => setViewPref({ whitespace: w })}
         onSetWrap={(w) => setViewPref({ wrap: w })}
+        pending={state.pending}
+        onSubmit={state.source === 'pr' ? () => mutate(request('submitReview', {})) : undefined}
       />
       {state.pr && <PrDescription pr={state.pr} />}
+      {state.headStale && (
+        <div className="lr-headstale-banner">
+          This pull request has new commits. Your review stays on the commit you loaded until you refresh.
+          <button className="lr-link" onClick={() => void request('refreshPullRequest', {})}>
+            Refresh
+          </button>
+        </div>
+      )}
       {error && (
         <div className="lr-error-banner">
           {error}
@@ -394,76 +439,90 @@ export function DiffView({
           </button>
         </div>
       )}
-      {d.files.map((file) => {
-        const collapsed = isCollapsed(file);
-        const add: AddCtl | undefined = file.isCommentable
-          ? {
-              onDown: (side, line) => setDrag({ filePath: file.path, side, from: line, to: line }),
-              onEnter: (side, line) =>
-                setDrag((prev) =>
-                  prev && prev.filePath === file.path && prev.side === side ? { ...prev, to: line } : prev,
-                ),
-              selected: (side, line) =>
-                !!drag &&
-                drag.filePath === file.path &&
-                drag.side === side &&
-                line >= Math.min(drag.from, drag.to) &&
-                line <= Math.max(drag.from, drag.to),
-            }
-          : undefined;
-        const below = (row: DiffRow) => renderBelow(file.path, row);
-        return (
-          <section className={collapsed ? 'lr-file lr-collapsed' : 'lr-file'} data-lr-path={file.path} key={file.path}>
-            <FileHeader
-              file={file}
-              collapsed={collapsed}
-              viewed={Boolean(state.viewed[file.path])}
-              onToggleCollapse={() => toggleCollapse(file)}
-              onToggleViewed={() => toggleViewed(file)}
-            />
-            {collapsed && isLarge(file) && !state.viewed[file.path] && file.hunks.length > 0 && (
-              <div className="lr-large">
-                Large file with {file.additions + file.deletions} changes.{' '}
-                <button className="lr-link" onClick={() => toggleCollapse(file)}>
-                  Load anyway
-                </button>
-              </div>
-            )}
-            {!collapsed && (
-              <div className="lr-file-body">
-                <div className="lr-hscroll">
-                  {file.hunks.map((hunk, hi) =>
-                    state.viewMode === 'split' ? (
-                      <SplitHunk
-                        key={hi}
-                        hunk={hunk}
-                        tokens={tokens}
-                        add={add}
-                        below={below}
-                        commented={commentedRows}
-                        changes={changesByRow}
-                        expand={hunkExpand(file, hi, hunk)}
-                      />
-                    ) : (
-                      <UnifiedHunk
-                        key={hi}
-                        hunk={hunk}
-                        tokens={tokens}
-                        add={add}
-                        below={below}
-                        commented={commentedRows}
-                        changes={changesByRow}
-                        expand={hunkExpand(file, hi, hunk)}
-                      />
-                    ),
-                  )}
+      {busy && (
+        <div className="lr-diff-loading">
+          <div className="lr-spinner" />
+        </div>
+      )}
+      {!busy &&
+        d.files.map((file) => {
+          const collapsed = isCollapsed(file);
+          const add: AddCtl | undefined = file.isCommentable
+            ? {
+                onDown: (side, line) => setDrag({ filePath: file.path, side, from: line, to: line }),
+                onEnter: (side, line) =>
+                  setDrag((prev) =>
+                    prev && prev.filePath === file.path && prev.side === side ? { ...prev, to: line } : prev,
+                  ),
+                selected: (side, line) =>
+                  !!drag &&
+                  drag.filePath === file.path &&
+                  drag.side === side &&
+                  line >= Math.min(drag.from, drag.to) &&
+                  line <= Math.max(drag.from, drag.to),
+              }
+            : undefined;
+          const below = (row: DiffRow) => renderBelow(file.path, row);
+          // A wholly added or deleted file has content on one side only; split view would leave the other
+          // column empty, so render it unified regardless of the chosen view mode.
+          const oneSided = file.status === 'added' || file.status === 'deleted';
+          const split = state.viewMode === 'split' && !oneSided;
+          return (
+            <section
+              className={collapsed ? 'lr-file lr-collapsed' : 'lr-file'}
+              data-lr-path={file.path}
+              key={file.path}
+            >
+              <FileHeader
+                file={file}
+                collapsed={collapsed}
+                viewed={Boolean(state.viewed[file.path])}
+                onToggleCollapse={() => toggleCollapse(file)}
+                onToggleViewed={() => toggleViewed(file)}
+              />
+              {collapsed && isLarge(file) && !state.viewed[file.path] && file.hunks.length > 0 && (
+                <div className="lr-large">
+                  Large file with {file.additions + file.deletions} changes.{' '}
+                  <button className="lr-link" onClick={() => toggleCollapse(file)}>
+                    Load anyway
+                  </button>
                 </div>
-              </div>
-            )}
-          </section>
-        );
-      })}
-      {outdated.length > 0 && (
+              )}
+              {!collapsed && (
+                <div className="lr-file-body">
+                  <div className={split ? 'lr-hscroll lr-split' : 'lr-hscroll'}>
+                    {file.hunks.map((hunk, hi) =>
+                      split ? (
+                        <SplitHunk
+                          key={hi}
+                          hunk={hunk}
+                          tokens={tokens}
+                          add={add}
+                          below={below}
+                          commented={commentedRows}
+                          changes={changesByRow}
+                          expand={hunkExpand(file, hi, hunk)}
+                        />
+                      ) : (
+                        <UnifiedHunk
+                          key={hi}
+                          hunk={hunk}
+                          tokens={tokens}
+                          add={add}
+                          below={below}
+                          commented={commentedRows}
+                          changes={changesByRow}
+                          expand={hunkExpand(file, hi, hunk)}
+                        />
+                      ),
+                    )}
+                  </div>
+                </div>
+              )}
+            </section>
+          );
+        })}
+      {!busy && outdated.length > 0 && (
         <section className={outdatedOpen ? 'lr-file lr-outdated-section' : 'lr-file lr-outdated-section lr-collapsed'}>
           <div
             className="lr-file-header lr-outdated-head"
@@ -499,6 +558,8 @@ export function DiffView({
                       suggestBase={suggestBaseFor(t)}
                       tokenize={tokenizeCode(t.anchor.filePath)}
                       pendingOnRemote={state.source === 'pr' && !t.remoteThreadId}
+                      viewer={state.viewer}
+                      prMode={state.source === 'pr'}
                     />
                   </div>
                 </div>
