@@ -82,6 +82,8 @@ export function DiffView({
   const [outdatedOpen, setOutdatedOpen] = useState(true);
   const [expandState, setExpandState] = useState<Record<string, { up: number; down: number }>>({});
   const [renderedKey, setRenderedKey] = useState<string | null>(null);
+  // Bumped by expand-all / collapse-all so those rebuilds go through the loading gate below.
+  const [bulkTick, setBulkTick] = useState(0);
 
   // Sticky file headers sit directly under the top bar, whose height varies: the PR action row is only
   // there in PR mode, and either row wraps on a narrow panel. Publish the measured height onto the diff
@@ -135,8 +137,9 @@ export function DiffView({
   // reads as a frozen, unscrollable page. Instead, when the diff itself or the view mode/wrap changes, drop
   // to a spinner for two frames so it paints first (its transform animation keeps spinning on the compositor
   // even while the build blocks the main thread), then mount the diff once and reveal it ready to scroll.
-  // The key ignores thread/viewed updates, so replying or resolving never flashes the spinner.
-  const heavyKey = `${diff?.generatedAt ?? ''}|${state?.viewMode ?? ''}|${state?.wrap ?? ''}`;
+  // The key ignores thread/viewed updates, so replying or resolving never flashes the spinner. Expanding
+  // every file at once is the same kind of bulk rebuild, so it goes through the gate too.
+  const heavyKey = `${diff?.generatedAt ?? ''}|${state?.viewMode ?? ''}|${state?.wrap ?? ''}|${bulkTick}`;
   const busy = renderedKey !== heavyKey;
   useEffect(() => {
     if (!busy) return;
@@ -418,6 +421,19 @@ export function DiffView({
   };
   const toggleCollapse = (f: FileDiff) =>
     setOverride((prev) => ({ ...prev, [f.path]: isCollapsed(f) ? 'expanded' : 'collapsed' }));
+
+  // Only an expanded file's lines are in the page, so the editor's find widget can only see expanded files.
+  // Expanding every file is what makes a search cover the whole diff. Files with no hunks (binary,
+  // unsupported) have no body to search and would render as an empty card, so they stay collapsed.
+  const anyCollapsed = d.files.some((f) => isCollapsed(f) && f.hunks.length > 0);
+  const setAll = (to: 'expanded' | 'collapsed'): void => {
+    setOverride(() => {
+      const next: OverrideMap = {};
+      for (const f of d.files) if (to === 'collapsed' || f.hunks.length > 0) next[f.path] = to;
+      return next;
+    });
+    setBulkTick((n) => n + 1);
+  };
   const toggleViewed = (f: FileDiff) => {
     setOverride((prev) => {
       const next = { ...prev };
@@ -442,6 +458,8 @@ export function DiffView({
           onSetViewMode={(m) => setViewPref({ viewMode: m })}
           onSetWhitespace={(w) => setViewPref({ whitespace: w })}
           onSetWrap={(w) => setViewPref({ wrap: w })}
+          anyCollapsed={anyCollapsed}
+          onToggleAll={() => setAll(anyCollapsed ? 'expanded' : 'collapsed')}
         />
         {state.source === 'pr' && state.pr && (
           <PrActionBar

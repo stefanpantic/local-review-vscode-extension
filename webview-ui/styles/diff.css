@@ -440,6 +440,22 @@ body {
   cursor: pointer;
   user-select: none;
 }
+/* A lone action in the toggles row: quieter than the primary buttons, framed like the segmented control
+   so the row reads as one set of controls. */
+.lr-toggle-btn {
+  padding: 1px 8px;
+  border: 1px solid var(--lr-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.lr-toggle-btn:hover {
+  background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+}
 
 /* pull request description card (between the summary bar and the file list) */
 .lr-pr-card {

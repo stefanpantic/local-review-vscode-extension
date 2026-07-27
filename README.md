@@ -87,6 +87,7 @@ For an agent you have not connected, **Export Review** produces agent-ready Mark
 - **Syntax highlighting** with intra-line word highlighting (only the changed characters light up).
 - **Expand context** at hunk boundaries to reveal surrounding lines.
 - **Hide whitespace** changes.
+- **Find in the diff** with Ctrl+F (Cmd+F on macOS). Only expanded files are searched, so use **Expand all files** in the summary bar to cover files you have marked viewed or that opened collapsed.
 - **Inline comments** on single lines or ranges, old or new side, with edit, delete, reply, resolve.
 - **Suggestions:** propose replacement code in a comment, rendered as a before/after diff. Posted to GitHub as an applicable suggestion, and included in the export. Never written to your files.
 - **Markdown comments**, rendered in the panel.
