@@ -39,6 +39,20 @@ export interface SubmitReviewInput {
   resolves: { threadId: string; resolved: boolean }[]; // resolve/unresolve toggles
 }
 
+/**
+ * One step of a submit that has actually landed on the remote. The provider reports each as it succeeds so
+ * the caller can clear that item's pending state immediately: if a later step fails, what already posted is
+ * no longer staged and a retry does only the work that is left. Created content (new threads and replies)
+ * has no local id to stamp, so it is not reported here — it reconciles by re-import instead.
+ */
+export type AppliedStep =
+  | { kind: 'edit'; commentId: string } // the local body is now the remote body: re-baseline it
+  | { kind: 'delete'; commentId: string }
+  | { kind: 'resolve'; threadId: string; resolved: boolean };
+
+/** Called by the provider after each step lands. Awaited, so the caller can persist before the next call. */
+export type OnApplied = (step: AppliedStep) => Promise<void> | void;
+
 export interface SubmitCounts {
   newComments: number;
   replies: number;
@@ -92,10 +106,12 @@ function positionOf(t: CommentThread): { line: number; startLine?: number } {
  * - a thread whose resolved state differs from the imported baseline is a resolve/unresolve toggle.
  * A local review, or one with nothing staged, yields an empty batch. AI-agent comments are included (posted
  * under the human's identity) and counted so the confirmation can show how many are agent-authored.
+ * `body` is the optional review summary, posted as the review's own text.
  */
 export function buildSubmitPlan(
   review: Review,
   event: SubmitEvent,
+  body?: string,
 ): { input: SubmitReviewInput; counts: SubmitCounts } {
   if (review.kind !== 'remote') return { input: EMPTY_INPUT, counts: EMPTY_COUNTS };
 
@@ -144,7 +160,7 @@ export function buildSubmitPlan(
   const input: SubmitReviewInput = {
     event,
     commitId: review.remote.headSha,
-    body: '',
+    body: body ?? '',
     newThreads,
     replies,
     edits,

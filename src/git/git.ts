@@ -1,7 +1,5 @@
 // The one git access module (CLI via child_process). Plain functions — a thin, testable seam.
 // The vscode.git API could augment discovery later; the CLI is the guaranteed path.
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import * as vscode from 'vscode';
@@ -9,21 +7,10 @@ import type { DiffSource, PrRef, RepoInfo, DiffResult } from '../model/ReviewDif
 import { diffArgs } from './diffSources';
 import { normalize, synthesizeUntracked } from './normalize';
 import { parseBranches } from './parse';
+import { git, gitAllowFail } from './run';
+import { prRefs, retireLegacyPrRef } from './prRefs';
 
-const pexec = promisify(execFile);
-const MAX_BUFFER = 128 * 1024 * 1024;
-
-async function git(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await pexec('git', args, { cwd, maxBuffer: MAX_BUFFER });
-  return stdout;
-}
-
-/** Run git but resolve stdout regardless of exit code (for `diff --no-index`, which exits 1 on differences). */
-function gitAllowFail(cwd: string, args: string[]): Promise<string> {
-  return new Promise((resolve) => {
-    execFile('git', args, { cwd, maxBuffer: MAX_BUFFER }, (_err, stdout) => resolve(stdout ?? ''));
-  });
-}
+export { prRefs, prRefsPresent } from './prRefs';
 
 async function isUnbornHead(repoRoot: string): Promise<boolean> {
   try {
@@ -158,10 +145,12 @@ async function vscodeGitRepo(repoRoot: string): Promise<GitRepositoryLike | unde
 }
 
 /**
- * Fetch a PR's head + base commit into the local object store, then pin the head under a hidden ref,
- * without touching the working tree or any branch. The network fetch goes through the vscode.git API so
- * VS Code supplies credentials for private remotes; the pin is a local (no-network) update-ref. The CLI
- * fetch is a fallback only when the git extension is unavailable. Returns the head sha + pinned ref.
+ * Fetch a PR's head + base commit into the local object store, then pin both under hidden refs, without
+ * touching the working tree or any branch. The network fetch goes through the vscode.git API so VS Code
+ * supplies credentials for private remotes; the pins are local (no-network) update-refs. The CLI fetch is a
+ * fallback only when the git extension is unavailable. Pinning the base as well as the head is what lets a
+ * review survive a restart and a `git gc`: the three-dot diff needs both ends to still exist.
+ * Returns the head sha + pinned head ref.
  */
 export async function fetchPr(req: {
   repoRoot: string;
@@ -172,7 +161,7 @@ export async function fetchPr(req: {
   baseRef?: string; // base branch name — fetched so the base sha (its ancestor) is present for the diff
   headRefspec?: string; // the remote ref that yields the head, e.g. `pull/<n>/head` (GitHub default)
 }): Promise<{ headSha: string; headRef: string }> {
-  const headRef = `refs/agentic-review/pr/${req.number}`;
+  const refs = prRefs(req.number);
   const headSpec = req.headRefspec ?? `pull/${req.number}/head`;
   // Fetching the base by branch name is reliable; a bare-sha fetch is the fallback (servers often refuse it).
   const baseSpecs = [req.baseRef, req.baseSha].filter((s): s is string => !!s);
@@ -190,9 +179,15 @@ export async function fetchPr(req: {
       // try the next form; the base may also already be present locally
     }
   }
-  // Pin the fetched head so it survives gc and gives a stable ref for diffing (local, no network).
-  await git(req.repoRoot, ['update-ref', headRef, req.headSha]);
-  return { headSha: req.headSha, headRef };
+  await retireLegacyPrRef(req.repoRoot, req.number); // an older version's ref would block the pin below
+  await git(req.repoRoot, ['update-ref', refs.head, req.headSha]);
+  // The base may still be missing if every fetch form failed and it was not already local; pin what we can.
+  try {
+    await git(req.repoRoot, ['update-ref', refs.base, req.baseSha]);
+  } catch {
+    // the diff will surface the missing base as an error state, which is more useful than failing here
+  }
+  return { headSha: req.headSha, headRef: refs.head };
 }
 
 // --- Whole-file text (for syntax highlighting: tokenize the file, then clip to the diff) ---

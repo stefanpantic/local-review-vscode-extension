@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { HighlighterCore } from 'shiki/core';
 import type { ReviewStatePayload } from '../../src/protocol/messages';
 import type { FileDiff, DiffRow, DiffSource, Hunk, ReviewDiff, Side, ViewMode } from '../../src/model/ReviewDiff';
@@ -22,7 +22,9 @@ import { CommentThreadView, type ThreadOps } from '../comments/CommentThread';
 import { CommentForm } from '../comments/CommentForm';
 import { FileHeader } from '../components/FileHeader';
 import { SummaryBar } from '../components/SummaryBar';
+import { PrActionBar } from '../components/PrActionBar';
 import { PrDescription } from '../components/PrDescription';
+import { BackToTop } from '../components/BackToTop';
 import { EmptyState } from '../components/EmptyState';
 
 type OverrideMap = Record<string, 'expanded' | 'collapsed'>;
@@ -80,6 +82,25 @@ export function DiffView({
   const [outdatedOpen, setOutdatedOpen] = useState(true);
   const [expandState, setExpandState] = useState<Record<string, { up: number; down: number }>>({});
   const [renderedKey, setRenderedKey] = useState<string | null>(null);
+
+  // Sticky file headers sit directly under the top bar, whose height varies: the PR action row is only
+  // there in PR mode, and either row wraps on a narrow panel. Publish the measured height onto the diff
+  // root as a CSS variable, instead of hardcoding an offset that is wrong the moment anything wraps.
+  // A callback ref rather than an effect, so it tracks the node attaching and detaching exactly.
+  const topBarObserver = useRef<ResizeObserver | null>(null);
+  const topBarRef = useCallback((el: HTMLDivElement | null) => {
+    topBarObserver.current?.disconnect();
+    topBarObserver.current = null;
+    if (!el) return;
+    const root = el.parentElement; // the .lr-diff container the file headers live in
+    if (!root) return;
+    const publish = (): void => root.style.setProperty('--lr-topbar-h', `${el.offsetHeight}px`);
+    publish();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(publish);
+    ro.observe(el);
+    topBarObserver.current = ro;
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -408,26 +429,39 @@ export function DiffView({
 
   return (
     <div className={`lr-diff${state.wrap ? ' lr-wrap' : ''}`}>
-      <SummaryBar
-        diff={d}
-        source={state.source}
-        baseRef={state.baseRef}
-        branch={state.repos.find((r) => r.repoRoot === state.repoRoot)?.branch ?? null}
-        viewMode={state.viewMode}
-        whitespace={state.whitespace}
-        wrap={state.wrap}
-        onSetViewMode={(m) => setViewPref({ viewMode: m })}
-        onSetWhitespace={(w) => setViewPref({ whitespace: w })}
-        onSetWrap={(w) => setViewPref({ wrap: w })}
-        pending={state.pending}
-        onSubmit={state.source === 'pr' ? () => mutate(request('submitReview', {})) : undefined}
-      />
+      {/* One sticky block so file headers can stick directly beneath it whatever its height. */}
+      <div className="lr-topbar" ref={topBarRef}>
+        <SummaryBar
+          diff={d}
+          source={state.source}
+          baseRef={state.baseRef}
+          branch={state.repos.find((r) => r.repoRoot === state.repoRoot)?.branch ?? null}
+          viewMode={state.viewMode}
+          whitespace={state.whitespace}
+          wrap={state.wrap}
+          onSetViewMode={(m) => setViewPref({ viewMode: m })}
+          onSetWhitespace={(w) => setViewPref({ whitespace: w })}
+          onSetWrap={(w) => setViewPref({ wrap: w })}
+        />
+        {state.source === 'pr' && state.pr && (
+          <PrActionBar
+            pending={state.pending}
+            sync={state.sync}
+            onSync={() => void request('syncPullRequest', {})}
+            onSubmit={() => mutate(request('submitReview', {}))}
+            onDiscard={() => mutate(request('discardPendingReview', {}))}
+          />
+        )}
+      </div>
       {state.pr && <PrDescription pr={state.pr} />}
+      {/* Loading new commits changes which diff you are reviewing, so it stays a deliberate act here rather
+          than becoming another button in the bar. The paused state needs no banner: the Sync button says so
+          and retries on click. */}
       {state.headStale && (
         <div className="lr-headstale-banner">
-          This pull request has new commits. Your review stays on the commit you loaded until you refresh.
+          This pull request has new commits. Your review stays on the commit you loaded until you load them.
           <button className="lr-link" onClick={() => void request('refreshPullRequest', {})}>
-            Refresh
+            Load new commits
           </button>
         </div>
       )}
@@ -567,6 +601,7 @@ export function DiffView({
             })}
         </section>
       )}
+      <BackToTop />
     </div>
   );
 }

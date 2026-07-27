@@ -7,6 +7,11 @@
   --lr-radius: 8px;
   /* Left accent rails: green for diff file cards, the theme accent (focusBorder) for comment cards. */
   --lr-diff-accent: var(--vscode-gitDecoration-addedResourceForeground, #4caf50);
+  /* A sticky file header: one line at fixed padding, so a constant is honest here. The top bar above it is
+     NOT a constant (it grows a row in PR mode and wraps when narrow) — the panel measures that one and
+     publishes it as --lr-topbar-h on .lr-diff. Anything scrolled to must clear both. */
+  --lr-file-header-h: 40px;
+  --lr-reveal-gap: 8px; /* breathing room above a revealed target */
 }
 
 * {
@@ -28,20 +33,27 @@ body {
   flex-direction: column;
 }
 
-.lr-summary {
+/* The persistent header: the diff summary, plus the PR action row when a pull request is open. Sticky as
+   one block, and it publishes its own height so the file headers below can stick flush against it. */
+.lr-topbar {
   position: sticky;
   top: 0;
   z-index: 2;
+  background: var(--vscode-editor-background);
+  border-bottom: 1px solid var(--lr-border);
+}
+
+.lr-summary {
   padding: 8px 12px;
   color: var(--vscode-descriptionForeground);
   background: var(--vscode-editor-background);
-  border-bottom: 1px solid var(--lr-border);
   font-family: var(--vscode-font-family);
 }
 
 .lr-file-header {
   position: sticky;
-  top: 33px;
+  /* Measured by the panel: the bar is taller in PR mode and taller again when it wraps. */
+  top: var(--lr-topbar-h, 33px);
   z-index: 1;
   display: flex;
   align-items: center;
@@ -248,6 +260,82 @@ body {
 .lr-submit-btn:hover {
   background: var(--vscode-button-hoverBackground, var(--vscode-button-background));
 }
+.lr-submit-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.lr-submit-btn:disabled:hover {
+  background: var(--vscode-button-background);
+}
+.lr-incoming {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid currentColor;
+  border-radius: 10px;
+  font-size: 11px;
+  color: var(--vscode-charts-green, #89d185);
+}
+
+/* PR action row: everything you can do to the pull request, always in the same place. */
+.lr-pr-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--lr-border);
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--vscode-font-family);
+  font-size: 12px;
+}
+.lr-pr-idle {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+}
+.lr-pr-actions-end {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  flex: none; /* never shrink: the actions must stay clickable when the row is tight */
+  gap: 8px;
+}
+.lr-synced-hint {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+.lr-sync-paused {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  border-color: currentColor;
+}
+
+/* Floating back-to-top, bottom-right. Above the body's bottom padding, clear of the diff content. */
+.lr-to-top {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 3; /* over the sticky headers, which sit at 1 and 2 */
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border: 1px solid var(--lr-card-border);
+  border-radius: 14px;
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  color: var(--vscode-foreground);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  font-family: var(--vscode-font-family);
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.lr-to-top:hover {
+  background: var(--vscode-list-hoverBackground, var(--vscode-editorWidget-background));
+  opacity: 1;
+}
+.lr-btn-danger:hover {
+  color: var(--vscode-editorError-foreground, #f14c4c);
+  border-color: currentColor;
+}
 .lr-pr-pill {
   white-space: nowrap; /* the branch names are pre-truncated; keep the pill on one line */
 }
@@ -262,7 +350,8 @@ body {
   border-left: 2px solid var(--lr-diff-accent);
   border-radius: var(--lr-radius);
   background: var(--vscode-editor-background);
-  scroll-margin-top: 40px; /* clear the sticky summary bar when revealed */
+  /* Clear the sticky top bar when revealed. Measured, because the bar is taller in PR mode. */
+  scroll-margin-top: calc(var(--lr-topbar-h, 33px) + var(--lr-reveal-gap));
 }
 /* Body wrapper clips hunks to the card's rounded bottom (sticky header is its sibling, not inside it). */
 .lr-file-body {
@@ -539,9 +628,10 @@ body {
 .lr-thread {
   max-width: 820px;
   margin: 4px 0;
-  /* clear the two stacked sticky headers (summary bar + file header) when a thread is revealed, so its
-     top lands below them instead of scrolled underneath (which showed the footer actions at the top). */
-  scroll-margin-top: 80px;
+  /* Clear BOTH stacked sticky headers (top bar + file header) when a thread is revealed, so its top lands
+     below them instead of scrolled underneath, which clips the card and shows its footer actions at the
+     top. The top bar is measured rather than assumed: it grows a row in PR mode and wraps when narrow. */
+  scroll-margin-top: calc(var(--lr-topbar-h, 33px) + var(--lr-file-header-h) + var(--lr-reveal-gap));
   border: 1px solid var(--lr-card-border);
   border-radius: var(--lr-radius);
   background: var(--vscode-editor-background);
@@ -767,9 +857,14 @@ body {
   color: var(--vscode-descriptionForeground);
   border-color: currentColor;
 }
+/* Sits in the thread header badge row, which supplies its own gap. */
 .lr-badge-localonly {
-  margin-left: 6px;
   color: var(--vscode-editorWarning-foreground, #cca700);
+  border-color: currentColor;
+}
+.lr-badge-conflict {
+  margin-left: 6px;
+  color: var(--vscode-editorError-foreground, #f14c4c);
   border-color: currentColor;
 }
 

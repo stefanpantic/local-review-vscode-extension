@@ -1,8 +1,9 @@
 # Iteration 13 — Write-back hardening (refinement)
 
-> **Status: draft gate.** Opens after iteration 12 is closed (its docs + ACs ticked). Prioritized **before**
-> the scale-out/virtualization work (iteration 10). Nothing here extends iteration 12; these are the flow/UX
-> gaps found by pressure-testing the write-back + live-sync surface, batched into one hardening pass.
+> **Status: open.** Iteration 12 is merged. Prioritized **before** the scale-out/virtualization work
+> (iteration 10). Nothing here extends iteration 12; these are the flow/UX gaps found by pressure-testing the
+> write-back + live-sync surface, batched into one hardening pass. The three key design decisions below were
+> confirmed at the gate and are implemented as stated.
 
 ## Context
 
@@ -96,27 +97,43 @@ rendering scale-out. Grouped below; item numbers match the ideation list for tra
 
 ## Acceptance criteria (tick in place)
 
-- [ ] Deleting your posted comment keeps it hidden across polls/refreshes and still deletes on Submit (#1).
-- [ ] Approve / Request changes are unavailable on a PR you authored, with a clear note; Comment works (#2).
-- [ ] A submit interrupted mid-batch, then retried, never double-posts; succeeded items are not re-sent (#3).
-- [ ] A poll never mutates state while a submit/refresh is running, and vice versa (#4).
-- [ ] The poll never removes any comment; upstream deletions appear only on explicit Refresh/re-open; an open
-      composer never loses typed text to a background sync (#5).
-- [ ] A PR review restored after a VS Code restart renders its diff and threads (refs are durable; missing
-      refs are re-fetched) (#6).
-- [ ] Submit offers an optional review summary that posts as the review body (#7).
-- [ ] "Discard pending review changes" resets the review to current upstream after confirmation (#8).
-- [ ] A visible sync control in the PR panel pulls the latest comments on demand (#9).
-- [ ] Editing a comment that also changed upstream is flagged as a conflict, not silently overwritten (#10).
-- [ ] Submitting with a stale head warns that comments attach to the reviewed commit (#11).
-- [ ] New upstream comments arriving via the poll are signalled (#12).
-- [ ] A submit without write access shows a clear permission message, not a raw API error (#13).
-- [ ] Signing out mid-review does not make your own comments read-only; a write re-auths (#14).
-- [ ] Repeated poll failures surface a "sync paused" state with manual retry (#15).
-- [ ] The MCP write tools reject editing/deleting comments the caller did not author (#16).
-- [ ] The submit confirmation makes agent-authored items visible before posting (#17).
+- [x] Deleting your posted comment keeps it hidden across polls/refreshes and still deletes on Submit (#1).
+      _(`reconcile` suppresses any comment whose `remoteId` is staged; `test/reconcile.test.ts`.)_
+- [x] Approve / Request changes are unavailable on a PR you authored, with a clear note; Comment works (#2).
+      _(`submitPreview().ownPr` drives `pickReviewEvent`.)_
+- [x] A submit interrupted mid-batch, then retried, never double-posts; succeeded items are not re-sent (#3).
+      _(Apply-as-you-go via `onApplied` + `retireApplied`, plus draft adoption on re-import;
+      `test/submitRetry.test.ts` simulates a mid-batch throw and asserts the retry.)_
+- [x] A poll never mutates state while a submit/refresh is running, and vice versa (#4).
+      _(One `withPrLock` in the controller with a bounded wait; the poll returns early while it is held.)_
+- [x] The poll never removes any comment; upstream deletions appear only on explicit Refresh/re-open; an open
+      composer never loses typed text to a background sync (#5). _(`reconcile`'s `removeMissing` flag; the
+      composer mirrors unsent text into a draft store and reopens itself after a remount.)_
+- [x] A PR review restored after a VS Code restart renders its diff and threads (refs are durable; missing
+      refs are re-fetched) (#6). _(Head and base both pinned under `refs/agentic-review/pr/<n>/*`;
+      `prRefsPresent` + `ensurePrRefs` on the first refresh, then a one-shot re-import.)_
+- [x] Submit offers an optional review summary that posts as the review body (#7).
+- [x] "Discard pending review changes" resets the review to current upstream after confirmation (#8).
+      _(A Discard button on the PR bar, shown only when something is staged, plus the command.)_
+- [x] A visible sync control in the PR panel pulls the latest comments on demand (#9). _(Grew into a
+      persistent PR action bar carrying every PR action; see `notes.md`.)_
+- [x] Editing a comment that also changed upstream is flagged as a conflict, not silently overwritten (#10).
+      _(Persisted `Comment.conflict`; see the deviation in `notes.md`.)_
+- [x] Submitting with a stale head warns that comments attach to the reviewed commit (#11).
+- [x] New upstream comments arriving via the poll are signalled (#12). _(Toolbar count plus one notification.)_
+- [x] A submit without write access shows a clear permission message, not a raw API error (#13).
+      _(`src/github/errors.ts`, `test/githubErrors.test.ts`.)_
+- [x] Signing out mid-review does not make your own comments read-only; a write re-auths (#14).
+      _(`RemoteRef.viewer` cached at open; `authorIdentity()` falls back to it.)_
+- [x] Repeated poll failures surface a "sync paused" state with manual retry (#15).
+- [x] The MCP write tools reject editing/deleting comments the caller did not author (#16). _(Audit found no
+      edit or delete surface exists; kept that way and pinned by `test/mcpPermissions.test.ts`. See
+      `notes.md`.)_
+- [x] The submit confirmation makes agent-authored items visible before posting (#17).
 - [ ] Gates green (`format:check`, `lint`, `typecheck`, `test`, `build`, `package`); docs updated where
       behavior changed (protocol/README; ADR addendum if the sync/egress contract shifts).
+      _(Automated gates green and docs updated. Awaiting the manual F5 pass on github.com + GHE, which also
+      closes iteration 12's outstanding AC.)_
 
 ## Scope
 

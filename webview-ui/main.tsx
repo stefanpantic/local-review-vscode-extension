@@ -45,20 +45,46 @@ function revealFile(filePath: string, threadId?: string, attempt = 0, expanded =
   fileEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-/** Scroll to the next/previous changed file (section) or comment (thread) relative to the viewport. */
+/** Breathing room above a revealed target. Mirrors --lr-reveal-gap, which sets the same gap in CSS. */
+const REVEAL_GAP = 8;
+
+/** Height of an element, or a fallback when it is not on the page. */
+function heightOf(selector: string, fallback: number): number {
+  return document.querySelector(selector)?.getBoundingClientRect().height ?? fallback;
+}
+
+/**
+ * How much of the top of the viewport is hidden behind sticky headers. A file section is occluded by the top
+ * bar alone; a thread is also occluded by its file header. Measured rather than assumed, because the top bar
+ * carries an extra row in PR mode and wraps on a narrow panel — anything above this is not really visible,
+ * so it must not count as the "next" item.
+ */
+function stickyOffset(target: 'file' | 'comment'): number {
+  const bar = heightOf('.lr-topbar', 33);
+  return target === 'file' ? bar : bar + heightOf('.lr-file-header', 40);
+}
+
+/**
+ * Scroll to the next/previous changed file (section) or comment (thread).
+ *
+ * Both directions are measured from the reading line — where a revealed item comes to rest, just below the
+ * sticky headers — not from the raw viewport top. Anything above that line is hidden behind the headers, so
+ * treating it as visible would make "next" land on the item you are already looking at.
+ */
 function navigateTo(target: 'file' | 'comment', dir: 'next' | 'prev'): void {
   const els = Array.from(document.querySelectorAll<HTMLElement>(target === 'file' ? '[data-lr-path]' : '.lr-thread'));
   if (els.length === 0) return;
-  const margin = 40; // tolerance so the item at the top isn't re-picked
+  const line = stickyOffset(target) + REVEAL_GAP;
+  const eps = 4; // don't re-pick the item already parked on the line
   const tops = els.map((e) => e.getBoundingClientRect().top);
   let i: number;
   if (dir === 'next') {
-    i = tops.findIndex((t) => t > margin);
+    i = tops.findIndex((t) => t > line + eps);
     if (i === -1) i = els.length - 1;
   } else {
     i = 0;
     for (let k = els.length - 1; k >= 0; k--) {
-      if (tops[k] < -margin) {
+      if (tops[k] < line - eps) {
         i = k;
         break;
       }

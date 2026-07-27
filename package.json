@@ -167,6 +167,18 @@
         "icon": "$(sync)"
       },
       {
+        "command": "agenticReview.github.syncPullRequest",
+        "title": "Sync Pull Request Comments",
+        "category": "Agentic Review",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "agenticReview.github.discardPending",
+        "title": "Discard Pending Review Changes",
+        "category": "Agentic Review",
+        "icon": "$(discard)"
+      },
+      {
         "command": "agenticReview.revealFile",
         "title": "Reveal File",
         "category": "Agentic Review"
@@ -299,9 +311,24 @@
           "group": "navigation@1"
         },
         {
+          "command": "agenticReview.github.submitReview",
+          "when": "view == agenticReview.pullRequests && agenticReview.source == pr",
+          "group": "navigation@1"
+        },
+        {
+          "command": "agenticReview.github.syncPullRequest",
+          "when": "view == agenticReview.pullRequests && agenticReview.source == pr",
+          "group": "navigation@2"
+        },
+        {
           "command": "agenticReview.refreshPullRequests",
           "when": "view == agenticReview.pullRequests",
-          "group": "navigation@1"
+          "group": "navigation@3"
+        },
+        {
+          "command": "agenticReview.github.discardPending",
+          "when": "view == agenticReview.pullRequests && agenticReview.source == pr",
+          "group": "1_pr@1"
         }
       ],
       "view/item/context": [
@@ -369,6 +396,14 @@
         },
         {
           "command": "agenticReview.github.refreshPullRequest",
+          "when": "agenticReview.source == pr"
+        },
+        {
+          "command": "agenticReview.github.syncPullRequest",
+          "when": "agenticReview.source == pr"
+        },
+        {
+          "command": "agenticReview.github.discardPending",
           "when": "agenticReview.source == pr"
         }
       ]

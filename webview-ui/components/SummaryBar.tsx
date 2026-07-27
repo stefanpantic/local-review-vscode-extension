@@ -1,5 +1,4 @@
 import type { ReviewDiff, DiffSource, ViewMode } from '../../src/model/ReviewDiff';
-import type { PendingSummary } from '../../src/review/pending';
 
 const SOURCE_LABELS: Record<DiffSource, string> = {
   'worktree-vs-head': 'Uncommitted changes',
@@ -13,6 +12,10 @@ const SOURCE_LABELS: Record<DiffSource, string> = {
 const MAX_REF = 22;
 const truncateRef = (s: string): string => (s.length > MAX_REF ? `${s.slice(0, MAX_REF)}...` : s);
 
+/**
+ * What you are looking at, plus how it is rendered. Pull-request actions are deliberately not here — they
+ * live on their own row (`PrActionBar`) so neither set of controls crowds the other out.
+ */
 export function SummaryBar({
   diff,
   source,
@@ -21,11 +24,9 @@ export function SummaryBar({
   viewMode,
   whitespace,
   wrap,
-  pending,
   onSetViewMode,
   onSetWhitespace,
   onSetWrap,
-  onSubmit,
 }: {
   diff: ReviewDiff;
   source: DiffSource;
@@ -34,11 +35,9 @@ export function SummaryBar({
   viewMode: ViewMode;
   whitespace: boolean;
   wrap: boolean;
-  pending?: PendingSummary;
   onSetViewMode: (mode: ViewMode) => void;
   onSetWhitespace: (hide: boolean) => void;
   onSetWrap: (wrap: boolean) => void;
-  onSubmit?: () => void;
 }) {
   const additions = diff.files.reduce((n, f) => n + f.additions, 0);
   const deletions = diff.files.reduce((n, f) => n + f.deletions, 0);
@@ -73,21 +72,6 @@ export function SummaryBar({
       <span className="lr-source" title="Diff source">
         {label}
       </span>
-      {pending && pending.total > 0 && (
-        <span className="lr-pending" title="Local changes not yet submitted to GitHub">
-          {pending.total} pending
-        </span>
-      )}
-      {pr && onSubmit && pending && pending.total > 0 && (
-        <button
-          type="button"
-          className="lr-submit-btn"
-          onClick={onSubmit}
-          title="Post your staged changes to GitHub as one review"
-        >
-          Submit review ({pending.total})
-        </button>
-      )}
       <span className="lr-toggles">
         <span className="lr-segmented" role="group" aria-label="View mode">
           <button

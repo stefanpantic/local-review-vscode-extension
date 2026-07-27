@@ -38,3 +38,43 @@ Implementing the write half settled a few mechanics on top of the decision above
 - **Sync is gentle and non-surprising.** A background poll (PR-mode only, configurable interval) live-updates comment changes; an advanced head is never swapped in automatically — it raises a Refresh banner. Concurrent edits are last-write-wins for now.
 - **Identity.** A new comment is attributed to your GitHub login when signed in, else `git config user.name`; edit/delete is allowed only on your own or the AI Agent's comments.
 - **Deferred to iteration 13 (hardening).** Honoring a staged delete across a poll, safe retry after a partial submit, a mutation lock between poll and submit, durable-ref restart restore, a review summary body, concurrent-edit surfacing, and permission/auth edges were pressure-test findings batched into a follow-up so iteration 12 shipped without scope creep.
+
+## Addendum — hardening the sync contract (iteration 13)
+
+Pressure-testing the write-back against real pull requests changed two things the iteration 12 addendum
+stated, and settled the mechanics that make a partial submit safe. The egress stance is unchanged: still one
+explicit human Submit, still confined to `src/github/*`, still no network capability for the MCP server.
+
+- **The background poll is now strictly non-destructive.** It only adds new threads and comments and
+  refreshes content. It never removes anyone's comment, so a thread cannot vanish under an open composer.
+  Upstream deletions land on an explicit sync instead (open, Refresh, or the panel's new sync control), which
+  keeps the previous behavior. This supersedes "the poll removes others' deleted comments". The cost is that
+  an upstream deletion lingers until you sync, which is the right trade: a background tick silently deleting
+  content someone is mid-reply to is far worse than a slightly late removal. One reconcile flag,
+  `removeMissing`, is what separates the two paths, so there is still a single merge primitive.
+- **Submit applies as it goes, and always reconciles.** Each id-addressable step (edit, delete, resolve) is
+  retired from the pending set the moment it lands, and a reconcile from a fresh fetch runs on any outcome.
+  Created content has no local id to stamp, so reconcile **adopts** a draft that turns out to be posted
+  already, matching on file, side, body, and suggestion among your own content. Together these mean a submit
+  that dies partway leaves only genuinely unsent work staged, and a retry never double-posts. This is
+  preferred over threading provisional ids through the batch, which would be fragile in exactly the failure
+  cases it is meant to cover.
+- **Concurrent edits are surfaced, not silently resolved.** A pending edit whose upstream body also moved off
+  the same imported baseline is flagged `conflict` and keeps your text until you decide. The flag has to be
+  **persisted**, because every reconcile advances the baseline and the collision cannot be re-derived on a
+  later pass. This replaces "last-write-wins for now" — the write still wins on Submit, but never quietly.
+- **All PR network mutations are serialized behind one lock,** with a bounded wait so a hung call cannot wedge
+  the poll forever. The poll skips entirely while the lock is held.
+- **Both ends of a PR are pinned.** The head moves from `refs/agentic-review/pr/<n>` to `<n>/head`, and the
+  base is pinned beside it at `<n>/base`. A restored session verifies both and re-fetches what is missing. A
+  three-dot diff needs both ends to exist, so pinning only the head left a review one `git gc` away from
+  unopenable. The rename is not additive: git stores refs as paths, so the old ref occupies the name the new
+  one needs as a directory, and a PR opened by an earlier version fails to open until the old ref is deleted.
+  `retireLegacyPrRef` does that before pinning.
+- **Identity is cached on the review.** The signed-in login is stored when the PR is opened, so a session
+  lapsing mid-review no longer turns your own comments read-only. A write re-auths interactively as before.
+- **The MCP write surface was audited and left alone.** It has no edit or delete tool, and the host surface
+  behind it (`McpReviewApi`) exposes only add, reply, and resolve, so an agent already cannot alter or remove
+  anyone's content. Rather than add a permission check with nothing to check, the shape is pinned by a test
+  that fails if an edit or delete path is ever introduced without enforcing the same `canEditComment` rule the
+  human UI uses.

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { ReviewState } from './reviewState';
 import { ReviewStore } from './comments/ReviewStore';
-import { ReviewController } from './reviewController';
+import { ReviewController, type SubmitPreview } from './reviewController';
 import { FilesView } from './webview/filesView';
 import { CommentsView } from './webview/commentsView';
 import { ReviewsView } from './webview/reviewsView';
@@ -16,6 +16,7 @@ import type { DiffSource } from './model/ReviewDiff';
 import type { Review } from './model/Comment';
 import { parsePrReference, type GithubProviderId } from './github/remote';
 import { githubTokenSource } from './github/auth';
+import { githubErrorText } from './github/errors';
 import type { SubmitEvent, SubmitCounts } from './review/submit';
 import type { OrphanReport } from './review/reconcile';
 import { PullRequestsView } from './webview/pullRequestsView';
@@ -252,6 +253,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('agenticReview.github.refreshPullRequest', () =>
       refreshOpenPullRequest(controller),
     ),
+    vscode.commands.registerCommand('agenticReview.github.syncPullRequest', () => syncOpenPullRequest(controller)),
+    vscode.commands.registerCommand('agenticReview.github.discardPending', () => discardPendingReview(controller)),
     vscode.commands.registerCommand('agenticReview.toggleViewMode', () =>
       controller.setViewPref({ viewMode: controller.viewMode === 'split' ? 'unified' : 'split' }),
     ),
@@ -280,9 +283,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (polling || controller.source !== 'pr') return;
     polling = true;
     try {
-      const { orphans } = await controller.pollPullRequest();
+      const { orphans, incoming } = await controller.pollPullRequest();
       if (orphans)
         void vscode.window.showInformationMessage(`Agentic Review: synced upstream changes.${orphanNote(orphans)}`);
+      // A discussion landing while you read is easy to miss, so say so once rather than only badging the panel.
+      if (incoming)
+        void vscode.window.showInformationMessage(
+          `Agentic Review: ${incoming} new comment${incoming === 1 ? '' : 's'} on this pull request.`,
+        );
     } catch {
       /* transient (offline, rate limit); the next tick retries */
     } finally {
@@ -513,13 +521,15 @@ async function submitPullRequest(controller: ReviewController): Promise<void> {
     );
     return;
   }
-  const event = await pickReviewEvent(preview.state);
+  const event = await pickReviewEvent(preview);
   if (!event) return;
-  if (!(await confirmSubmit(preview.counts, event))) return;
+  const body = await askReviewSummary();
+  if (body === undefined) return; // dismissed the summary box: treat as cancelling the whole submit
+  if (!(await confirmSubmit(preview, event))) return;
   try {
     const { counts, orphans } = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'Submitting review to GitHub…' },
-      () => controller.submitPullRequest(event),
+      () => controller.submitPullRequest(event, body),
     );
     const note = orphanNote(orphans);
     void vscode.window.showInformationMessage(`Agentic Review: submitted ${summarizeCounts(counts)}.${note}`);
@@ -529,25 +539,41 @@ async function submitPullRequest(controller: ReviewController): Promise<void> {
 }
 
 /**
- * Choose the GitHub review event for a Submit. A closed or merged PR only accepts Comment (GitHub rejects
- * Approve / Request changes), so those are omitted with a note rather than failing on submit.
+ * Choose the GitHub review event for a Submit. GitHub rejects Approve and Request changes on a closed or
+ * merged pull request, and on one you authored yourself, so those are omitted with a note explaining why
+ * rather than failing with a 422 after the fact.
  */
-async function pickReviewEvent(state?: string): Promise<SubmitEvent | undefined> {
-  const closed = state === 'closed' || state === 'merged';
+async function pickReviewEvent(preview: SubmitPreview): Promise<SubmitEvent | undefined> {
+  const closed = preview.state === 'closed' || preview.state === 'merged';
+  const commentOnly = closed || preview.ownPr;
   const items: (vscode.QuickPickItem & { event: SubmitEvent })[] = [
     { label: 'Comment', description: 'Submit comments without explicit approval', event: 'comment' },
   ];
-  if (!closed) {
+  if (!commentOnly) {
     items.push(
       { label: 'Approve', description: 'Approve the pull request', event: 'approve' },
       { label: 'Request changes', description: 'Submit feedback that must be addressed', event: 'request-changes' },
     );
   }
   const placeHolder = closed
-    ? `This pull request is ${state}; only Comment can be submitted`
-    : 'Choose the review event to submit';
+    ? `This pull request is ${preview.state}; only Comment can be submitted`
+    : preview.ownPr
+      ? 'You opened this pull request, so only Comment can be submitted'
+      : 'Choose the review event to submit';
   const picked = await vscode.window.showQuickPick(items, { placeHolder });
   return picked?.event;
+}
+
+/**
+ * The optional review summary, GitHub's "Finish your review" box. Returns the text (empty when skipped), or
+ * undefined when the box is dismissed, which cancels the submit.
+ */
+async function askReviewSummary(): Promise<string | undefined> {
+  return vscode.window.showInputBox({
+    title: 'Review summary (optional)',
+    prompt: 'Posted as the body of the review. Leave empty to submit the comments on their own.',
+    placeHolder: 'Summarize your review…',
+  });
 }
 
 /** Apply the "new commits" banner: re-fetch the open PR's advanced head, re-diff, and re-import in place. */
@@ -562,28 +588,83 @@ async function refreshOpenPullRequest(controller: ReviewController): Promise<voi
   }
 }
 
+/** Pull the latest upstream comments on demand. Unlike the poll, this is where an upstream deletion lands. */
+async function syncOpenPullRequest(controller: ReviewController): Promise<void> {
+  try {
+    const orphans = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'Syncing pull request comments…' },
+      () => controller.syncPullRequest(),
+    );
+    void vscode.window.showInformationMessage(`Agentic Review: comments are up to date.${orphanNote(orphans)}`);
+  } catch (err) {
+    void vscode.window.showErrorMessage(`Agentic Review: could not sync the pull request. ${errorText(err)}`);
+  }
+}
+
+/**
+ * Throw away everything staged on the open PR and take current upstream as it stands. Confirmed modally and
+ * spelled out, because drafts, edits, resolve toggles, and queued deletes all go and none of it comes back.
+ */
+async function discardPendingReview(controller: ReviewController): Promise<void> {
+  const preview = controller.submitPreview();
+  if (!preview) {
+    void vscode.window.showInformationMessage('Agentic Review: open a pull request first.');
+    return;
+  }
+  if (preview.counts.total === 0) {
+    void vscode.window.showInformationMessage('Agentic Review: nothing is staged, so there is nothing to discard.');
+    return;
+  }
+  const choice = await vscode.window.showWarningMessage(
+    'Discard pending review changes?',
+    {
+      modal: true,
+      detail: `${summarizeCounts(preview.counts)} will be thrown away and the review reset to what is on GitHub now. This cannot be undone.`,
+    },
+    'Discard',
+  );
+  if (choice !== 'Discard') return;
+  try {
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'Discarding pending changes…' },
+      () => controller.discardPendingReview(),
+    );
+    void vscode.window.showInformationMessage('Agentic Review: pending review changes discarded.');
+  } catch (err) {
+    void vscode.window.showErrorMessage(`Agentic Review: could not discard the pending changes. ${errorText(err)}`);
+  }
+}
+
 /** A trailing sentence describing content whose upstream target vanished during a re-fetch, or empty. */
 function orphanNote(o: OrphanReport): string {
   const parts: string[] = [];
   if (o.localOnly > 0)
     parts.push(
-      `${o.localOnly} of your comment${o.localOnly === 1 ? ' was' : 's were'} deleted on GitHub and kept local-only (repost on Submit, or delete to discard)`,
+      `${o.localOnly} of your comment${o.localOnly === 1 ? ' was' : 's were'} deleted on GitHub and kept here, badged "deleted on GitHub" (Submit reposts, or delete to discard)`,
     );
   if (o.deletes > 0) parts.push(`${o.deletes} staged delete${o.deletes === 1 ? '' : 's'} already gone upstream`);
   return parts.length ? ` (${parts.join('; ')}.)` : '';
 }
 
 /** Modal confirmation showing what the Submit will post, including how many comments are AI-authored. */
-async function confirmSubmit(counts: SubmitCounts, event: SubmitEvent): Promise<boolean> {
+async function confirmSubmit(preview: SubmitPreview, event: SubmitEvent): Promise<boolean> {
+  const { counts } = preview;
   const eventLabel = event === 'approve' ? 'Approve' : event === 'request-changes' ? 'Request changes' : 'Comment';
-  const agent =
-    counts.agentComments > 0
-      ? ` Includes ${counts.agentComments} AI Agent comment${counts.agentComments === 1 ? '' : 's'}, posted under your account.`
-      : '';
-  const detail = `${summarizeCounts(counts)} will be posted to GitHub as "${eventLabel}".${agent}`;
+  const lines = [`${summarizeCounts(counts)} will be posted to GitHub as "${eventLabel}".`];
+  if (counts.agentComments > 0) {
+    const n = counts.agentComments;
+    lines.push(
+      `${n} of them ${n === 1 ? 'was' : 'were'} written by the AI Agent and will be posted under your account.`,
+    );
+  }
+  if (preview.headStale) {
+    lines.push(
+      'This pull request has new commits. Your comments attach to the commit you reviewed, so GitHub will show them as outdated. Refresh first to review the new head.',
+    );
+  }
   const choice = await vscode.window.showWarningMessage(
     'Submit this review to GitHub?',
-    { modal: true, detail },
+    { modal: true, detail: lines.join('\n\n') },
     'Submit',
   );
   return choice === 'Submit';
@@ -651,7 +732,7 @@ async function pickPullRequest(provider: ReviewProvider, repo: RemoteRepoRef): P
 }
 
 function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  return githubErrorText(err) ?? (err instanceof Error ? err.message : String(err));
 }
 
 async function exportReview(controller: ReviewController, arg?: Review): Promise<void> {

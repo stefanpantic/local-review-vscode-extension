@@ -48,6 +48,7 @@ Tools the agent gets: `get_diff`, `get_review`, `list_reviews`, `post_comment`, 
 - **Inline comments** on single lines or ranges, old or new side, with edit, delete, reply, resolve.
 - **Suggestions:** propose replacement code in a comment, rendered as a before/after diff and captured in the export. Never written to disk.
 - **Markdown comments**, rendered in the panel.
+- **Back to top** button once you have scrolled into a long diff.
 - **Line drift:** comments follow their lines. When they can't be matched they go "outdated" and stay in the review.
 - **Branch-tied reviews:** saved automatically per branch. Reviews for deleted or merged branches are archived and can be moved to the current branch.
 - **Structured Markdown export:** grouped by file, scoped to all, unresolved, or one file, at current or as-reviewed line positions.
@@ -77,9 +78,28 @@ When the current repo's `origin` is a GitHub remote, a **Pull Requests** section
 
 ### Write your review back
 
-Comment, reply, resolve, and edit or delete your own and your agent's comments. These changes stay on your machine and show how many are pending. Use the **Submit review** button in the review toolbar, or the **Agentic Review: Submit Review to GitHub** command. Choose one event: **Comment**, **Approve**, or **Request changes**. Your changes post as one GitHub review, pinned to the commit you reviewed. Submit is the only network write.
+Reviewing a PR adds a **pull request bar** across the top of the review, always visible as you scroll. Everything you can do to the PR is there, so nothing hides in the command palette:
 
-A PR polls GitHub while it is open. New, edited, and resolved comments from other people appear in your review. Set the interval with `agenticReview.github.pollInterval`. Use `0` to turn polling off. New commits on the PR show a **Refresh** banner. Your review stays on the commit you loaded until you refresh. Other people's comments are read-only. You can edit or delete only your own and your agent's comments. If you delete one of your comments on GitHub, it stays in your review with an **only local** flag. Submit reposts it. Delete it to discard.
+| Control           | What it does                                                                                             |
+| ----------------- | -------------------------------------------------------------------------------------------------------- |
+| **Submit review** | Posts everything you have staged as one GitHub review. Always shown, disabled until something is staged. |
+| **Sync**          | Pulls the latest comments and checks for new commits. Reads **Sync paused** if GitHub cannot be reached. |
+| **Discard**       | Throws away everything staged and resets to what is on GitHub now. Shown only when something is staged.  |
+| **N pending**     | How much is staged. Hover for the breakdown. **N new** appears when other people comment while you read. |
+
+The same actions sit in the **Pull Requests** sidebar title bar, and as **Agentic Review:** commands.
+
+Comment, reply, resolve, and edit or delete your own and your agent's comments. These changes stay on your machine until you submit. Submit asks for one event, **Comment**, **Approve**, or **Request changes**, then an optional summary. Your changes post as one GitHub review, pinned to the commit you reviewed. Submit is the only network write.
+
+Approve and Request changes are unavailable on a pull request you opened yourself, and on a closed or merged one, because GitHub rejects them. Only Comment is offered there.
+
+If a submit fails partway, retry it. Whatever already posted is not sent again.
+
+A PR also polls GitHub while it is open, so other people's new, edited, and resolved comments appear on their own. Set the interval with `agenticReview.github.pollInterval`. Use `0` to turn polling off. **The poll only adds and updates. It never removes a comment.** Deletions made on GitHub appear when you press **Sync**, or reopen the PR. This is deliberate: a background refresh should not delete a thread you are in the middle of replying to.
+
+New commits on the PR raise a **Load new commits** banner. Loading them changes which diff you are reviewing, so it stays a separate, deliberate action rather than something Sync does to you. Your review stays on the commit you loaded until then, and a review left open is restored with its diff and comments after a restart.
+
+Other people's comments are read-only. You can edit or delete only your own and your agent's comments, and that stays true if your GitHub session lapses while you review. If you delete one of your comments on GitHub, it stays in your review and its thread is badged **deleted on GitHub**. Submit reposts it. Delete it to discard. If you edit a comment that someone also edited on GitHub, it is flagged **edited on both sides**. Your version is kept and wins on Submit, so edit it to merge the two, or discard your edit to take theirs.
 
 For **GitHub Enterprise**, set `agenticReview.github.enterpriseUri` to your server, for example `https://github.your-company.com`. VS Code's `github-enterprise.uri` must point at the same host.
 
