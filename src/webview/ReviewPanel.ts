@@ -21,6 +21,9 @@ export class ReviewPanel {
     }
     const panel = vscode.window.createWebviewPanel('agenticReview.panel', 'ReviewMate', vscode.ViewColumn.Active, {
       enableScripts: true,
+      // Find over the diff. The widget searches rendered text, so a collapsed file is not covered.
+      // "Expand all files" in the summary bar is how the reader brings every file into range.
+      enableFindWidget: true,
       localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'dist'), vscode.Uri.joinPath(extensionUri, 'media')],
     });
     ReviewPanel.current = new ReviewPanel(panel, extensionUri, controller);

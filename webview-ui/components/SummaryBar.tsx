@@ -27,6 +27,8 @@ export function SummaryBar({
   onSetViewMode,
   onSetWhitespace,
   onSetWrap,
+  anyCollapsed,
+  onToggleAll,
 }: {
   diff: ReviewDiff;
   source: DiffSource;
@@ -38,6 +40,8 @@ export function SummaryBar({
   onSetViewMode: (mode: ViewMode) => void;
   onSetWhitespace: (hide: boolean) => void;
   onSetWrap: (wrap: boolean) => void;
+  anyCollapsed: boolean;
+  onToggleAll: () => void;
 }) {
   const additions = diff.files.reduce((n, f) => n + f.additions, 0);
   const deletions = diff.files.reduce((n, f) => n + f.deletions, 0);
@@ -96,6 +100,16 @@ export function SummaryBar({
         <label className="lr-ws" title="Wrap long lines instead of scrolling horizontally">
           <input type="checkbox" checked={wrap} onChange={(e) => onSetWrap(e.target.checked)} /> Wrap lines
         </label>
+        <button
+          type="button"
+          className="lr-toggle-btn"
+          title={
+            anyCollapsed ? 'Expand every file, so find covers the whole diff' : 'Collapse every file back to its header'
+          }
+          onClick={onToggleAll}
+        >
+          {anyCollapsed ? 'Expand all files' : 'Collapse all files'}
+        </button>
       </span>
     </div>
   );
