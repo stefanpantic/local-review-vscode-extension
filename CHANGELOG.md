@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.1.0...agentic-review-v0.2.0) (2026-07-27)
+
+
+### Features
+
+* find in the diff with Ctrl+F ([#43](https://github.com/stefanpantic/local-review-vscode-extension/issues/43)) ([676a512](https://github.com/stefanpantic/local-review-vscode-extension/commit/676a512a93ca9e350aeef2363a388811f69a8e80))
+
+
+### Bug Fixes
+
+* highlight Kotlin and other unregistered languages in the diff ([#42](https://github.com/stefanpantic/local-review-vscode-extension/issues/42)) ([7cf1248](https://github.com/stefanpantic/local-review-vscode-extension/commit/7cf1248e3bc7c37ef4aede1c50eb0fea55aeaad4))
+
 ## [0.1.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.0.8...agentic-review-v0.1.0) (2026-07-27)
 
 
