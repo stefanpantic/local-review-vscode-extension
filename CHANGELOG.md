@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.0.8...agentic-review-v0.1.0) (2026-07-27)
+
+
+### Features
+
+* harden GitHub pull request write-back and sync ([#39](https://github.com/stefanpantic/local-review-vscode-extension/issues/39)) ([cbe7eec](https://github.com/stefanpantic/local-review-vscode-extension/commit/cbe7eec4ae308b3dc5aa5d6c509cb7c1fb4b9f6e))
+* rename the extension to ReviewMate ([#40](https://github.com/stefanpantic/local-review-vscode-extension/issues/40)) ([11dfd82](https://github.com/stefanpantic/local-review-vscode-extension/commit/11dfd823a5fdda81e8e08865b7fb992111d322f4))
+* review GitHub pull requests locally ([#34](https://github.com/stefanpantic/local-review-vscode-extension/issues/34)) ([e4e5b30](https://github.com/stefanpantic/local-review-vscode-extension/commit/e4e5b3001252ae277b553ed1804111b80333cf0d))
+* write your pull request review back to GitHub ([#36](https://github.com/stefanpantic/local-review-vscode-extension/issues/36)) ([284dbb5](https://github.com/stefanpantic/local-review-vscode-extension/commit/284dbb543b5753fac3e332ba2daf14966d0df570))
+
 ## [0.0.8](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.0.7...agentic-review-v0.0.8) (2026-07-10)
 
 
