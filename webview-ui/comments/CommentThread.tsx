@@ -4,7 +4,7 @@ import type { CommentThread } from '../../src/model/Comment';
 import { AGENT_AUTHOR, canEditComment } from '../../src/model/Comment';
 import { TokenText } from '../render/UnifiedRows';
 import type { Tok } from '../render/highlight';
-import { CommentForm } from './CommentForm';
+import { CommentForm, hasDraft } from './CommentForm';
 
 export interface ThreadOps {
   onReply: (body: string, suggestion?: string) => void;
@@ -72,12 +72,18 @@ export function CommentThreadView({
   viewer?: string; // the current user's identity; comments not by them (in a PR) are read-only
   prMode?: boolean; // a PR review, where others' comments exist and are read-only
 }) {
-  const [replying, setReplying] = useState(false);
+  const replyDraftKey = `reply:${thread.id}`;
+  // Reopen the composer if it holds text a remount would otherwise have hidden (a sync, a diff refresh).
+  const [replying, setReplying] = useState(() => hasDraft(replyDraftKey));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(!thread.resolved);
   useEffect(() => setExpanded(!thread.resolved), [thread.resolved]);
 
   const canSuggest = thread.anchor.side === 'new';
+  // Comments of yours that were deleted on GitHub and kept here. A thread-level fact, so it belongs in the
+  // header badges rather than beside an author name: it stays visible when the thread is collapsed, and it
+  // keeps the comment rows to their content.
+  const deletedUpstream = thread.comments.filter((c) => c.localOnly).length;
 
   const head = (
     <div
@@ -99,10 +105,24 @@ export function CommentThreadView({
         {thread.status === 'moved' && <span className="lr-badge lr-badge-moved">moved</span>}
         {thread.status === 'outdated' && <span className="lr-badge lr-badge-outdated">outdated</span>}
         {thread.resolved && <span className="lr-badge lr-badge-resolved">resolved</span>}
-        {pendingOnRemote && (
-          <span className="lr-badge lr-badge-pending" title="A local draft, not posted to GitHub">
-            not on GitHub
+        {/* "deleted on GitHub" already says it is not there, so the two never stack: the specific one wins. */}
+        {deletedUpstream > 0 ? (
+          <span
+            className="lr-badge lr-badge-localonly"
+            title={
+              deletedUpstream === 1
+                ? 'Your comment was deleted on GitHub. It is kept here: Submit reposts it, or delete it to discard.'
+                : `${deletedUpstream} of your comments were deleted on GitHub. They are kept here: Submit reposts them, or delete them to discard.`
+            }
+          >
+            deleted on GitHub
           </span>
+        ) : (
+          pendingOnRemote && (
+            <span className="lr-badge lr-badge-pending" title="A local draft, not posted to GitHub">
+              not on GitHub
+            </span>
+          )
         )}
       </span>
     </div>
@@ -135,6 +155,7 @@ export function CommentThreadView({
                 suggestBase={suggestBase}
                 canSuggest={canSuggest}
                 submitLabel="Save"
+                draftKey={`edit:${c.id}`}
                 onSubmit={(b, s) => {
                   ops.onEdit(c.id, b, s);
                   setEditingId(null);
@@ -148,12 +169,12 @@ export function CommentThreadView({
                 {c.author && (
                   <div className={`lr-comment-author${c.author === AGENT_AUTHOR ? ' lr-author-agent' : ''}`}>
                     {c.author}
-                    {c.localOnly && (
+                    {c.conflict && (
                       <span
-                        className="lr-badge lr-badge-localonly"
-                        title="Deleted on GitHub; kept locally. Submit to repost, or delete to discard."
+                        className="lr-badge lr-badge-conflict"
+                        title="This comment also changed on GitHub after you edited it. Submitting replaces their version with yours. Edit it to merge the two, or discard your edit to take theirs."
                       >
-                        only local
+                        edited on both sides
                       </span>
                     )}
                   </div>
@@ -198,6 +219,7 @@ export function CommentThreadView({
             submitLabel="Reply"
             suggestBase={suggestBase}
             canSuggest={canSuggest}
+            draftKey={replyDraftKey}
             onSubmit={(b, s) => {
               ops.onReply(b, s ?? undefined);
               setReplying(false);

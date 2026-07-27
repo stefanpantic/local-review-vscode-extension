@@ -30,6 +30,10 @@ export interface Comment {
   // Was posted on the remote by you, then deleted there: its remote link is dropped so it can repost, and
   // this marks it "local only" so the UI can flag it and you can repost on Submit or delete to discard.
   localOnly?: boolean;
+  // Your unsubmitted edit and an upstream edit both moved off the same imported baseline. Your text is kept
+  // and flagged rather than silently overwriting theirs; you resolve it by keeping or discarding your edit.
+  // Persisted, because each reconcile advances the baseline and the collision cannot be re-derived later.
+  conflict?: boolean;
 }
 
 /** Fallback author when the writer is unknown (git user.name unset, or a legacy comment). */
@@ -85,6 +89,9 @@ export interface RemoteRef {
   baseSha: string; // three-dot diff base
   headRef?: string; // local pinned head ref
   headSha: string; // reviewed head commit
+  // The signed-in login at the time the request was opened. Cached so "is this comment mine" still resolves
+  // if the VS Code session lapses mid-review, rather than turning your own comments read-only.
+  viewer?: string;
 }
 
 /**

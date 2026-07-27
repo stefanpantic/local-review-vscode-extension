@@ -63,6 +63,14 @@ export class ReviewPanel {
           await vscode.commands.executeCommand('agenticReview.github.refreshPullRequest');
           return { ok: true as const };
         },
+        syncPullRequest: async () => {
+          await vscode.commands.executeCommand('agenticReview.github.syncPullRequest');
+          return { ok: true as const };
+        },
+        discardPendingReview: async () => {
+          await vscode.commands.executeCommand('agenticReview.github.discardPending');
+          return { ok: true as const };
+        },
         panelRendered: () => {
           this.controller.markPanelRendered();
           return { ok: true as const };

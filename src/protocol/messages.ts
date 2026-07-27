@@ -31,6 +31,18 @@ export interface PrDisplay {
   body?: string; // description (markdown); empty string when there is none
 }
 
+/**
+ * How the open PR's live sync is doing. `incoming` is upstream comments the background poll brought in
+ * since you last synced explicitly, so an active reviewer notices a discussion landed. `paused` means the
+ * poll has failed repeatedly (offline, rate-limited) and the view may be stale, rather than quietly
+ * pretending it is current.
+ */
+export interface SyncState {
+  incoming?: number;
+  paused?: boolean;
+  lastSyncedAt?: string; // ISO
+}
+
 export interface ReviewStatePayload {
   result: DiffResult;
   repoRoot?: string;
@@ -45,6 +57,7 @@ export interface ReviewStatePayload {
   pr?: PrDisplay; // the PR being reviewed (source === 'pr')
   pending?: PendingSummary; // staged, not-yet-submitted changes on the PR review (source === 'pr')
   headStale?: boolean; // the open PR advanced upstream; show a Refresh banner (never auto-applied)
+  sync?: SyncState; // live sync health for the PR panel (source === 'pr')
   viewer?: string; // the current user's identity (GitHub login or git user.name); who "your" comments belong to
   config: { largeFileThreshold: number };
 }
@@ -82,6 +95,11 @@ export interface Requests {
   submitReview: { payload: Record<string, never>; response: { ok: true } };
   // Re-fetch the open PR's new head (the "new commits" banner action); re-diffs and re-imports in place.
   refreshPullRequest: { payload: Record<string, never>; response: { ok: true } };
+  // Pull the latest upstream comments on demand and re-check the head (the panel's sync control). Unlike the
+  // background poll this is an explicit sync, so it is also where an upstream deletion is reflected.
+  syncPullRequest: { payload: Record<string, never>; response: { ok: true } };
+  // Throw away everything staged on the PR and take current upstream. The host confirms first.
+  discardPendingReview: { payload: Record<string, never>; response: { ok: true } };
   // The webview has painted the current diff (threads are in the DOM). Lets the sidebar mark comments
   // clickable only once they can actually be revealed on the diff.
   panelRendered: { payload: Record<string, never>; response: { ok: true } };

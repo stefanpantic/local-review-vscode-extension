@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { CommentThread, RemoteRef, RemoteReview, Review } from '../model/Comment';
 import { durableThread, isCommentThread, UNKNOWN_AUTHOR } from '../model/Comment';
+import type { AppliedStep } from '../review/submit';
 
 const REVIEWS_KEY = 'agenticReview.reviews';
 const CURRENT_KEY = 'agenticReview.currentReview';
@@ -114,6 +115,35 @@ export class ReviewStore {
     const review = map[repoRoot]?.find((r) => r.id === id);
     if (review?.kind !== 'remote') return;
     review.pendingDeletes = [...remoteIds];
+    await this.store.update(REVIEWS_KEY, map);
+  }
+
+  /**
+   * Retire one submitted step from a review's pending set, the moment it lands on the remote. An edit
+   * re-baselines the comment to the text just posted, a resolve stamps the resolved baseline, and a delete
+   * drops its queued id. A failure later in the same Submit then leaves only genuinely unsent work staged,
+   * so a retry does what is left instead of posting anything twice.
+   */
+  async retireApplied(repoRoot: string, id: string, step: AppliedStep): Promise<void> {
+    const map = this.allMap();
+    const review = map[repoRoot]?.find((r) => r.id === id);
+    if (review?.kind !== 'remote') return;
+    if (step.kind === 'delete') {
+      // The comment itself already left the thread when the delete was staged; only the queued id remains.
+      review.pendingDeletes = (review.pendingDeletes ?? []).filter((d) => d !== step.commentId);
+    } else if (step.kind === 'edit') {
+      for (const t of review.threads) {
+        for (const c of t.comments) {
+          if (c.remoteId === step.commentId) {
+            c.remoteBody = c.body;
+            delete c.conflict; // your text is upstream now, so there is nothing left to collide with
+          }
+        }
+      }
+    } else {
+      for (const t of review.threads) if (t.remoteThreadId === step.threadId) t.remoteResolved = step.resolved;
+    }
+    review.updatedAt = new Date().toISOString();
     await this.store.update(REVIEWS_KEY, map);
   }
 

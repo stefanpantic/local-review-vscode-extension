@@ -4,7 +4,7 @@
 import type { CommentThread } from '../model/Comment';
 import type { ReviewDiff } from '../model/ReviewDiff';
 import type { RemoteRepoRef } from '../github/remote';
-import type { SubmitReviewInput } from './submit';
+import type { OnApplied, SubmitReviewInput } from './submit';
 
 export type { RemoteRepoRef };
 
@@ -45,6 +45,10 @@ export interface ReviewProvider {
   getThreads(repo: RemoteRepoRef, number: number, diff: ReviewDiff): Promise<CommentThread[]>;
   /** The authenticated user's login (attribution and, in iteration 12, edit/delete permission). */
   viewer(): Promise<string>;
-  /** Post a staged change set as one review (the single write egress; triggered only by a human Submit). */
-  submitReview(repo: RemoteRepoRef, number: number, input: SubmitReviewInput): Promise<void>;
+  /**
+   * Post a staged change set as one review (the single write egress; triggered only by a human Submit).
+   * `onApplied` is invoked after each id-addressable step lands, so a caller can retire that item from its
+   * pending set before the next call runs and a failure partway through cannot make a retry re-send it.
+   */
+  submitReview(repo: RemoteRepoRef, number: number, input: SubmitReviewInput, onApplied?: OnApplied): Promise<void>;
 }

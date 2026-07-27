@@ -5,7 +5,7 @@
 import type { CommentThread } from '../model/Comment';
 import type { ReviewDiff, Side } from '../model/ReviewDiff';
 import type { PullRequestDetail, PullRequestSummary, RemoteRepoRef, ReviewProvider } from '../review/provider';
-import type { NewInlineComment, SubmitReviewInput } from '../review/submit';
+import type { NewInlineComment, OnApplied, SubmitReviewInput } from '../review/submit';
 import type { TokenSource } from './auth';
 import { createGithubClient, type GhNewComment, type GhPostedComment, type GithubWriteClient } from './client';
 import { mapThreads } from './mapThreads';
@@ -69,13 +69,29 @@ class GithubReviewProvider implements ReviewProvider {
    * threaded up front (the reply needs the root's id, which only exists once the review posts), so after the
    * batch we read back the created comments, match each root, and post its follow-ups — all in this one
    * call. Uses an interactive token: a write is a deliberate human action, so a sign-in prompt fits here.
+   * Each id-addressable step is reported through `onApplied` the moment it lands, so a failure later in the
+   * sequence leaves the earlier work retired rather than staged for a second send.
    */
-  async submitReview(repo: RemoteRepoRef, number: number, input: SubmitReviewInput): Promise<void> {
+  async submitReview(
+    repo: RemoteRepoRef,
+    number: number,
+    input: SubmitReviewInput,
+    onApplied?: OnApplied,
+  ): Promise<void> {
     const client = await this.clientFor(true);
-    for (const e of input.edits) await client.editComment(repo, { commentId: Number(e.commentId), body: e.body });
-    for (const id of input.deletes) await client.deleteComment(repo, { commentId: Number(id) });
+    for (const e of input.edits) {
+      await client.editComment(repo, { commentId: Number(e.commentId), body: e.body });
+      await onApplied?.({ kind: 'edit', commentId: e.commentId });
+    }
+    for (const id of input.deletes) {
+      await client.deleteComment(repo, { commentId: Number(id) });
+      await onApplied?.({ kind: 'delete', commentId: id });
+    }
     for (const r of input.replies) await client.reply(repo, number, { inReplyTo: Number(r.rootId), body: r.body });
-    for (const rs of input.resolves) await client.resolveThread({ threadId: rs.threadId, resolved: rs.resolved });
+    for (const rs of input.resolves) {
+      await client.resolveThread({ threadId: rs.threadId, resolved: rs.resolved });
+      await onApplied?.({ kind: 'resolve', threadId: rs.threadId, resolved: rs.resolved });
+    }
 
     const event =
       input.event === 'approve' ? 'APPROVE' : input.event === 'request-changes' ? 'REQUEST_CHANGES' : 'COMMENT';
