@@ -80,7 +80,7 @@ Versioning is automated with [release-please](https://github.com/googleapis/rele
 1. Merges to `main` with `feat`/`fix` (etc.) commits keep a **release PR** up to date — it accumulates the changelog and the next version bump.
 2. Merging that release PR tags the version and creates a GitHub Release, with the packaged `.vsix` attached.
 
-While the project is pre-1.0, features and fixes bump the patch version and breaking changes bump the minor version.
+While the project is pre-1.0, a `feat` or a breaking change bumps the **minor** version and a `fix` bumps the **patch**. The major stays at `0` until the extension is declared stable, so a breaking change is a minor bump rather than a `1.0.0`.
 
 ## Working in the codebase
 
