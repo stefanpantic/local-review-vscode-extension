@@ -1,7 +1,7 @@
 {
   "name": "agentic-review",
-  "displayName": "Agentic Review",
-  "description": "PR-style review of your local git diff, exported for a coding agent.",
+  "displayName": "ReviewMate",
+  "description": "Review your local git diff or a GitHub pull request in VS Code, together with your coding agent.",
   "version": "0.0.8",
   "publisher": "StefanPantic",
   "icon": "media/icon.png",
@@ -41,7 +41,7 @@
       "activitybar": [
         {
           "id": "agenticReview",
-          "title": "Agentic Review",
+          "title": "ReviewMate",
           "icon": "media/agentic-review.svg"
         }
       ]
@@ -116,165 +116,165 @@
       {
         "command": "agenticReview.startReview",
         "title": "Start a Review",
-        "category": "Agentic Review",
+        "category": "ReviewMate",
         "icon": "$(git-pull-request)"
       },
       {
         "command": "agenticReview.refresh",
         "title": "Refresh",
-        "category": "Agentic Review",
+        "category": "ReviewMate",
         "icon": "$(refresh)"
       },
       {
         "command": "agenticReview.selectSource",
         "title": "Select Diff Source",
-        "category": "Agentic Review",
+        "category": "ReviewMate",
         "icon": "$(git-compare)"
       },
       {
         "command": "agenticReview.selectRepo",
         "title": "Select Repository",
-        "category": "Agentic Review",
+        "category": "ReviewMate",
         "icon": "$(repo)"
       },
       {
         "command": "agenticReview.reviewPullRequest",
         "title": "Review Pull Request",
-        "category": "Agentic Review",
+        "category": "ReviewMate",
         "icon": "$(git-pull-request)"
       },
       {
         "command": "agenticReview.refreshPullRequests",
         "title": "Refresh Pull Requests",
-        "category": "Agentic Review",
+        "category": "ReviewMate",
         "icon": "$(refresh)"
       },
       {
         "command": "agenticReview.openPullRequestFromList",
         "title": "Open Pull Request",
-        "category": "Agentic Review"
+        "category": "ReviewMate"
       },
       {
         "command": "agenticReview.github.submitReview",
         "title": "Submit Review to GitHub",
-        "category": "Agentic Review",
+        "category": "ReviewMate",
         "icon": "$(cloud-upload)"
       },
       {
         "command": "agenticReview.github.refreshPullRequest",
         "title": "Refresh Pull Request",
-        "category": "Agentic Review",
+        "category": "ReviewMate",
         "icon": "$(sync)"
       },
       {
         "command": "agenticReview.github.syncPullRequest",
         "title": "Sync Pull Request Comments",
-        "category": "Agentic Review",
+        "category": "ReviewMate",
         "icon": "$(cloud-download)"
       },
       {
         "command": "agenticReview.github.discardPending",
         "title": "Discard Pending Review Changes",
-        "category": "Agentic Review",
+        "category": "ReviewMate",
         "icon": "$(discard)"
       },
       {
         "command": "agenticReview.revealFile",
         "title": "Reveal File",
-        "category": "Agentic Review"
+        "category": "ReviewMate"
       },
       {
         "command": "agenticReview.toggleViewMode",
         "title": "Toggle Split / Unified View",
-        "category": "Agentic Review"
+        "category": "ReviewMate"
       },
       {
         "command": "agenticReview.toggleWhitespace",
         "title": "Toggle Hide Whitespace",
-        "category": "Agentic Review"
+        "category": "ReviewMate"
       },
       {
         "command": "agenticReview.toggleWrap",
         "title": "Toggle Wrap Lines",
-        "category": "Agentic Review"
+        "category": "ReviewMate"
       },
       {
         "command": "agenticReview.newReview",
         "title": "New Review",
-        "category": "Agentic Review",
+        "category": "ReviewMate",
         "icon": "$(add)"
       },
       {
         "command": "agenticReview.switchReview",
         "title": "Switch to Review",
-        "category": "Agentic Review"
+        "category": "ReviewMate"
       },
       {
         "command": "agenticReview.renameReview",
         "title": "Rename Review",
-        "category": "Agentic Review",
+        "category": "ReviewMate",
         "icon": "$(pencil)"
       },
       {
         "command": "agenticReview.deleteReview",
         "title": "Delete Review",
-        "category": "Agentic Review",
+        "category": "ReviewMate",
         "icon": "$(trash)"
       },
       {
         "command": "agenticReview.moveReviewToCurrentBranch",
         "title": "Move to Current Branch",
-        "category": "Agentic Review",
+        "category": "ReviewMate",
         "icon": "$(arrow-right)"
       },
       {
         "command": "agenticReview.exportReview",
         "title": "Export Review",
-        "category": "Agentic Review",
+        "category": "ReviewMate",
         "icon": "$(export)"
       },
       {
         "command": "agenticReview.nextChange",
         "title": "Next Changed File",
-        "category": "Agentic Review"
+        "category": "ReviewMate"
       },
       {
         "command": "agenticReview.prevChange",
         "title": "Previous Changed File",
-        "category": "Agentic Review"
+        "category": "ReviewMate"
       },
       {
         "command": "agenticReview.nextComment",
         "title": "Next Comment",
-        "category": "Agentic Review"
+        "category": "ReviewMate"
       },
       {
         "command": "agenticReview.prevComment",
         "title": "Previous Comment",
-        "category": "Agentic Review"
+        "category": "ReviewMate"
       },
       {
         "command": "agenticReview.setupMcp",
         "title": "Set up MCP",
-        "category": "Agentic Review",
+        "category": "ReviewMate",
         "icon": "$(plug)"
       },
       {
         "command": "agenticReview.startMcp",
         "title": "Start MCP Server",
-        "category": "Agentic Review",
+        "category": "ReviewMate",
         "icon": "$(play)"
       },
       {
         "command": "agenticReview.stopMcp",
         "title": "Stop MCP Server",
-        "category": "Agentic Review",
+        "category": "ReviewMate",
         "icon": "$(debug-stop)"
       },
       {
         "command": "agenticReview.openMcpConfig",
         "title": "Open MCP Config",
-        "category": "Agentic Review",
+        "category": "ReviewMate",
         "icon": "$(json)"
       }
     ],
@@ -436,7 +436,7 @@
       }
     ],
     "configuration": {
-      "title": "Agentic Review",
+      "title": "ReviewMate",
       "properties": {
         "agenticReview.defaultSource": {
           "type": "string",
@@ -471,7 +471,7 @@
         "agenticReview.log": {
           "type": "boolean",
           "default": false,
-          "description": "Write diagnostic logs to the 'Agentic Review' output channel."
+          "description": "Write diagnostic logs to the 'ReviewMate' output channel."
         },
         "agenticReview.includeUntracked": {
           "type": "boolean",
@@ -491,7 +491,7 @@
         "agenticReview.mcp.autoStart": {
           "type": "boolean",
           "default": false,
-          "description": "Start the local MCP server automatically when VS Code launches, so a coding agent (e.g. Claude Code) can read the diff and post, reply to, and resolve review comments. Otherwise start it with the 'Agentic Review: Start MCP Server' command. Binds to 127.0.0.1 only."
+          "description": "Start the local MCP server automatically when VS Code launches, so a coding agent (e.g. Claude Code) can read the diff and post, reply to, and resolve review comments. Otherwise start it with the 'ReviewMate: Start MCP Server' command. Binds to 127.0.0.1 only."
         },
         "agenticReview.mcp.port": {
           "type": "number",

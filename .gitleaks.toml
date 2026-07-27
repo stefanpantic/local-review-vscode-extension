@@ -1,4 +1,4 @@
-title = "Local Review gitleaks config"
+title = "ReviewMate gitleaks config"
 
 # Start from gitleaks' built-in rules, then narrow with the allowlist below.
 [extend]

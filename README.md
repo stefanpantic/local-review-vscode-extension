@@ -1,75 +1,39 @@
-# Agentic Review
+# ReviewMate
 
 [![CI](https://github.com/stefanpantic/local-review-vscode-extension/actions/workflows/ci.yml/badge.svg)](https://github.com/stefanpantic/local-review-vscode-extension/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-fe5196.svg)](https://www.conventionalcommits.org)
 [![code style: Prettier](https://img.shields.io/badge/code_style-Prettier-ff69b4.svg)](https://prettier.io)
 
-Review your local git changes like a pull request, without opening one, or review a real GitHub PR in the same UI. Then hand the review to a coding agent, or let the agent post its own.
+A pull-request review surface inside VS Code, for three things: your own uncommitted changes, a real GitHub pull request, and a coding agent reviewing alongside you.
 
-> **Local-first.** Reviewing your git diff happens entirely on your machine. Nothing leaves your box unless you open a GitHub pull request to review. No account. No telemetry.
+> **Local-first.** Reviewing your git diff happens entirely on your machine. The only network traffic is GitHub pull request review: fetching a PR when you open one, and posting your review when you press **Submit**. Nothing else leaves your box. No account. No telemetry.
 
-![Agentic Review: a local git diff reviewed like a pull request in VS Code, with an inline comment and a suggested change, and a sidebar of changed files, active comments, and saved reviews. You and your coding agent comment in the same review over MCP.](docs/images/review-panel.png)
+![ReviewMate: a local git diff reviewed like a pull request in VS Code, with an inline comment and a suggested change, and a sidebar of changed files, active comments, and saved reviews. You and your coding agent comment in the same review over MCP.](docs/images/review-panel.png)
 
 ## What it does
 
-- Renders your working-tree diff as a continuous, PR-style review inside VS Code (unified or side-by-side, syntax-highlighted).
-- Reviews a **GitHub pull request** in the same UI: point it at a PR and it fetches the PR in place (no checkout, your working tree untouched) and imports every review thread. Works with github.com and GitHub Enterprise.
-- Lets you comment on any line or range, on added or removed lines, with reply, resolve, and code suggestions.
-- Keeps comments anchored as code shifts. They follow their lines, or go "outdated". They are never silently lost.
-- Saves a review per branch automatically.
-- Hands off to a coding agent two ways: a structured Markdown export, or a live MCP connection.
+- **Reviews your working-tree diff** as a continuous, PR-style surface: unified or side-by-side, syntax-highlighted, with comments on any line or range.
+- **Reviews a real GitHub pull request** in the same UI. The PR is fetched in place, with no checkout and no change to your working tree, and every existing review thread is imported. github.com and GitHub Enterprise.
+- **Writes your review back.** Comment, reply, resolve, edit, and suggest, then post the lot as one GitHub review with **Comment**, **Approve**, or **Request changes**.
+- **Lets a coding agent review with you** over a local MCP server. It reads the diff and posts its own comments, replies, and suggestions into the same review, attributed to "AI Agent".
+- **Exports any review** as an agent-ready Markdown work list, for agents you have not wired up over MCP.
+- **Keeps comments anchored** as code shifts. They follow their lines, or go "outdated". They are never silently lost.
+- **Saves a review per branch** automatically, including one per pull request.
 
 ## Getting started
 
-1. Install the extension (see [Install](#install)).
-2. Make some local changes, then open **Agentic Review** from the activity bar. The diff opens in a full-width tab.
-3. Hover a line and click **+** (or drag to select a range) to comment. Reply and resolve as you go.
-4. Hand it to a coding agent:
-   - **Export:** run **Export Review** for a Markdown work list (clipboard, file, or editor), then paste it into your agent.
-   - **MCP (live):** run **Set up MCP**, connect your agent, and it reads the diff and posts comments straight into the review.
+Install the extension (see [Install](#install)), then open **ReviewMate** from the activity bar. Pick whichever of these you came for.
 
-## Agent integration (MCP)
+**Review your own changes.** Your uncommitted diff opens in a full-width tab. Hover a line and click **+**, or drag to select a range, to comment. Reply and resolve as you go.
 
-Agentic Review runs a standard, local MCP server (bound to `127.0.0.1`, token-guarded, off by default) that any MCP client can use. You comment and the agent acts on it. The agent can also post its own comments, replies, and suggestions. They show up in the panel attributed to "AI Agent", anchored like yours.
+**Review a GitHub pull request.** If the repo's `origin` is a GitHub remote, a **Pull Requests** section lists the open PRs. Click one. Review it exactly like a local diff, then press **Submit review** to post everything back. See [Review a GitHub pull request](#review-a-github-pull-request).
 
-1. Run **Agentic Review: Set up MCP**. Pick a port and whether to start it on launch.
-2. It generates an mcp.json (URL, token, and ready-to-run connect commands: Claude Code, plus a generic `mcpServers` config for other clients) and opens it. Reopen it anytime with **Open MCP Config**. It lives in the extension's per-workspace storage, not in your repo.
-3. Connect your client. Use **Start MCP Server** / **Stop MCP Server** to control it anytime.
-
-Tools the agent gets: `get_diff`, `get_review`, `list_reviews`, `post_comment`, `reply`, `resolve`. It never writes to your files. It posts comments and makes the changes by editing code itself.
-
-## Features
-
-- **Unified and side-by-side** diff, toggleable.
-- **Syntax highlighting** with intra-line word highlighting (only the changed characters light up).
-- **Expand context** at hunk boundaries to reveal surrounding lines.
-- **Hide whitespace** changes.
-- **Inline comments** on single lines or ranges, old or new side, with edit, delete, reply, resolve.
-- **Suggestions:** propose replacement code in a comment, rendered as a before/after diff and captured in the export. Never written to disk.
-- **Markdown comments**, rendered in the panel.
-- **Back to top** button once you have scrolled into a long diff.
-- **Line drift:** comments follow their lines. When they can't be matched they go "outdated" and stay in the review.
-- **Branch-tied reviews:** saved automatically per branch. Reviews for deleted or merged branches are archived and can be moved to the current branch.
-- **Structured Markdown export:** grouped by file, scoped to all, unresolved, or one file, at current or as-reviewed line positions.
-
-## Diff sources
-
-Pick what you review from **Select Diff Source**:
-
-| Source                    | What it shows                          |
-| ------------------------- | -------------------------------------- |
-| **Uncommitted changes**   | everything not yet committed (default) |
-| **Unstaged changes**      | not yet staged                         |
-| **Staged changes**        | staged for commit                      |
-| **Compare with a branch** | diff against another local branch      |
-| **Pull request**          | a fetched GitHub PR (`base...head`)    |
-
-Switching source changes only what you see. Comments re-anchor against whatever is loaded, so staging a hunk or switching source never orphans one.
+**Bring in your coding agent.** Run **Set up MCP** and connect it, and the agent reviews alongside you in the same threads. Or run **Export Review** for a Markdown work list to paste in. See [Agent integration](#agent-integration-mcp).
 
 ## Review a GitHub pull request
 
-When the current repo's `origin` is a GitHub remote, a **Pull Requests** section appears in the Agentic Review sidebar listing the open PRs. Click one to review it. You can also run **Agentic Review: Review Pull Request** (or pick it from **Select Diff Source**), which signs you in with VS Code's built-in GitHub sign-in the first time, lists the open PRs, and also accepts a PR URL or number. Either way it:
+When the current repo's `origin` is a GitHub remote, a **Pull Requests** section appears in the ReviewMate sidebar listing the open PRs. Click one to review it. You can also run **ReviewMate: Review Pull Request** (or pick it from **Select Diff Source**), which signs you in with VS Code's built-in GitHub sign-in the first time, lists the open PRs, and also accepts a PR URL or number. Either way it:
 
 - fetches the PR head and base **in place** (into hidden refs under `refs/agentic-review/`), so your working tree, index, and current branch are never touched.
 - renders `base...head` in the usual diff UI, with a header pill showing the source and target branches and a card with the PR title, state, and description.
@@ -87,7 +51,7 @@ Reviewing a PR adds a **pull request bar** across the top of the review, always 
 | **Discard**       | Throws away everything staged and resets to what is on GitHub now. Shown only when something is staged.  |
 | **N pending**     | How much is staged. Hover for the breakdown. **N new** appears when other people comment while you read. |
 
-The same actions sit in the **Pull Requests** sidebar title bar, and as **Agentic Review:** commands.
+The same actions sit in the **Pull Requests** sidebar title bar, and as **ReviewMate:** commands.
 
 Comment, reply, resolve, and edit or delete your own and your agent's comments. These changes stay on your machine until you submit. Submit asks for one event, **Comment**, **Approve**, or **Request changes**, then an optional summary. Your changes post as one GitHub review, pinned to the commit you reviewed. Submit is the only network write.
 
@@ -103,9 +67,50 @@ Other people's comments are read-only. You can edit or delete only your own and 
 
 For **GitHub Enterprise**, set `agenticReview.github.enterpriseUri` to your server, for example `https://github.your-company.com`. VS Code's `github-enterprise.uri` must point at the same host.
 
+## Agent integration (MCP)
+
+ReviewMate runs a standard, local MCP server (bound to `127.0.0.1`, token-guarded, off by default) that any MCP client can use. You comment and the agent acts on it. The agent can also post its own comments, replies, and suggestions. They show up in the panel attributed to "AI Agent", anchored like yours, and on a pull request they post to GitHub with the rest of your review.
+
+1. Run **ReviewMate: Set up MCP**. Pick a port and whether to start it on launch.
+2. It generates an mcp.json (URL, token, and ready-to-run connect commands: Claude Code, plus a generic `mcpServers` config for other clients) and opens it. Reopen it anytime with **Open MCP Config**. It lives in the extension's per-workspace storage, not in your repo.
+3. Connect your client. Use **Start MCP Server** / **Stop MCP Server** to control it anytime.
+
+Tools the agent gets: `get_diff`, `get_review`, `list_reviews`, `post_comment`, `reply`, `resolve`. There is no edit or delete tool, so an agent can never alter or remove anyone else's comment. It never writes to your files either: it posts comments and makes the changes by editing code itself. The server is loopback-only and has no GitHub access of its own.
+
+### Or export a work list
+
+For an agent you have not connected, **Export Review** produces agent-ready Markdown: grouped by file, scoped to all comments, unresolved only, or a single file, at current or as-reviewed line positions, with ` ```suggestion ` blocks intact. Copy it, write it to a file, or open it in an editor.
+
+## Features
+
+- **Unified and side-by-side** diff, toggleable.
+- **Syntax highlighting** with intra-line word highlighting (only the changed characters light up).
+- **Expand context** at hunk boundaries to reveal surrounding lines.
+- **Hide whitespace** changes.
+- **Inline comments** on single lines or ranges, old or new side, with edit, delete, reply, resolve.
+- **Suggestions:** propose replacement code in a comment, rendered as a before/after diff. Posted to GitHub as an applicable suggestion, and included in the export. Never written to your files.
+- **Markdown comments**, rendered in the panel.
+- **Back to top** button once you have scrolled into a long diff.
+- **Line drift:** comments follow their lines. When they can't be matched they go "outdated" and stay in the review.
+- **Branch-tied reviews:** saved automatically per branch, and per pull request. Reviews for deleted or merged branches are archived and can be moved to the current branch.
+
+## Diff sources
+
+Pick what you review from **Select Diff Source**:
+
+| Source                    | What it shows                          |
+| ------------------------- | -------------------------------------- |
+| **Uncommitted changes**   | everything not yet committed (default) |
+| **Unstaged changes**      | not yet staged                         |
+| **Staged changes**        | staged for commit                      |
+| **Compare with a branch** | diff against another local branch      |
+| **Pull request**          | a fetched GitHub PR (`base...head`)    |
+
+Switching source changes only what you see. Comments re-anchor against whatever is loaded, so staging a hunk or switching source never orphans one.
+
 ## Install
 
-Install from the VS Code Marketplace: search **Agentic Review** in the Extensions view, or run `code --install-extension StefanPantic.agentic-review`.
+Install from the VS Code Marketplace: search **ReviewMate** in the Extensions view, or run `code --install-extension StefanPantic.agentic-review`.
 
 Prefer a packaged `.vsix`? Download `agentic-review-<version>.vsix` from [Releases](https://github.com/stefanpantic/local-review-vscode-extension/releases), or build it with `pnpm run package` (see [CONTRIBUTING](CONTRIBUTING.md)). Then in VS Code open the **Extensions** view, use the `⋯` menu, and pick **Install from VSIX…**, or run `code --install-extension agentic-review-<version>.vsix`.
 
@@ -132,7 +137,7 @@ Prefer a packaged `.vsix`? Download `agentic-review-<version>.vsix` from [Releas
 | `agenticReview.github.pollInterval`   | `60`               | Seconds between polls of an open PR for upstream changes. `0` turns it off. |
 | `agenticReview.mcp.autoStart`         | `false`            | Start the MCP server when VS Code launches.                                 |
 | `agenticReview.mcp.port`              | `0`                | MCP server port (`0` picks a free port and reuses it).                      |
-| `agenticReview.log`                   | `false`            | Write diagnostic logs to the "Agentic Review" output channel.               |
+| `agenticReview.log`                   | `false`            | Write diagnostic logs to the "ReviewMate" output channel.                   |
 
 ## Contributing
 
@@ -153,6 +158,10 @@ No. With the default `agenticReview.mcp.port` of `0`, each workspace is assigned
 ### Where does the connect file live?
 
 In VS Code's per-workspace extension storage, not in your repository, so nothing is committed or gitignored. Open it anytime with the **Open MCP Config** command, or the button shown after **Set up MCP**.
+
+### Does the agent's review get posted to GitHub?
+
+Yes, if you submit it. Agent comments sit in the same pending set as yours and post under your account, so you own what goes out. The Submit confirmation tells you how many of the items are agent-authored before anything is sent.
 
 ## Credits
 

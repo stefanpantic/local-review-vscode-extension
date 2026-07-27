@@ -108,7 +108,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const setupMcp = async (): Promise<void> => {
     const cfg = vscode.workspace.getConfiguration('agenticReview');
     const input = await vscode.window.showInputBox({
-      title: 'Agentic Review MCP server port',
+      title: 'ReviewMate MCP server port',
       prompt: 'Port for the MCP server (0 = pick a free port; it is then reused across restarts)',
       value: String(cfg.get<number>('mcp.port', 0)),
       validateInput: (v) =>
@@ -118,9 +118,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const auto = await vscode.window.showQuickPick(
       [
         { label: 'Autostart on launch', description: 'run the MCP server every time VS Code opens', value: true },
-        { label: 'Start manually', description: 'start it with "Agentic Review: Start MCP Server"', value: false },
+        { label: 'Start manually', description: 'start it with "ReviewMate: Start MCP Server"', value: false },
       ],
-      { title: 'Agentic Review MCP autostart', placeHolder: 'Start the MCP server automatically on launch?' },
+      { title: 'ReviewMate MCP autostart', placeHolder: 'Start the MCP server automatically on launch?' },
     );
     if (!auto) return; // cancelled
     await cfg.update('mcp.port', Number(input.trim()), vscode.ConfigurationTarget.Workspace);
@@ -129,13 +129,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     mcpDesired = true;
     await syncMcp();
     if (!mcpHandle) {
-      void vscode.window.showErrorMessage('Agentic Review: could not start the MCP server.');
+      void vscode.window.showErrorMessage('ReviewMate: could not start the MCP server.');
       return;
     }
     const { url, token } = mcpHandle;
     const jsonUri = await writeMcpArtifacts(context, url, token);
     const choice = await vscode.window.showInformationMessage(
-      'Agentic Review MCP server is running.',
+      'ReviewMate MCP server is running.',
       {
         modal: true,
         detail: `URL: ${url}\n\nConnect your MCP client using the mcp.json this opens (or the "Open MCP Config" command anytime). It has the URL, token, and ready-to-run connect commands for Claude Code and other clients.`,
@@ -157,7 +157,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (!mcpHandle) return;
     const jsonUri = await writeMcpArtifacts(context, mcpHandle.url, mcpHandle.token);
     const choice = await vscode.window.showInformationMessage(
-      `Agentic Review MCP server is running at ${mcpHandle.url}.`,
+      `ReviewMate MCP server is running at ${mcpHandle.url}.`,
       'Open mcp.json',
     );
     if (choice === 'Open mcp.json' && jsonUri) await vscode.window.showTextDocument(jsonUri);
@@ -165,13 +165,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const stopMcp = async (): Promise<void> => {
     mcpDesired = false;
     await syncMcp();
-    void vscode.window.showInformationMessage('Agentic Review MCP server stopped.');
+    void vscode.window.showInformationMessage('ReviewMate MCP server stopped.');
   };
   // Open the connect file (regenerating it with the live url + token). Starts the server first if needed.
   const openMcpConfig = async (): Promise<void> => {
     if (!mcpHandle) {
       const choice = await vscode.window.showInformationMessage(
-        'The Agentic Review MCP server is not running.',
+        'The ReviewMate MCP server is not running.',
         'Start MCP Server',
       );
       if (choice === 'Start MCP Server') await startMcp();
@@ -179,7 +179,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
     const jsonUri = await writeMcpArtifacts(context, mcpHandle.url, mcpHandle.token);
     if (jsonUri) await vscode.window.showTextDocument(jsonUri);
-    else void vscode.window.showErrorMessage('Agentic Review: no workspace storage available to write the MCP config.');
+    else void vscode.window.showErrorMessage('ReviewMate: no workspace storage available to write the MCP config.');
   };
 
   tree.onDidChangeCheckboxState(
@@ -285,11 +285,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     try {
       const { orphans, incoming } = await controller.pollPullRequest();
       if (orphans)
-        void vscode.window.showInformationMessage(`Agentic Review: synced upstream changes.${orphanNote(orphans)}`);
+        void vscode.window.showInformationMessage(`ReviewMate: synced upstream changes.${orphanNote(orphans)}`);
       // A discussion landing while you read is easy to miss, so say so once rather than only badging the panel.
       if (incoming)
         void vscode.window.showInformationMessage(
-          `Agentic Review: ${incoming} new comment${incoming === 1 ? '' : 's'} on this pull request.`,
+          `ReviewMate: ${incoming} new comment${incoming === 1 ? '' : 's'} on this pull request.`,
         );
     } catch {
       /* transient (offline, rate limit); the next tick retries */
@@ -335,14 +335,16 @@ async function writeMcpArtifacts(
   if (!dir) return undefined; // no workspace storage (no folder open)
   await fs.mkdir(dir.fsPath, { recursive: true });
 
-  const content = `// Agentic Review MCP server. A standard, local (127.0.0.1), token-guarded MCP server over Streamable HTTP.
+  const content = `// ReviewMate MCP server. A standard, local (127.0.0.1), token-guarded MCP server over Streamable HTTP.
 // Connect any MCP client with the url + token below. Ready-to-use options:
 //
-// Claude Code (CLI):
-//   claude mcp remove agentic-review 2>/dev/null; claude mcp add --transport http agentic-review ${url} --header "Authorization: Bearer ${token}"
+// Claude Code (CLI). The first remove clears the old name this server used to register under, so an
+// upgrade does not leave two entries pointing at the same port:
+//   claude mcp remove agentic-review 2>/dev/null; claude mcp remove reviewmate 2>/dev/null; claude mcp add --transport http reviewmate ${url} --header "Authorization: Bearer ${token}"
 //
-// mcpServers config for Claude Desktop, Cursor, Windsurf, VS Code, and other clients. Add under "mcpServers":
-//   "agentic-review": {
+// mcpServers config for Claude Desktop, Cursor, Windsurf, VS Code, and other clients. Add under "mcpServers"
+// (and drop any earlier "agentic-review" entry):
+//   "reviewmate": {
 //     "type": "http",
 //     "url": "${url}",
 //     "headers": { "Authorization": "Bearer ${token}" }
@@ -441,7 +443,7 @@ async function pickSource(controller: ReviewController): Promise<void> {
   } else if (picked.source === 'vs-base') {
     const branches = controller.repoRoot ? await listBranches(controller.repoRoot) : [];
     if (branches.length === 0) {
-      void vscode.window.showWarningMessage('Agentic Review: no local branches to compare against.');
+      void vscode.window.showWarningMessage('ReviewMate: no local branches to compare against.');
       return;
     }
     const base = await vscode.window.showQuickPick(branches, { placeHolder: 'Select the base branch' });
@@ -460,14 +462,14 @@ async function reviewPullRequest(controller: ReviewController, extensionUri: vsc
   const remote = await controller.currentRemote();
   if (!remote) {
     void vscode.window.showWarningMessage(
-      'Agentic Review: this repo\'s origin isn\'t a supported review host. Use github.com, or set "agenticReview.github.enterpriseUri" for GitHub Enterprise.',
+      'ReviewMate: this repo\'s origin isn\'t a supported review host. Use github.com, or set "agenticReview.github.enterpriseUri" for GitHub Enterprise.',
     );
     return;
   }
   // Sign in once (interactive); later reads reuse the session silently.
   const token = await githubTokenSource(remote.provider.id as GithubProviderId)(true);
   if (!token) {
-    void vscode.window.showInformationMessage('Agentic Review: sign in to GitHub to review a pull request.');
+    void vscode.window.showInformationMessage('ReviewMate: sign in to GitHub to review a pull request.');
     return;
   }
   const number = await pickPullRequest(remote.provider, remote.repo);
@@ -499,7 +501,7 @@ async function openPr(
       () => controller.openPullRequest({ provider, repo, number, remote: 'origin' }),
     );
   } catch (err) {
-    void vscode.window.showErrorMessage(`Agentic Review: could not open PR #${number}. ${errorText(err)}`);
+    void vscode.window.showErrorMessage(`ReviewMate: could not open PR #${number}. ${errorText(err)}`);
     return;
   }
   ReviewPanel.show(extensionUri, controller);
@@ -512,12 +514,12 @@ async function openPr(
 async function submitPullRequest(controller: ReviewController): Promise<void> {
   const preview = controller.submitPreview();
   if (!preview) {
-    void vscode.window.showInformationMessage('Agentic Review: open a pull request to submit a review.');
+    void vscode.window.showInformationMessage('ReviewMate: open a pull request to submit a review.');
     return;
   }
   if (preview.counts.total === 0) {
     void vscode.window.showInformationMessage(
-      'Agentic Review: nothing to submit yet. Add a comment, reply, resolve, or edit first.',
+      'ReviewMate: nothing to submit yet. Add a comment, reply, resolve, or edit first.',
     );
     return;
   }
@@ -532,9 +534,9 @@ async function submitPullRequest(controller: ReviewController): Promise<void> {
       () => controller.submitPullRequest(event, body),
     );
     const note = orphanNote(orphans);
-    void vscode.window.showInformationMessage(`Agentic Review: submitted ${summarizeCounts(counts)}.${note}`);
+    void vscode.window.showInformationMessage(`ReviewMate: submitted ${summarizeCounts(counts)}.${note}`);
   } catch (err) {
-    void vscode.window.showErrorMessage(`Agentic Review: could not submit the review. ${errorText(err)}`);
+    void vscode.window.showErrorMessage(`ReviewMate: could not submit the review. ${errorText(err)}`);
   }
 }
 
@@ -584,7 +586,7 @@ async function refreshOpenPullRequest(controller: ReviewController): Promise<voi
       () => controller.reloadPullRequest(),
     );
   } catch (err) {
-    void vscode.window.showErrorMessage(`Agentic Review: could not refresh the pull request. ${errorText(err)}`);
+    void vscode.window.showErrorMessage(`ReviewMate: could not refresh the pull request. ${errorText(err)}`);
   }
 }
 
@@ -595,9 +597,9 @@ async function syncOpenPullRequest(controller: ReviewController): Promise<void> 
       { location: vscode.ProgressLocation.Notification, title: 'Syncing pull request comments…' },
       () => controller.syncPullRequest(),
     );
-    void vscode.window.showInformationMessage(`Agentic Review: comments are up to date.${orphanNote(orphans)}`);
+    void vscode.window.showInformationMessage(`ReviewMate: comments are up to date.${orphanNote(orphans)}`);
   } catch (err) {
-    void vscode.window.showErrorMessage(`Agentic Review: could not sync the pull request. ${errorText(err)}`);
+    void vscode.window.showErrorMessage(`ReviewMate: could not sync the pull request. ${errorText(err)}`);
   }
 }
 
@@ -608,11 +610,11 @@ async function syncOpenPullRequest(controller: ReviewController): Promise<void> 
 async function discardPendingReview(controller: ReviewController): Promise<void> {
   const preview = controller.submitPreview();
   if (!preview) {
-    void vscode.window.showInformationMessage('Agentic Review: open a pull request first.');
+    void vscode.window.showInformationMessage('ReviewMate: open a pull request first.');
     return;
   }
   if (preview.counts.total === 0) {
-    void vscode.window.showInformationMessage('Agentic Review: nothing is staged, so there is nothing to discard.');
+    void vscode.window.showInformationMessage('ReviewMate: nothing is staged, so there is nothing to discard.');
     return;
   }
   const choice = await vscode.window.showWarningMessage(
@@ -629,9 +631,9 @@ async function discardPendingReview(controller: ReviewController): Promise<void>
       { location: vscode.ProgressLocation.Notification, title: 'Discarding pending changes…' },
       () => controller.discardPendingReview(),
     );
-    void vscode.window.showInformationMessage('Agentic Review: pending review changes discarded.');
+    void vscode.window.showInformationMessage('ReviewMate: pending review changes discarded.');
   } catch (err) {
-    void vscode.window.showErrorMessage(`Agentic Review: could not discard the pending changes. ${errorText(err)}`);
+    void vscode.window.showErrorMessage(`ReviewMate: could not discard the pending changes. ${errorText(err)}`);
   }
 }
 
@@ -738,7 +740,7 @@ function errorText(err: unknown): string {
 async function exportReview(controller: ReviewController, arg?: Review): Promise<void> {
   const review = arg ?? controller.reviewToExport();
   if (!review) {
-    void vscode.window.showInformationMessage('Agentic Review: no review to export.');
+    void vscode.window.showInformationMessage('ReviewMate: no review to export.');
     return;
   }
 
@@ -756,7 +758,7 @@ async function exportReview(controller: ReviewController, arg?: Review): Promise
   if (scopePick.scope === 'file') {
     const files = [...new Set(review.threads.map((t) => t.anchor.filePath))].sort();
     if (files.length === 0) {
-      void vscode.window.showInformationMessage('Agentic Review: this review has no comments.');
+      void vscode.window.showInformationMessage('ReviewMate: this review has no comments.');
       return;
     }
     file = await vscode.window.showQuickPick(files, { placeHolder: 'File to export' });
@@ -785,7 +787,7 @@ async function exportReview(controller: ReviewController, arg?: Review): Promise
   };
   const md = exportReviewMarkdown(meta, controller.exportThreads(review, live), { scope: scopePick.scope, file });
   if (!md) {
-    void vscode.window.showInformationMessage('Agentic Review: no comments match that scope.');
+    void vscode.window.showInformationMessage('ReviewMate: no comments match that scope.');
     return;
   }
 
@@ -809,7 +811,7 @@ function sourceLabel(source: DiffSource, baseRef?: string): string {
 async function deliverExport(action: 'clipboard' | 'editor' | 'file', md: string, name: string): Promise<void> {
   if (action === 'clipboard') {
     await vscode.env.clipboard.writeText(md);
-    void vscode.window.showInformationMessage('Agentic Review: export copied to clipboard.');
+    void vscode.window.showInformationMessage('ReviewMate: export copied to clipboard.');
   } else if (action === 'editor') {
     const doc = await vscode.workspace.openTextDocument({ content: md, language: 'markdown' });
     await vscode.window.showTextDocument(doc);
@@ -840,7 +842,7 @@ async function deleteReview(controller: ReviewController, review?: Review): Prom
 async function pickRepo(controller: ReviewController): Promise<void> {
   const repos = controller.repositories;
   if (repos.length <= 1) {
-    void vscode.window.showInformationMessage('Agentic Review: only one repository in this workspace.');
+    void vscode.window.showInformationMessage('ReviewMate: only one repository in this workspace.');
     return;
   }
   const picked = await vscode.window.showQuickPick(

@@ -1,4 +1,4 @@
-# Local Review — Protocol & Core Data Model
+# ReviewMate — Protocol & Core Data Model
 
 > **Living document.** The contract shared across the extension host and the webview. Defined up front (so no iteration silently breaks it) but **implemented incrementally** — each type/message is tagged with the iteration that introduces it. When the contract changes, update this file in the same change.
 

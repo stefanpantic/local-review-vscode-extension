@@ -1,4 +1,4 @@
-# Local Review — Specification
+# ReviewMate — Specification
 
 > A VSCode extension that reproduces the GitHub Pull Request review experience against the **current local git diff**, with no PR required, and exports the result as an agent-ready work list.
 
@@ -10,7 +10,7 @@ This document is the **source of truth** for the project's vision, invariants, a
 
 Reviewing your own changes before you hand them off is most effective when it has the structure of a PR review: a continuous diff, side-by-side comparison, "viewed" tracking, and **line-anchored comments**. Today the only way to get that structure locally is to open a (draft) PR — heavyweight, needs a remote, pollutes history.
 
-_Local Review_ provides that structure entirely on the local machine. You open a dedicated view, read the working-tree diff as if it were a PR, leave inline comments, and then **export a structured file** — file paths, commented line ranges, surrounding code context, and comment text — that you paste into a coding agent (e.g. Claude Code) so it can action the review.
+_ReviewMate_ provides that structure entirely on the local machine. You open a dedicated view, read the working-tree diff as if it were a PR, leave inline comments, and then **export a structured file** — file paths, commented line ranges, surrounding code context, and comment text — that you paste into a coding agent (e.g. Claude Code) so it can action the review.
 
 ## 2. Goals
 
@@ -35,7 +35,7 @@ _Local Review_ provides that structure entirely on the local machine. You open a
 ## 4. Primary user flow (the review loop)
 
 1. Make local changes.
-2. Open **Local Review** from the activity bar → the diff opens in a full-width editor tab. _(A changed-file list/navigator arrives in Iteration 2.)_
+2. Open **ReviewMate** from the activity bar → the diff opens in a full-width editor tab. _(A changed-file list/navigator arrives in Iteration 2.)_
 3. Read the diff (toggle unified/side-by-side, hide whitespace, mark files "viewed").
 4. Leave inline comments on lines/ranges; reply/resolve as thinking evolves.
 5. _(Optional)_ **Save** the review as a named snapshot; **clear** to start another pass; **load** a saved review to resume.
