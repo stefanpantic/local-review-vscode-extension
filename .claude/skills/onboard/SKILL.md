@@ -1,15 +1,15 @@
 ---
 name: onboard
-description: Get oriented in the Agentic Review repo. Covers what it is, the host + webview architecture, the docs to read first, the iteration workflow, the conventions, the key files, how to run and verify, and MCP. Use when an agent is new to this repository or needs a map of it before making a change.
+description: Get oriented in the ReviewMate repo. Covers what it is, the host + webview architecture, the docs to read first, the iteration workflow, the conventions, the key files, how to run and verify, and MCP. Use when an agent is new to this repository or needs a map of it before making a change.
 ---
 
-# Onboarding to Agentic Review
+# Onboarding to ReviewMate
 
 Read this once, then read `docs/spec.md`. Keep changes small and gated.
 
 ## What this is
 
-Agentic Review is a VS Code extension. It renders a git diff as a pull-request-style review and hands that review to a coding agent. It has three modes:
+ReviewMate is a VS Code extension. It renders a git diff as a pull-request-style review and hands that review to a coding agent. It has three modes:
 
 1. Review the local git diff (the default, fully on-machine).
 2. Review a real GitHub pull request in the same UI, fetched in place with no checkout.
@@ -73,7 +73,7 @@ One iteration at a time. The rhythm is refine, implement, verify.
 
 ## MCP
 
-A local MCP server lets a coding agent join a review. Set it up with the "Agentic Review: Set up MCP" command. It binds to `127.0.0.1` and is token-guarded. Tools: `get_diff`, `get_review`, `list_reviews`, `post_comment`, `reply`, `resolve`. It never writes your files and has no GitHub or network capability. Agent comments are attributed to "AI Agent" and anchor like a human's.
+A local MCP server lets a coding agent join a review. Set it up with the "ReviewMate: Set up MCP" command. It binds to `127.0.0.1` and is token-guarded. Tools: `get_diff`, `get_review`, `list_reviews`, `post_comment`, `reply`, `resolve`. It never writes your files and has no GitHub or network capability. Agent comments are attributed to "AI Agent" and anchor like a human's.
 
 ## Invariants to respect
 

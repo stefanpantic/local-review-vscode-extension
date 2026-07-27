@@ -15,7 +15,7 @@ export interface McpServerHandle {
 }
 
 function buildServer(api: McpReviewApi, version: string): McpServer {
-  const server = new McpServer({ name: 'agentic-review', version });
+  const server = new McpServer({ name: 'reviewmate', version });
   for (const t of TOOLS) {
     server.registerTool(
       t.name,

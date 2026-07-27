@@ -25,7 +25,7 @@ export function buildHtml(webview: vscode.Webview, extensionUri: vscode.Uri): st
   <meta http-equiv="Content-Security-Policy" content="${csp}" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link href="${styleUri}" rel="stylesheet" />
-  <title>Agentic Review</title>
+  <title>ReviewMate</title>
 </head>
 <body>
   <div id="root">

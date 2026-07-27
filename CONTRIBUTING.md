@@ -1,6 +1,6 @@
-# Contributing to Local Review
+# Contributing to ReviewMate
 
-Thanks for helping improve Local Review! This guide covers local development, the quality gates, and how releases work.
+Thanks for helping improve ReviewMate! This guide covers local development, the quality gates, and how releases work.
 
 ## Prerequisites
 
@@ -18,7 +18,7 @@ pnpm run build        # bundle the host + webview into dist/
 
 ### Run the extension
 
-Press **F5** (the **Run Extension** launch config) to open an Extension Development Host with Local Review loaded. It builds first, so your latest changes are live. Reload the host window (`Cmd/Ctrl+R`) after a rebuild.
+Press **F5** (the **Run Extension** launch config) to open an Extension Development Host with ReviewMate loaded. It builds first, so your latest changes are live. Reload the host window (`Cmd/Ctrl+R`) after a rebuild.
 
 For a tight loop, run the bundler in watch mode in a terminal and reload the host as needed:
 

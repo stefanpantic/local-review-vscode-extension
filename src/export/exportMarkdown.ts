@@ -33,7 +33,7 @@ export function exportReviewMarkdown(meta: ExportMeta, threads: CommentThread[],
   const unresolved = selected.filter((t) => !t.resolved).length;
 
   const out: string[] = [
-    `# Agentic Review: ${meta.name}`,
+    `# ReviewMate: ${meta.name}`,
     '',
     `**repo** ${meta.repoName} · **branch** ${meta.branch} · **source** ${meta.source} · **generated** ${meta.generatedAt}`,
     '',
