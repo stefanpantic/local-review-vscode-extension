@@ -3,6 +3,9 @@
 import { createHighlighterCore, type HighlighterCore } from 'shiki/core';
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript';
 import type { FileDiff, DiffRow } from '../../src/model/ReviewDiff';
+import { LANGS, langForPath } from './lang';
+
+export { langForPath };
 
 export interface Tok {
   content: string;
@@ -15,29 +18,7 @@ export function getHighlighter(): Promise<HighlighterCore> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighterCore({
       themes: [import('shiki/themes/one-dark-pro.mjs'), import('shiki/themes/light-plus.mjs')],
-      langs: [
-        import('shiki/langs/typescript.mjs'),
-        import('shiki/langs/tsx.mjs'),
-        import('shiki/langs/javascript.mjs'),
-        import('shiki/langs/jsx.mjs'),
-        import('shiki/langs/json.mjs'),
-        import('shiki/langs/python.mjs'),
-        import('shiki/langs/go.mjs'),
-        import('shiki/langs/rust.mjs'),
-        import('shiki/langs/java.mjs'),
-        import('shiki/langs/c.mjs'),
-        import('shiki/langs/cpp.mjs'),
-        import('shiki/langs/csharp.mjs'),
-        import('shiki/langs/ruby.mjs'),
-        import('shiki/langs/php.mjs'),
-        import('shiki/langs/html.mjs'),
-        import('shiki/langs/css.mjs'),
-        import('shiki/langs/scss.mjs'),
-        import('shiki/langs/shellscript.mjs'),
-        import('shiki/langs/yaml.mjs'),
-        import('shiki/langs/markdown.mjs'),
-        import('shiki/langs/sql.mjs'),
-      ],
+      langs: LANGS.map((l) => l.load()),
       engine: createJavaScriptRegexEngine({ forgiving: true }),
     });
   }
@@ -47,50 +28,6 @@ export function getHighlighter(): Promise<HighlighterCore> {
 export function activeTheme(): string {
   const c = document.body.classList;
   return c.contains('vscode-light') || c.contains('vscode-high-contrast-light') ? 'light-plus' : 'one-dark-pro';
-}
-
-const EXT_LANG: Record<string, string> = {
-  ts: 'typescript',
-  mts: 'typescript',
-  cts: 'typescript',
-  tsx: 'tsx',
-  js: 'javascript',
-  mjs: 'javascript',
-  cjs: 'javascript',
-  jsx: 'jsx',
-  json: 'json',
-  jsonc: 'json',
-  py: 'python',
-  go: 'go',
-  rs: 'rust',
-  java: 'java',
-  c: 'c',
-  h: 'c',
-  cc: 'cpp',
-  cpp: 'cpp',
-  cxx: 'cpp',
-  hpp: 'cpp',
-  hh: 'cpp',
-  cs: 'csharp',
-  rb: 'ruby',
-  php: 'php',
-  html: 'html',
-  htm: 'html',
-  css: 'css',
-  scss: 'scss',
-  sh: 'shellscript',
-  bash: 'shellscript',
-  zsh: 'shellscript',
-  yml: 'yaml',
-  yaml: 'yaml',
-  md: 'markdown',
-  markdown: 'markdown',
-  sql: 'sql',
-};
-
-export function langForPath(path: string): string | undefined {
-  const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
-  return EXT_LANG[ext];
 }
 
 /** Tokenize free text (e.g. a suggestion body) into per-line tokens. */
