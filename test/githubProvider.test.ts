@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GithubReviewProvider } from '../src/github/provider';
-import type { GhNewComment, GhPostedComment, GithubWriteClient } from '../src/github/client';
+import type { GhNewComment, GhPostedComment, GhViewerTeam, GithubWriteClient } from '../src/github/client';
 import type { PullRequestDetail, PullRequestSummary } from '../src/review/provider';
 import type { SubmitReviewInput } from '../src/review/submit';
 import type { GhReviewThread } from '../src/github/types';
@@ -33,6 +33,11 @@ class FakeClient implements GithubWriteClient {
   constructor(private readonly threads: GhReviewThread[] = []) {}
   async viewer(): Promise<string> {
     return 'octocat';
+  }
+  // Teams across every org the user belongs to; the provider is what narrows them to the repo's org.
+  teams: GhViewerTeam[] = [];
+  async listViewerTeams(): Promise<GhViewerTeam[]> {
+    return this.teams;
   }
   async createReview(
     _repo: unknown,
@@ -94,6 +99,25 @@ const repo = { host: 'github.com', owner: 'o', repo: 'r' };
 test('headRefspec targets the PR head', () => {
   const p = new GithubReviewProvider('github', async () => new FakeClient([]));
   assert.equal(p.headRefspec(42), 'pull/42/head');
+});
+
+test('viewerTeams keeps only the repo org, since a slug is unique per org', async () => {
+  const client = new FakeClient([]);
+  client.teams = [
+    { slug: 'reviewers', org: 'o' },
+    { slug: 'reviewers', org: 'other-org' }, // same slug, different org — must not leak in
+    { slug: 'designers', org: 'O' }, // org comparison is case-insensitive
+    { slug: 'infra', org: 'unrelated' },
+  ];
+  const p = new GithubReviewProvider('github', async () => client);
+  assert.deepEqual(await p.viewerTeams(repo), ['reviewers', 'designers']);
+});
+
+test('viewerTeams is empty when the user is in no team in this org', async () => {
+  const client = new FakeClient([]);
+  client.teams = [{ slug: 'infra', org: 'unrelated' }];
+  const p = new GithubReviewProvider('github', async () => client);
+  assert.deepEqual(await p.viewerTeams(repo), []);
 });
 
 test('getThreads fetches raw threads and returns them mapped + anchored against the diff', async () => {

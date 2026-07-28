@@ -17,7 +17,8 @@ export interface PullRequestSummary {
   url: string;
   updatedAt: string; // ISO
   isDraft: boolean;
-  reviewers?: string[]; // logins a review is requested from; team requests are not resolved to members
+  reviewers?: string[]; // logins a review is requested from, by name
+  reviewerTeams?: string[]; // slugs of teams a review is requested from, in the repo's own org
 }
 
 /** Full request detail needed to fetch and diff it. */
@@ -46,6 +47,12 @@ export interface ReviewProvider {
   getThreads(repo: RemoteRepoRef, number: number, diff: ReviewDiff): Promise<CommentThread[]>;
   /** The authenticated user's login (attribution and, in iteration 12, edit/delete permission). */
   viewer(): Promise<string>;
+  /**
+   * The teams the authenticated user belongs to **in this repo's own org**, as slugs. A review request
+   * addressed to one of these is a request of the user, so the list is what makes team requests matchable.
+   * Scoped to the repo's org on purpose: the same team name in another org is a different team.
+   */
+  viewerTeams(repo: RemoteRepoRef): Promise<string[]>;
   /**
    * Post a staged change set as one review (the single write egress; triggered only by a human Submit).
    * `onApplied` is invoked after each id-addressable step lands, so a caller can retire that item from its
