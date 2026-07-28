@@ -20,7 +20,8 @@ import { githubErrorText } from './github/errors';
 import type { SubmitEvent, SubmitCounts } from './review/submit';
 import type { OrphanReport } from './review/reconcile';
 import { PullRequestsView } from './webview/pullRequestsView';
-import type { ReviewProvider, RemoteRepoRef } from './review/provider';
+import type { ReviewProvider, RemoteRepoRef, PullRequestSummary } from './review/provider';
+import { applyPrFilter, formatPrFilter, parsePrFilter } from './review/prFilter';
 
 /** Narrow a command argument (tree node or selection) to a Review. */
 function asReview(x: unknown): Review | undefined {
@@ -46,10 +47,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const reviewsView = new ReviewsView(controller);
   const reviewsTree = vscode.window.createTreeView('agenticReview.reviews', { treeDataProvider: reviewsView });
 
-  const pullRequestsView = new PullRequestsView(controller);
+  const pullRequestsView = new PullRequestsView(controller, state);
   const pullRequestsTree = vscode.window.createTreeView('agenticReview.pullRequests', {
     treeDataProvider: pullRequestsView,
   });
+  pullRequestsView.bind(pullRequestsTree);
 
   // Badge the activity-bar icon with the number of changed files still to review; the count drops as
   // files are marked viewed and rises when unmarked (like the SCM count).
@@ -246,6 +248,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       reviewPullRequest(controller, context.extensionUri),
     ),
     vscode.commands.registerCommand('agenticReview.refreshPullRequests', () => pullRequestsView.refresh()),
+    // Two commands, one handler: the title bar shows a filled funnel once a filter is on, and either icon
+    // opens the box. Clearing is a row inside the box, so the visible affordance never destroys state.
+    vscode.commands.registerCommand('agenticReview.filterPullRequests', () => filterPullRequests(pullRequestsView)),
+    vscode.commands.registerCommand('agenticReview.changePullRequestFilter', () =>
+      filterPullRequests(pullRequestsView),
+    ),
+    vscode.commands.registerCommand('agenticReview.clearPullRequestFilter', () => pullRequestsView.setFilter('')),
     vscode.commands.registerCommand('agenticReview.openPullRequestFromList', (n: number) =>
       openPullRequestFromList(controller, context.extensionUri, n),
     ),
@@ -724,6 +733,90 @@ async function pickPullRequest(provider: ReviewProvider, repo: RemoteRepoRef): P
     qp.onDidAccept(() => {
       const picked = qp.selectedItems[0]?.number ?? parsePrReference(qp.value)?.number;
       resolve(picked);
+      qp.hide();
+    });
+    qp.onDidHide(() => {
+      resolve(undefined);
+      qp.dispose();
+    });
+  });
+}
+
+/** Open the filter box for the Pull Requests list, then apply whatever it returns. */
+async function filterPullRequests(view: PullRequestsView): Promise<void> {
+  const { prs, viewer } = await view.summaries();
+  const tokens = await pickPrFilter(formatPrFilter(view.filter()), prs, viewer);
+  if (tokens !== undefined) await view.setFilter(tokens);
+}
+
+type FilterItem = vscode.QuickPickItem & { tokens?: string };
+
+/**
+ * The filter box: presets for the common questions, the authors actually present in the list, and free-text
+ * tokens. It filters as you type and reports how many pull requests the typed filter would leave, so the
+ * effect is visible before you commit to it. Runs entirely against the already-fetched list.
+ */
+function pickPrFilter(current: string, prs: PullRequestSummary[], viewer?: string): Promise<string | undefined> {
+  const qp = vscode.window.createQuickPick<FilterItem>();
+  qp.title = 'Filter pull requests';
+  qp.placeholder = 'author:@me · review-requested:@me · is:draft · is:ready · or any text';
+  qp.value = current;
+  qp.matchOnDescription = true;
+
+  const matches = (tokens: string): string => {
+    const n = applyPrFilter(prs, parsePrFilter(tokens), viewer).length;
+    return `${n} of ${prs.length}`;
+  };
+  // Without a signed-in login there is nothing for `@me` to mean, so say that instead of reporting zero.
+  const meNote = (tokens: string): string => (viewer ? matches(tokens) : 'sign in to use');
+
+  // The box is also where a filter gets cleared, so the title-bar funnel can stay non-destructive.
+  const clearRow: FilterItem = current
+    ? { label: 'Clear filter', description: `show all ${prs.length} open pull requests`, tokens: '' }
+    : { label: 'All open', description: `no filter · ${prs.length}`, tokens: '' };
+
+  const presets: FilterItem[] = [
+    clearRow,
+    {
+      label: 'Review requested',
+      description: `review-requested:@me · ${meNote('review-requested:@me')}`,
+      tokens: 'review-requested:@me',
+    },
+    { label: 'Created by me', description: `author:@me · ${meNote('author:@me')}`, tokens: 'author:@me' },
+    { label: 'Drafts only', description: `is:draft · ${matches('is:draft')}`, tokens: 'is:draft' },
+    { label: 'Ready for review', description: `is:ready · ${matches('is:ready')}`, tokens: 'is:ready' },
+  ].map((p) => ({ ...p, alwaysShow: true }));
+
+  const counted = new Map<string, number>();
+  for (const pr of prs) counted.set(pr.author, (counted.get(pr.author) ?? 0) + 1);
+  const authors: FilterItem[] = [...counted.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([login, n]) => ({ label: login, description: `${n}`, tokens: `author:${login}` }));
+
+  const render = (): void => {
+    // Whatever is typed leads the list, so Enter always applies what the box shows. Without this, opening
+    // the box on an existing filter and accepting it would pick the first preset and clear that filter.
+    const typed = qp.value.trim();
+    const head: FilterItem[] = typed
+      ? [{ label: `Filter by "${typed}"`, description: matches(typed), tokens: typed, alwaysShow: true }]
+      : [];
+    qp.items = [
+      ...head,
+      { label: 'Presets', kind: vscode.QuickPickItemKind.Separator },
+      ...presets,
+      ...(authors.length
+        ? [{ label: 'Authors in this list', kind: vscode.QuickPickItemKind.Separator }, ...authors]
+        : []),
+    ];
+  };
+  render();
+  qp.onDidChangeValue(render);
+  qp.show();
+
+  return new Promise((resolve) => {
+    qp.onDidAccept(() => {
+      const picked = qp.selectedItems[0];
+      resolve(picked?.tokens ?? qp.value.trim());
       qp.hide();
     });
     qp.onDidHide(() => {

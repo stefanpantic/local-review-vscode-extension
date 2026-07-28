@@ -17,6 +17,7 @@ export interface PullRequestSummary {
   url: string;
   updatedAt: string; // ISO
   isDraft: boolean;
+  reviewers?: string[]; // logins a review is requested from; team requests are not resolved to members
 }
 
 /** Full request detail needed to fetch and diff it. */

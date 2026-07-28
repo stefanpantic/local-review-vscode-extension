@@ -9,6 +9,7 @@ export interface Pref {
   whitespace: boolean; // true = hide whitespace (git diff -w)
   wrap: boolean; // true = wrap long lines instead of scrolling horizontally
   pr?: PrRef; // the pull request under review; present (and restored on reload) when source === 'pr'
+  prFilter?: string; // filter tokens narrowing the Pull Requests list; stored as text and re-parsed on read
 }
 
 const PREF_KEY = 'agenticReview.pref';

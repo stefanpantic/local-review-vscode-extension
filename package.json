@@ -150,6 +150,24 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "agenticReview.filterPullRequests",
+        "title": "Filter Pull Requests",
+        "category": "ReviewMate",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "agenticReview.changePullRequestFilter",
+        "title": "Change Pull Request Filter",
+        "category": "ReviewMate",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "agenticReview.clearPullRequestFilter",
+        "title": "Clear Pull Request Filter",
+        "category": "ReviewMate",
+        "icon": "$(clear-all)"
+      },
+      {
         "command": "agenticReview.openPullRequestFromList",
         "title": "Open Pull Request",
         "category": "ReviewMate"
@@ -321,9 +339,19 @@
           "group": "navigation@2"
         },
         {
+          "command": "agenticReview.filterPullRequests",
+          "when": "view == agenticReview.pullRequests && !agenticReview.prFilterActive",
+          "group": "navigation@3"
+        },
+        {
+          "command": "agenticReview.changePullRequestFilter",
+          "when": "view == agenticReview.pullRequests && agenticReview.prFilterActive",
+          "group": "navigation@3"
+        },
+        {
           "command": "agenticReview.refreshPullRequests",
           "when": "view == agenticReview.pullRequests",
-          "group": "navigation@3"
+          "group": "navigation@4"
         },
         {
           "command": "agenticReview.github.discardPending",
@@ -389,6 +417,14 @@
         {
           "command": "agenticReview.openPullRequestFromList",
           "when": "false"
+        },
+        {
+          "command": "agenticReview.changePullRequestFilter",
+          "when": "agenticReview.prFilterActive"
+        },
+        {
+          "command": "agenticReview.clearPullRequestFilter",
+          "when": "agenticReview.prFilterActive"
         },
         {
           "command": "agenticReview.github.submitReview",
