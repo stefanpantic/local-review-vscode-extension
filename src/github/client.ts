@@ -109,6 +109,12 @@ const UNRESOLVE_MUTATION = `mutation ($threadId: ID!) { unresolveReviewThread(in
 
 type GraphqlFn = <T>(query: string, params: Record<string, unknown>) => Promise<T>;
 
+// The logins a review is requested from. Both the list and detail responses carry these, so filtering the
+// list by "requested from me" costs no extra call. Team requests (`requested_teams`) are deliberately not
+// expanded: resolving a slug to its members needs an org call for an uncommon case.
+const reviewerLogins = (requested: { login: string }[] | null | undefined): string[] =>
+  (requested ?? []).map((u) => u.login);
+
 class OctokitClient implements GithubWriteClient {
   constructor(
     private readonly kit: Octokit,
@@ -137,6 +143,7 @@ class OctokitClient implements GithubWriteClient {
       url: pr.html_url,
       updatedAt: pr.updated_at,
       isDraft: pr.draft ?? false,
+      reviewers: reviewerLogins(pr.requested_reviewers),
     }));
   }
 
@@ -152,6 +159,7 @@ class OctokitClient implements GithubWriteClient {
       url: pr.html_url,
       updatedAt: pr.updated_at,
       isDraft: pr.draft ?? false,
+      reviewers: reviewerLogins(pr.requested_reviewers),
       body: pr.body ?? '', // GitHub sends null for an empty description; normalize to an empty string
       baseRef: pr.base.ref,
       baseSha: pr.base.sha,

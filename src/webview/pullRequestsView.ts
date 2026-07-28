@@ -1,26 +1,51 @@
 import * as vscode from 'vscode';
 import type { ReviewController } from '../reviewController';
+import type { ReviewState } from '../reviewState';
 import type { PullRequestSummary } from '../review/provider';
 import { prStateLabel } from '../protocol/messages';
-import { hasGithubSession } from '../github/auth';
+import { getViewerLogin, hasGithubSession } from '../github/auth';
 import type { GithubProviderId } from '../github/remote';
+import {
+  applyPrFilter,
+  describePrFilter,
+  formatPrFilter,
+  isPrFilterEmpty,
+  needsViewer,
+  parsePrFilter,
+  type PrFilter,
+} from '../review/prFilter';
 
 // A pull request, or a single informational row (sign-in prompt, empty state, load error).
 type PrNode = { kind: 'pr'; pr: PullRequestSummary } | { kind: 'info'; label: string; icon: string; command?: string };
+
+/** The fetched list with the identity `@me` resolves to, or the rows to show instead of a list. */
+type Loaded = { prs: PullRequestSummary[]; viewer?: string } | { rows: PrNode[] };
 
 /**
  * Sidebar "Pull Requests" panel: the open PRs on the current repo's review host, click to review one.
  * Only shown when a supported remote is detected (gated by the `agenticReview.hasRemote` context key).
  * The list is fetched once per repo and cached; it refetches only on explicit refresh, not on every
  * comment edit, so opening the panel does not hammer the API.
+ *
+ * The filter narrows the cached list in place, so changing it is a repaint and never another fetch.
  */
 export class PullRequestsView implements vscode.TreeDataProvider<PrNode> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
-  private cache?: { repoKey: string; prs: PullRequestSummary[] };
+  private cache?: { repoKey: string; prs: PullRequestSummary[]; viewer?: string };
+  private view?: vscode.TreeView<PrNode>;
 
-  constructor(private readonly controller: ReviewController) {
+  constructor(
+    private readonly controller: ReviewController,
+    private readonly state: ReviewState,
+  ) {
     controller.onDidChange(() => this._onDidChangeTreeData.fire());
+  }
+
+  /** Take the tree handle so the header can name the active filter and its match count. */
+  bind(view: vscode.TreeView<PrNode>): void {
+    this.view = view;
+    void this.publishFilterState();
   }
 
   /** Drop the cached list and reload from the host (the refresh button, or after signing in). */
@@ -29,24 +54,34 @@ export class PullRequestsView implements vscode.TreeDataProvider<PrNode> {
     this._onDidChangeTreeData.fire();
   }
 
+  filter(): PrFilter {
+    return parsePrFilter(this.state.getPref().prFilter ?? '');
+  }
+
+  /** Persist a filter and repaint. The fetched list is kept, so this costs no network call. */
+  async setFilter(tokens: string): Promise<void> {
+    // Store the canonical form, so what is persisted round-trips and the header label is predictable.
+    await this.state.setPref({ prFilter: formatPrFilter(parsePrFilter(tokens)) });
+    await this.publishFilterState();
+    this._onDidChangeTreeData.fire();
+  }
+
+  /**
+   * The fetched summaries plus the resolved identity, for the filter box to build its author rows and live
+   * match counts from. Serves the cache when it is warm, so opening the box does not refetch.
+   */
+  async summaries(): Promise<{ prs: PullRequestSummary[]; viewer?: string }> {
+    const loaded = await this.load();
+    return 'prs' in loaded ? loaded : { prs: [] };
+  }
+
   async getChildren(node?: PrNode): Promise<PrNode[]> {
     if (node) return [];
-    const remote = await this.controller.currentRemote();
-    if (!remote) return []; // the view is hidden without a remote; guard anyway
-    const repoKey = `${remote.repo.host}/${remote.repo.owner}/${remote.repo.repo}`;
-    if (this.cache?.repoKey === repoKey) return render(this.cache.prs); // cached implies signed-in
-    if (!(await hasGithubSession(remote.provider.id as GithubProviderId))) {
-      return [
-        { kind: 'info', label: 'Sign in to GitHub', icon: 'sign-in', command: 'agenticReview.reviewPullRequest' },
-      ];
-    }
-    try {
-      const prs = await remote.provider.listRequests(remote.repo);
-      this.cache = { repoKey, prs };
-      return render(prs);
-    } catch {
-      return [{ kind: 'info', label: 'Could not load pull requests', icon: 'warning' }];
-    }
+    const loaded = await this.load();
+    if (!('prs' in loaded)) return loaded.rows;
+    const rows = render(loaded.prs, this.filter(), loaded.viewer);
+    await this.publishFilterState();
+    return rows;
   }
 
   getTreeItem(node: PrNode): vscode.TreeItem {
@@ -71,9 +106,70 @@ export class PullRequestsView implements vscode.TreeDataProvider<PrNode> {
     };
     return item;
   }
+
+  private async load(): Promise<Loaded> {
+    const remote = await this.controller.currentRemote();
+    if (!remote) return { rows: [] }; // the view is hidden without a remote; guard anyway
+    const repoKey = `${remote.repo.host}/${remote.repo.owner}/${remote.repo.repo}`;
+    if (this.cache?.repoKey === repoKey) return this.cache; // cached implies signed-in
+    const providerId = remote.provider.id as GithubProviderId;
+    if (!(await hasGithubSession(providerId))) {
+      return {
+        rows: [
+          { kind: 'info', label: 'Sign in to GitHub', icon: 'sign-in', command: 'agenticReview.reviewPullRequest' },
+        ],
+      };
+    }
+    try {
+      const prs = await remote.provider.listRequests(remote.repo);
+      // The login comes from the existing session (no prompt, no API call); it is what `@me` resolves to.
+      this.cache = { repoKey, prs, viewer: await getViewerLogin(providerId) };
+      return this.cache;
+    } catch {
+      return { rows: [{ kind: 'info', label: 'Could not load pull requests', icon: 'warning' }] };
+    }
+  }
+
+  /**
+   * Name the current filter in the view header, the way the Changes header always names its diff source, and
+   * expose whether one is set to `when` clauses for the title-bar icons. The unfiltered state is named too,
+   * so the header answers "what am I looking at" without the reader having to infer it from an absence.
+   */
+  private async publishFilterState(): Promise<void> {
+    const filter = this.filter();
+    const active = !isPrFilterEmpty(filter);
+    await vscode.commands.executeCommand('setContext', 'agenticReview.prFilterActive', active);
+    if (!this.view) return;
+    const prs = this.cache?.prs;
+    if (!prs) {
+      this.view.description = active ? describePrFilter(filter) : undefined; // nothing loaded yet to count
+      return;
+    }
+    // The row count carries the "how many" when unfiltered, so only a filter earns an explicit tally.
+    if (!active) {
+      this.view.description = 'All open';
+      return;
+    }
+    const shown = applyPrFilter(prs, filter, this.cache?.viewer).length;
+    this.view.description = `${describePrFilter(filter)} · ${shown} of ${prs.length}`;
+  }
 }
 
-function render(prs: PullRequestSummary[]): PrNode[] {
+function render(prs: PullRequestSummary[], filter: PrFilter, viewer?: string): PrNode[] {
   if (!prs.length) return [{ kind: 'info', label: 'No open pull requests', icon: 'info' }];
-  return prs.map((pr) => ({ kind: 'pr', pr }));
+  if (isPrFilterEmpty(filter)) return prs.map((pr) => ({ kind: 'pr', pr }));
+  const shown = applyPrFilter(prs, filter, viewer);
+  // A filtered list that comes back empty has to say so, otherwise it reads as a broken view.
+  if (!shown.length) {
+    return [
+      {
+        kind: 'info',
+        label:
+          needsViewer(filter) && !viewer ? 'Sign in to GitHub to filter by @me' : 'No pull requests match this filter',
+        icon: 'filter',
+        command: 'agenticReview.clearPullRequestFilter',
+      },
+    ];
+  }
+  return shown.map((pr) => ({ kind: 'pr', pr }));
 }

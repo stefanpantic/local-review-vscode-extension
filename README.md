@@ -40,6 +40,22 @@ When the current repo's `origin` is a GitHub remote, a **Pull Requests** section
 - imports all review threads at their correct file, side, and line, including resolved and outdated ones, with suggestions.
 - lists the PR as its own group in the **Reviews** sidebar, separate from your local branch reviews, and tracks "viewed" state per PR.
 
+### Filter the list
+
+Click the funnel in the **Pull Requests** title bar to open a filter box. It filters as you type and tells you how many PRs are left, with presets for the usual questions and a row per author in the list:
+
+| Filter                  | Shows                                     |
+| ----------------------- | ----------------------------------------- |
+| `review-requested:@me`  | PRs waiting on your review                |
+| `author:@me`            | PRs you opened                            |
+| `author:<login>`        | PRs by someone else                       |
+| `is:draft` / `is:ready` | Drafts, or everything that is not a draft |
+| any other text          | Matches the number, title, or author      |
+
+Filters combine, so `author:octocat is:draft` means both. The section header always names what you are looking at, either **All open** or the filter and how much it leaves, like **Created by me · 2 of 14**. The funnel fills in while a filter is on, and clicking it reopens the box, where the first row clears the filter. Filtering narrows the list already loaded, so it costs no network call, and it is remembered across restarts.
+
+A review requested from a **team** you belong to does not match `review-requested:@me`, which only matches requests addressed to you by name.
+
 ### Write your review back
 
 Reviewing a PR adds a **pull request bar** across the top of the review, always visible as you scroll. Everything you can do to the PR is there, so nothing hides in the command palette:
