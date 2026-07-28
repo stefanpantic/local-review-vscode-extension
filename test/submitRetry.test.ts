@@ -11,7 +11,7 @@ import { GithubReviewProvider } from '../src/github/provider';
 import { buildSubmitPlan } from '../src/review/submit';
 import { reconcile } from '../src/review/reconcile';
 import type { CommentThread, RemoteRef, RemoteReview } from '../src/model/Comment';
-import type { GhNewComment, GhPostedComment, GithubWriteClient } from '../src/github/client';
+import type { GhNewComment, GhPostedComment, GhViewerTeam, GithubWriteClient } from '../src/github/client';
 import type { PullRequestDetail, PullRequestSummary } from '../src/review/provider';
 import type { GhReviewThread } from '../src/github/types';
 
@@ -38,6 +38,9 @@ class FlakyClient implements GithubWriteClient {
   private nextId = 500;
   async viewer(): Promise<string> {
     return 'me';
+  }
+  async listViewerTeams(): Promise<GhViewerTeam[]> {
+    return [];
   }
   async createReview(
     _repo: unknown,

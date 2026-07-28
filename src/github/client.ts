@@ -9,9 +9,17 @@ import { apiBaseUrls, type GithubProviderId } from './remote';
 /** The read operations the provider needs. Fakeable, so the provider is testable without the network. */
 export interface GithubReadClient {
   viewer(): Promise<string>;
+  /** Every team the token's user belongs to, across all orgs. The caller narrows to the org it cares about. */
+  listViewerTeams(): Promise<GhViewerTeam[]>;
   listPullRequests(repo: RemoteRepoRef): Promise<PullRequestSummary[]>;
   getPullRequest(repo: RemoteRepoRef, number: number): Promise<PullRequestDetail>;
   getReviewThreads(repo: RemoteRepoRef, number: number): Promise<GhReviewThread[]>;
+}
+
+/** A team the signed-in user belongs to, with the org that owns it (team slugs are unique per org only). */
+export interface GhViewerTeam {
+  slug: string;
+  org: string; // organization login
 }
 
 /** One new inline comment in a create-review batch, in GitHub's shape (side is LEFT/RIGHT; lines pinned). */
@@ -109,11 +117,14 @@ const UNRESOLVE_MUTATION = `mutation ($threadId: ID!) { unresolveReviewThread(in
 
 type GraphqlFn = <T>(query: string, params: Record<string, unknown>) => Promise<T>;
 
-// The logins a review is requested from. Both the list and detail responses carry these, so filtering the
-// list by "requested from me" costs no extra call. Team requests (`requested_teams`) are deliberately not
-// expanded: resolving a slug to its members needs an org call for an uncommon case.
+// Who a review is requested from. Both the list and detail responses carry the requested people and teams,
+// so matching either against the viewer costs no extra call on the pull requests themselves.
 const reviewerLogins = (requested: { login: string }[] | null | undefined): string[] =>
   (requested ?? []).map((u) => u.login);
+
+// Teams are identified by slug. A team requested on a repo belongs to that repo's org, so the slug alone is
+// enough to identify it here (the response carries no org of its own).
+const teamSlugs = (requested: { slug: string }[] | null | undefined): string[] => (requested ?? []).map((t) => t.slug);
 
 class OctokitClient implements GithubWriteClient {
   constructor(
@@ -124,6 +135,13 @@ class OctokitClient implements GithubWriteClient {
   async viewer(): Promise<string> {
     const data = await this.gql<{ viewer: { login: string } }>('query { viewer { login } }', {});
     return data.viewer.login;
+  }
+
+  // Every org's teams in one paginated read. The `repo` scope this extension already requests covers it
+  // (GitHub accepts `user`, `repo`, or `read:org` here), so team matching needs no extra permission.
+  async listViewerTeams(): Promise<GhViewerTeam[]> {
+    const teams = await this.kit.paginate(this.kit.rest.teams.listForAuthenticatedUser, { per_page: 100 });
+    return teams.map((t) => ({ slug: t.slug, org: t.organization.login }));
   }
 
   async listPullRequests(repo: RemoteRepoRef): Promise<PullRequestSummary[]> {
@@ -144,6 +162,7 @@ class OctokitClient implements GithubWriteClient {
       updatedAt: pr.updated_at,
       isDraft: pr.draft ?? false,
       reviewers: reviewerLogins(pr.requested_reviewers),
+      reviewerTeams: teamSlugs(pr.requested_teams),
     }));
   }
 
@@ -160,6 +179,7 @@ class OctokitClient implements GithubWriteClient {
       updatedAt: pr.updated_at,
       isDraft: pr.draft ?? false,
       reviewers: reviewerLogins(pr.requested_reviewers),
+      reviewerTeams: teamSlugs(pr.requested_teams),
       body: pr.body ?? '', // GitHub sends null for an empty description; normalize to an empty string
       baseRef: pr.base.ref,
       baseSha: pr.base.sha,

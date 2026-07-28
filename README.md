@@ -42,19 +42,23 @@ When the current repo's `origin` is a GitHub remote, a **Pull Requests** section
 
 ### Filter the list
 
-Click the funnel in the **Pull Requests** title bar to open a filter box. It filters as you type and tells you how many PRs are left, with presets for the usual questions and a row per author in the list:
+Click the funnel in the **Pull Requests** title bar to open a filter box. It filters as you type and tells you how many PRs are left, with presets for the usual questions, a row per author, and a row per team a PR is waiting on:
 
-| Filter                  | Shows                                     |
-| ----------------------- | ----------------------------------------- |
-| `review-requested:@me`  | PRs waiting on your review                |
-| `author:@me`            | PRs you opened                            |
-| `author:<login>`        | PRs by someone else                       |
-| `is:draft` / `is:ready` | Drafts, or everything that is not a draft |
-| any other text          | Matches the number, title, or author      |
+| Filter                         | Shows                                                        |
+| ------------------------------ | ------------------------------------------------------------ |
+| `review-requested:@me`         | PRs waiting on you, asked of you **or of a team you are in** |
+| `user-review-requested:@me`    | Only PRs where you were asked by name                        |
+| `team-review-requested:<slug>` | PRs waiting on that team, whoever is in it                   |
+| `author:@me`                   | PRs you opened                                               |
+| `author:<login>`               | PRs by someone else                                          |
+| `is:draft` / `is:ready`        | Drafts, or everything that is not a draft                    |
+| any other text                 | Every word matched against the number, title, or author      |
 
-Filters combine, so `author:octocat is:draft` means both. The section header always names what you are looking at, either **All open** or the filter and how much it leaves, like **Created by me · 2 of 14**. The funnel fills in while a filter is on, and clicking it reopens the box, where the first row clears the filter. Filtering narrows the list already loaded, so it costs no network call, and it is remembered across restarts.
+These are GitHub's own search qualifiers, so they mean here what they mean there. Filters combine, so `author:octocat is:draft` means both. The section header always names what you are looking at, either **All open** or the filter and how much it leaves, like **Created by me · 2 of 14**. The funnel fills in while a filter is on, and clicking it reopens the box, where the first row clears the filter. The filter is remembered across restarts.
 
-A review requested from a **team** you belong to does not match `review-requested:@me`, which only matches requests addressed to you by name.
+Filtering runs against the list already loaded, so it costs no network call. The one exception: when some PR in the list is waiting on a team, your team memberships are looked up once so `review-requested:@me` can match them. Repos that never request reviews from teams never make that call. If the lookup is unavailable, `review-requested:@me` still matches everything asked of you by name and the view says teams could not be checked, rather than quietly showing a short list.
+
+`review-requested:<someone-else>` matches only what was asked of that person by name. Another person's team memberships are not knowable without asking GitHub about each one, so they are not assumed.
 
 ### Write your review back
 

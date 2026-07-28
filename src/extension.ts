@@ -21,7 +21,7 @@ import type { SubmitEvent, SubmitCounts } from './review/submit';
 import type { OrphanReport } from './review/reconcile';
 import { PullRequestsView } from './webview/pullRequestsView';
 import type { ReviewProvider, RemoteRepoRef, PullRequestSummary } from './review/provider';
-import { applyPrFilter, formatPrFilter, parsePrFilter } from './review/prFilter';
+import { applyPrFilter, formatPrFilter, parsePrFilter, type Viewer } from './review/prFilter';
 
 /** Narrow a command argument (tree node or selection) to a Review. */
 function asReview(x: unknown): Review | undefined {
@@ -756,7 +756,7 @@ type FilterItem = vscode.QuickPickItem & { tokens?: string };
  * tokens. It filters as you type and reports how many pull requests the typed filter would leave, so the
  * effect is visible before you commit to it. Runs entirely against the already-fetched list.
  */
-function pickPrFilter(current: string, prs: PullRequestSummary[], viewer?: string): Promise<string | undefined> {
+function pickPrFilter(current: string, prs: PullRequestSummary[], viewer: Viewer): Promise<string | undefined> {
   const qp = vscode.window.createQuickPick<FilterItem>();
   qp.title = 'Filter pull requests';
   qp.placeholder = 'author:@me · review-requested:@me · is:draft · is:ready · or any text';
@@ -768,7 +768,7 @@ function pickPrFilter(current: string, prs: PullRequestSummary[], viewer?: strin
     return `${n} of ${prs.length}`;
   };
   // Without a signed-in login there is nothing for `@me` to mean, so say that instead of reporting zero.
-  const meNote = (tokens: string): string => (viewer ? matches(tokens) : 'sign in to use');
+  const meNote = (tokens: string): string => (viewer.login ? matches(tokens) : 'sign in to use');
 
   // The box is also where a filter gets cleared, so the title-bar funnel can stay non-destructive.
   const clearRow: FilterItem = current
@@ -779,19 +779,39 @@ function pickPrFilter(current: string, prs: PullRequestSummary[], viewer?: strin
     clearRow,
     {
       label: 'Review requested',
-      description: `review-requested:@me · ${meNote('review-requested:@me')}`,
+      description: `review-requested:@me · you or your teams · ${meNote('review-requested:@me')}`,
       tokens: 'review-requested:@me',
+    },
+    {
+      label: 'Review requested from me directly',
+      description: `user-review-requested:@me · not via a team · ${meNote('user-review-requested:@me')}`,
+      tokens: 'user-review-requested:@me',
     },
     { label: 'Created by me', description: `author:@me · ${meNote('author:@me')}`, tokens: 'author:@me' },
     { label: 'Drafts only', description: `is:draft · ${matches('is:draft')}`, tokens: 'is:draft' },
     { label: 'Ready for review', description: `is:ready · ${matches('is:ready')}`, tokens: 'is:ready' },
   ].map((p) => ({ ...p, alwaysShow: true }));
 
-  const counted = new Map<string, number>();
-  for (const pr of prs) counted.set(pr.author, (counted.get(pr.author) ?? 0) + 1);
-  const authors: FilterItem[] = [...counted.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([login, n]) => ({ label: login, description: `${n}`, tokens: `author:${login}` }));
+  // Tally a facet across the list, most-used first, so each row can show how much it would leave.
+  const tally = (pick: (pr: PullRequestSummary) => string[]): [string, number][] => {
+    const counted = new Map<string, number>();
+    for (const pr of prs) for (const key of pick(pr)) counted.set(key, (counted.get(key) ?? 0) + 1);
+    return [...counted.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  };
+
+  const authors: FilterItem[] = tally((pr) => [pr.author]).map(([login, n]) => ({
+    label: login,
+    description: `${n}`,
+    tokens: `author:${login}`,
+  }));
+
+  // Teams that some pull request in the list is waiting on. Picking one works whether or not membership
+  // could be resolved, so this is also the way through when the teams lookup is unavailable.
+  const teams: FilterItem[] = tally((pr) => pr.reviewerTeams ?? []).map(([slug, n]) => ({
+    label: slug,
+    description: viewer.teams?.some((t) => t.toLowerCase() === slug.toLowerCase()) ? `${n} · your team` : `${n}`,
+    tokens: `team-review-requested:${slug}`,
+  }));
 
   const render = (): void => {
     // Whatever is typed leads the list, so Enter always applies what the box shows. Without this, opening
@@ -800,13 +820,13 @@ function pickPrFilter(current: string, prs: PullRequestSummary[], viewer?: strin
     const head: FilterItem[] = typed
       ? [{ label: `Filter by "${typed}"`, description: matches(typed), tokens: typed, alwaysShow: true }]
       : [];
+    const section = (title: string, rows: FilterItem[]): FilterItem[] =>
+      rows.length ? [{ label: title, kind: vscode.QuickPickItemKind.Separator }, ...rows] : [];
     qp.items = [
       ...head,
-      { label: 'Presets', kind: vscode.QuickPickItemKind.Separator },
-      ...presets,
-      ...(authors.length
-        ? [{ label: 'Authors in this list', kind: vscode.QuickPickItemKind.Separator }, ...authors]
-        : []),
+      ...section('Presets', presets),
+      ...section('Teams awaiting review', teams),
+      ...section('Authors in this list', authors),
     ];
   };
   render();

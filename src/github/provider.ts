@@ -63,6 +63,17 @@ class GithubReviewProvider implements ReviewProvider {
   }
 
   /**
+   * The viewer's teams narrowed to the repo's own org. GitHub returns teams from every org the user belongs
+   * to, and slugs are only unique within an org, so without this filter a `reviewers` team in one org would
+   * match a same-named team in another.
+   */
+  async viewerTeams(repo: RemoteRepoRef): Promise<string[]> {
+    const teams = await (await this.clientFor(false)).listViewerTeams();
+    const owner = repo.owner.toLowerCase();
+    return teams.filter((t) => t.org.toLowerCase() === owner).map((t) => t.slug);
+  }
+
+  /**
    * Post the staged batch as one review. Housekeeping (edits, deletes, imported-thread replies, resolves)
    * goes first via their own REST/GraphQL calls; the create-review batch (new roots + the chosen event)
    * lands next, pinned to the reviewed head sha. A new thread you replied to before submitting can't be

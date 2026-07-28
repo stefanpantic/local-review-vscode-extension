@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { ReviewController } from '../reviewController';
 import type { ReviewState } from '../reviewState';
-import type { PullRequestSummary } from '../review/provider';
+import type { PullRequestSummary, RemoteRepoRef, ReviewProvider } from '../review/provider';
 import { prStateLabel } from '../protocol/messages';
 import { getViewerLogin, hasGithubSession } from '../github/auth';
 import type { GithubProviderId } from '../github/remote';
@@ -10,16 +10,18 @@ import {
   describePrFilter,
   formatPrFilter,
   isPrFilterEmpty,
-  needsViewer,
+  needsIdentity,
   parsePrFilter,
+  teamsUnresolved,
   type PrFilter,
+  type Viewer,
 } from '../review/prFilter';
 
 // A pull request, or a single informational row (sign-in prompt, empty state, load error).
 type PrNode = { kind: 'pr'; pr: PullRequestSummary } | { kind: 'info'; label: string; icon: string; command?: string };
 
 /** The fetched list with the identity `@me` resolves to, or the rows to show instead of a list. */
-type Loaded = { prs: PullRequestSummary[]; viewer?: string } | { rows: PrNode[] };
+type Loaded = { prs: PullRequestSummary[]; viewer: Viewer } | { rows: PrNode[] };
 
 /**
  * Sidebar "Pull Requests" panel: the open PRs on the current repo's review host, click to review one.
@@ -32,7 +34,7 @@ type Loaded = { prs: PullRequestSummary[]; viewer?: string } | { rows: PrNode[] 
 export class PullRequestsView implements vscode.TreeDataProvider<PrNode> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
-  private cache?: { repoKey: string; prs: PullRequestSummary[]; viewer?: string };
+  private cache?: { repoKey: string; prs: PullRequestSummary[]; viewer: Viewer };
   private view?: vscode.TreeView<PrNode>;
 
   constructor(
@@ -70,9 +72,9 @@ export class PullRequestsView implements vscode.TreeDataProvider<PrNode> {
    * The fetched summaries plus the resolved identity, for the filter box to build its author rows and live
    * match counts from. Serves the cache when it is warm, so opening the box does not refetch.
    */
-  async summaries(): Promise<{ prs: PullRequestSummary[]; viewer?: string }> {
+  async summaries(): Promise<{ prs: PullRequestSummary[]; viewer: Viewer }> {
     const loaded = await this.load();
-    return 'prs' in loaded ? loaded : { prs: [] };
+    return 'prs' in loaded ? loaded : { prs: [], viewer: {} };
   }
 
   async getChildren(node?: PrNode): Promise<PrNode[]> {
@@ -123,10 +125,29 @@ export class PullRequestsView implements vscode.TreeDataProvider<PrNode> {
     try {
       const prs = await remote.provider.listRequests(remote.repo);
       // The login comes from the existing session (no prompt, no API call); it is what `@me` resolves to.
-      this.cache = { repoKey, prs, viewer: await getViewerLogin(providerId) };
+      const login = await getViewerLogin(providerId);
+      this.cache = { repoKey, prs, viewer: { login, teams: await this.teamsFor(remote, prs) } };
       return this.cache;
     } catch {
       return { rows: [{ kind: 'info', label: 'Could not load pull requests', icon: 'warning' }] };
+    }
+  }
+
+  /**
+   * The viewer's teams, fetched only when some pull request in the list actually has a team review request.
+   * A repo that never requests reviews from teams therefore costs no extra call at all. A failure here
+   * returns undefined ("unknown") rather than an empty list, and never takes the pull request list down with
+   * it: a filter is then narrower than asked for, and the view says so.
+   */
+  private async teamsFor(
+    remote: { repo: RemoteRepoRef; provider: ReviewProvider },
+    prs: PullRequestSummary[],
+  ): Promise<string[] | undefined> {
+    if (!prs.some((pr) => pr.reviewerTeams?.length)) return [];
+    try {
+      return await remote.provider.viewerTeams(remote.repo);
+    } catch {
+      return undefined;
     }
   }
 
@@ -155,7 +176,7 @@ export class PullRequestsView implements vscode.TreeDataProvider<PrNode> {
   }
 }
 
-function render(prs: PullRequestSummary[], filter: PrFilter, viewer?: string): PrNode[] {
+function render(prs: PullRequestSummary[], filter: PrFilter, viewer: Viewer): PrNode[] {
   if (!prs.length) return [{ kind: 'info', label: 'No open pull requests', icon: 'info' }];
   if (isPrFilterEmpty(filter)) return prs.map((pr) => ({ kind: 'pr', pr }));
   const shown = applyPrFilter(prs, filter, viewer);
@@ -164,12 +185,18 @@ function render(prs: PullRequestSummary[], filter: PrFilter, viewer?: string): P
     return [
       {
         kind: 'info',
-        label:
-          needsViewer(filter) && !viewer ? 'Sign in to GitHub to filter by @me' : 'No pull requests match this filter',
+        label: emptyReason(filter, viewer),
         icon: 'filter',
         command: 'agenticReview.clearPullRequestFilter',
       },
     ];
   }
   return shown.map((pr) => ({ kind: 'pr', pr }));
+}
+
+/** Why nothing matched. An unresolvable identity or team list is a different answer from a real zero. */
+function emptyReason(filter: PrFilter, viewer: Viewer): string {
+  if (needsIdentity(filter) && !viewer.login) return 'Sign in to GitHub to filter by @me';
+  if (teamsUnresolved(filter, viewer)) return 'No direct requests, and your teams could not be checked';
+  return 'No pull requests match this filter';
 }

@@ -5,8 +5,9 @@ import {
   describePrFilter,
   formatPrFilter,
   isPrFilterEmpty,
-  needsViewer,
+  needsIdentity,
   parsePrFilter,
+  teamsUnresolved,
 } from '../src/review/prFilter';
 import type { PullRequestSummary } from '../src/review/provider';
 
@@ -32,6 +33,8 @@ const numbers = (prs: PullRequestSummary[]): number[] => prs.map((p) => p.number
 test('parses each recognized token', () => {
   assert.deepEqual(parsePrFilter('author:octocat'), { author: 'octocat' });
   assert.deepEqual(parsePrFilter('review-requested:hubot'), { reviewRequested: 'hubot' });
+  assert.deepEqual(parsePrFilter('user-review-requested:hubot'), { userReviewRequested: 'hubot' });
+  assert.deepEqual(parsePrFilter('team-review-requested:reviewers'), { teamReviewRequested: 'reviewers' });
   assert.deepEqual(parsePrFilter('is:draft'), { draft: 'only' });
   assert.deepEqual(parsePrFilter('is:ready'), { draft: 'exclude' });
   assert.deepEqual(parsePrFilter('author:@me'), { author: '@me' });
@@ -69,6 +72,9 @@ test('formatting round-trips through parsing', () => {
     'is:ready',
     'author:@me is:draft',
     'author:octocat review-requested:hubot is:ready rename',
+    'user-review-requested:@me',
+    'team-review-requested:reviewers',
+    'review-requested:@me team-review-requested:designers is:draft',
     '',
   ]) {
     const once = formatPrFilter(parsePrFilter(input));
@@ -82,20 +88,78 @@ test('filters by author, case-insensitively', () => {
 });
 
 test('@me resolves to the viewer, and matches nothing without one', () => {
-  assert.deepEqual(numbers(applyPrFilter(list, parsePrFilter('author:@me'), 'hubot')), [2]);
+  assert.deepEqual(numbers(applyPrFilter(list, parsePrFilter('author:@me'), { login: 'hubot' })), [2]);
   assert.deepEqual(numbers(applyPrFilter(list, parsePrFilter('author:@me'), undefined)), []);
-  assert.ok(needsViewer(parsePrFilter('review-requested:@me')));
-  assert.ok(!needsViewer(parsePrFilter('author:hubot')));
+  assert.ok(needsIdentity(parsePrFilter('review-requested:@me')));
+  assert.ok(needsIdentity(parsePrFilter('user-review-requested:@me')));
+  assert.ok(!needsIdentity(parsePrFilter('author:hubot')));
+  assert.ok(!needsIdentity(parsePrFilter('team-review-requested:reviewers')));
 });
 
 test('review-requested matches the requested reviewers, case-insensitively', () => {
-  assert.deepEqual(numbers(applyPrFilter(list, parsePrFilter('review-requested:@me'), 'octocat')), [2]);
+  assert.deepEqual(numbers(applyPrFilter(list, parsePrFilter('review-requested:@me'), { login: 'octocat' })), [2]);
   assert.deepEqual(numbers(applyPrFilter(list, parsePrFilter('review-requested:hubot'))), [1]);
 });
 
 test('a PR with no reviewers field is not requested of anyone', () => {
   const noField = [pr({ number: 9, author: 'octocat' })];
   assert.deepEqual(numbers(applyPrFilter(noField, parsePrFilter('review-requested:hubot'))), []);
+});
+
+// --- team review requests. A review asked of a team you are in is a review asked of you, and GitHub
+// reports the two separately, so the team half has to be matched explicitly. ---
+
+const teamList: PullRequestSummary[] = [
+  pr({ number: 20, title: 'Direct only', reviewers: ['octocat'] }),
+  pr({ number: 21, title: 'Team only', reviewerTeams: ['reviewers'] }),
+  pr({ number: 22, title: 'Both', reviewers: ['octocat'], reviewerTeams: ['Reviewers'] }),
+  pr({ number: 23, title: 'Another team', reviewerTeams: ['designers'] }),
+  pr({ number: 24, title: 'Nobody' }),
+];
+const onTeam = { login: 'octocat', teams: ['reviewers'] };
+
+test('review-requested:@me includes requests to a team the viewer is in', () => {
+  assert.deepEqual(numbers(applyPrFilter(teamList, parsePrFilter('review-requested:@me'), onTeam)), [20, 21, 22]);
+});
+
+test('a team the viewer is not in does not match', () => {
+  assert.deepEqual(numbers(applyPrFilter(teamList, parsePrFilter('review-requested:@me'), onTeam)).includes(23), false);
+  const noTeams = { login: 'octocat', teams: [] };
+  assert.deepEqual(numbers(applyPrFilter(teamList, parsePrFilter('review-requested:@me'), noTeams)), [20, 22]);
+});
+
+test('team slugs match case-insensitively', () => {
+  const upper = { login: 'octocat', teams: ['REVIEWERS'] };
+  assert.deepEqual(numbers(applyPrFilter(teamList, parsePrFilter('review-requested:@me'), upper)), [20, 21, 22]);
+});
+
+test('a PR requested both directly and via a team appears once', () => {
+  const both = applyPrFilter(teamList, parsePrFilter('review-requested:@me'), onTeam).filter((p) => p.number === 22);
+  assert.equal(both.length, 1);
+});
+
+test('unresolved teams fall back to direct requests instead of a silent zero', () => {
+  const unknown = { login: 'octocat', teams: undefined };
+  assert.deepEqual(numbers(applyPrFilter(teamList, parsePrFilter('review-requested:@me'), unknown)), [20, 22]);
+  assert.ok(teamsUnresolved(parsePrFilter('review-requested:@me'), unknown));
+  assert.ok(!teamsUnresolved(parsePrFilter('review-requested:@me'), onTeam));
+  assert.ok(!teamsUnresolved(parsePrFilter('user-review-requested:@me'), unknown)); // never consults teams
+});
+
+test('user-review-requested is direct only, excluding team-only PRs', () => {
+  assert.deepEqual(numbers(applyPrFilter(teamList, parsePrFilter('user-review-requested:@me'), onTeam)), [20, 22]);
+});
+
+test('team-review-requested matches a team with no viewer at all', () => {
+  assert.deepEqual(numbers(applyPrFilter(teamList, parsePrFilter('team-review-requested:reviewers'))), [21, 22]);
+  assert.deepEqual(numbers(applyPrFilter(teamList, parsePrFilter('team-review-requested:REVIEWERS'))), [21, 22]);
+  assert.deepEqual(numbers(applyPrFilter(teamList, parsePrFilter('team-review-requested:designers'))), [23]);
+});
+
+test("another person's teams are not assumed, so their filter stays direct-only", () => {
+  // The viewer is on `reviewers`, but the filter targets hubot; #21 must not match off the viewer's teams.
+  const forHubot = applyPrFilter(teamList, parsePrFilter('review-requested:hubot'), onTeam);
+  assert.deepEqual(numbers(forHubot), []);
 });
 
 test('draft facets split the list', () => {
@@ -132,6 +196,11 @@ test('describes single-dimension filters by name and combinations by tokens', ()
   assert.equal(describePrFilter(parsePrFilter('review-requested:hubot')), 'Review requested from hubot');
   assert.equal(describePrFilter(parsePrFilter('is:draft')), 'Drafts only');
   assert.equal(describePrFilter(parsePrFilter('is:ready')), 'Ready for review');
+  assert.equal(describePrFilter(parsePrFilter('user-review-requested:@me')), 'Review requested from me directly');
+  assert.equal(
+    describePrFilter(parsePrFilter('team-review-requested:reviewers')),
+    'Review requested from team reviewers',
+  );
   assert.equal(describePrFilter(parsePrFilter('author:@me is:draft')), 'author:@me is:draft');
   assert.equal(describePrFilter(parsePrFilter('')), '');
 });
