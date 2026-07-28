@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.3.0...agentic-review-v0.3.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* match team review requests in the pull request filter ([#47](https://github.com/stefanpantic/local-review-vscode-extension/issues/47)) ([367bc7c](https://github.com/stefanpantic/local-review-vscode-extension/commit/367bc7cd3f1c3967ff2ebf859b660ed94d30929a))
+
 ## [0.3.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.2.0...agentic-review-v0.3.0) (2026-07-28)
 
 
