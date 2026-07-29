@@ -349,3 +349,41 @@ test('your comment deleted from a surviving thread is kept local-only within tha
   assert.equal(mineC.localOnly, true);
   assert.equal(mineC.remoteId, undefined);
 });
+
+test('submitting the review upstream clears the unsubmitted flag on the next sync', () => {
+  const local = [
+    imported('T1', 'note', {
+      comments: [comment({ id: 'T1c', remoteId: 'T1c', body: 'note', remoteBody: 'note', remotePending: true })],
+    }),
+  ];
+  const fresh = [imported('T1', 'note')]; // same comment, now submitted upstream
+  for (const removeMissing of [true, false]) {
+    const { threads } = reconcile(local, [], fresh, { viewer: 'me', removeMissing });
+    assert.equal(threads[0].comments[0].remotePending, undefined, `removeMissing: ${removeMissing}`);
+  }
+});
+
+test('an unsubmitted comment stays flagged while it is still unsubmitted upstream', () => {
+  const pending = () =>
+    imported('T1', 'note', {
+      comments: [comment({ id: 'T1c', remoteId: 'T1c', body: 'note', remoteBody: 'note', remotePending: true })],
+    });
+  const { threads } = reconcile([pending()], [], [pending()], { viewer: 'me' });
+  assert.equal(threads[0].comments[0].remotePending, true);
+});
+
+test('your local edit of an unsubmitted comment keeps both the edit and the flag', () => {
+  const local = [
+    imported('T1', 'note', {
+      comments: [comment({ id: 'T1c', remoteId: 'T1c', body: 'my edit', remoteBody: 'note', remotePending: true })],
+    }),
+  ];
+  const fresh = [
+    imported('T1', 'note', {
+      comments: [comment({ id: 'T1c', remoteId: 'T1c', body: 'note', remoteBody: 'note', remotePending: true })],
+    }),
+  ];
+  const { threads } = reconcile(local, [], fresh, { viewer: 'me' });
+  assert.equal(threads[0].comments[0].body, 'my edit');
+  assert.equal(threads[0].comments[0].remotePending, true);
+});

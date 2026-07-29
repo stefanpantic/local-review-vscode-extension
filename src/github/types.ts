@@ -13,6 +13,9 @@ export interface GhReviewComment {
   updatedAt: string; // ISO
   url: string; // permalink to the comment
   diffHunk: string; // the unified-diff hunk the comment was made against (as GitHub captured it)
+  // Sits in a review its author has not submitted yet, so only they can see it. GitHub returns these
+  // alongside submitted comments to their own author, and they are indistinguishable without this flag.
+  isPending: boolean;
 }
 
 /** A GitHub pull request review thread: its anchor, resolution state, and ordered comments. */

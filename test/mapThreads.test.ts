@@ -29,6 +29,7 @@ function comment(over: Partial<GhReviewComment> = {}): GhReviewComment {
     updatedAt: 't0',
     url: 'https://gh/c/1001',
     diffHunk: '@@ -1,3 +1,3 @@\n A\n B\n C',
+    isPending: false,
     ...over,
   };
 }
@@ -120,6 +121,16 @@ test('an outdated thread (line=null) keys on its captured hunk content and re-an
   assert.equal(t.anchor.line, 'GONE'); // not the unrelated line now at position 2
   assert.equal(t.anchor.originalDiffHunk, '@@ -1,1 +1,2 @@\n A\n+GONE');
   assert.equal(reanchorOne(t, ABC()).status, 'outdated');
+});
+
+test('a comment in an unsubmitted review is flagged; a submitted one carries no flag', () => {
+  const root = comment({ id: 'N1', databaseId: 10, isPending: false });
+  const draft = comment({ id: 'N2', databaseId: 11, isPending: true });
+  const [t] = mapThreads([ghThread({}, [root, draft])], ABC());
+  assert.equal(t.comments[0].remotePending, undefined); // absent, not false — it is an exception flag
+  assert.equal(t.comments[1].remotePending, true);
+  // It is a real comment on the remote either way, so the remote link is unaffected.
+  assert.equal(t.comments[1].remoteId, '11');
 });
 
 test('threads with no anchorable position or no comments are dropped', () => {

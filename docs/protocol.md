@@ -196,6 +196,10 @@ interface Comment {
   remoteId?: string; // opaque provider comment id (edit/delete target)
   remoteUrl?: string; // permalink to the comment on the remote
   remoteBody?: string; // [it.12] body as imported — a baseline; `body !== remoteBody` is a pending edit to submit
+  // On the remote, but inside a review its author never submitted, so nobody else can see it yet. Refreshed
+  // from every fetch, so submitting that review upstream clears it on the next sync. Blocks Submit, because
+  // a provider allows only one unsubmitted review per person per request.
+  remotePending?: boolean;
   localOnly?: boolean; // [it.12] was yours on the remote, deleted there; kept local-only (repost on Submit or discard)
   // [it.13] your pending edit and an upstream edit both moved off the same baseline. Your text is kept and
   // flagged rather than silently overwriting theirs. PERSISTED: each reconcile advances the baseline, so the
