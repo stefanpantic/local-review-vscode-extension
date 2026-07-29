@@ -2,8 +2,8 @@
 // Handlers return readable text (or throw Error on failure); the server wraps both into MCP content.
 import { z } from 'zod';
 import type { ReviewDiff, Side } from '../model/ReviewDiff';
-import type { CommentThread, Review } from '../model/Comment';
-import { AGENT_AUTHOR } from '../model/Comment';
+import type { Comment, CommentThread, Review } from '../model/Comment';
+import { AGENT_AUTHOR, canEditComment } from '../model/Comment';
 
 // Re-exported for existing importers; the definition now lives in the shared model.
 export { AGENT_AUTHOR };
@@ -27,6 +27,14 @@ export interface McpReviewApi {
   }): Promise<CommentThread>;
   reply(a: { threadId: string; body: string; author: string }): Promise<CommentThread>;
   resolve(a: { threadId: string; resolved: boolean }): Promise<CommentThread>;
+  /** `suggestion`: a string sets it, `null` clears it, omitting it leaves the existing one. */
+  editComment(a: {
+    threadId: string;
+    commentId: string;
+    body: string;
+    suggestion?: string | null;
+  }): Promise<CommentThread>;
+  deleteComment(a: { threadId: string; commentId: string }): Promise<{ threadId: string; threadDeleted: boolean }>;
 }
 
 // --- readable formatting (text, not JSON — compact and easy for the agent + human to read) ---
@@ -48,9 +56,10 @@ function indent(text: string, spaces: number): string {
 
 function formatThread(t: CommentThread): string {
   const head = `[${t.id}] ${threadLoc(t)} · ${t.status ?? 'anchored'} · ${t.resolved ? 'resolved' : 'unresolved'}`;
+  // Each comment leads with its own id, which is what edit_comment / delete_comment address.
   const body = t.comments.map((c) => {
     const suggestion = c.suggestion ? `\n    suggestion:\n${indent(c.suggestion.replacement, 6)}` : '';
-    return `  ${c.author}: ${c.body}${suggestion}`;
+    return `  [${c.id}] ${c.author}: ${c.body}${suggestion}`;
   });
   return [head, ...body].join('\n');
 }
@@ -110,6 +119,32 @@ function requireDiff(api: McpReviewApi): ReviewDiff {
   return diff;
 }
 
+/**
+ * Resolve a comment in the active review and confirm the agent may change it, the single gate every tool that
+ * alters existing content goes through. The rule is `canEditComment` with the agent as the viewer, which is
+ * what the human UI applies to itself: on a pull request only agent-authored comments qualify, so an imported
+ * comment from someone else is never touchable, and on a local review everything does, because the only
+ * authors there are the human and the agent.
+ *
+ * The refusal names the author, so a caller learns why rather than retrying the same call.
+ */
+function requireEditable(api: McpReviewApi, threadId: string, commentId: string): Comment {
+  const review = api.getReview();
+  const thread = review?.threads.find((t) => t.id === threadId);
+  const comment = thread?.comments.find((c) => c.id === commentId);
+  if (!comment) {
+    throw new Error(
+      `Comment ${commentId} was not found in thread ${threadId} of the active review. Call get_active_review for current thread and comment ids.`,
+    );
+  }
+  if (!canEditComment(comment, AGENT_AUTHOR, review?.kind === 'remote')) {
+    throw new Error(
+      `Comment ${commentId} was written by ${comment.author}, so it is not yours to change. On a pull request you can only edit or delete comments authored by ${AGENT_AUTHOR}.`,
+    );
+  }
+  return comment;
+}
+
 // --- tool definitions ---
 
 export interface ToolDef {
@@ -136,6 +171,18 @@ export const TOOLS: ToolDef[] = [
     handler: async (api, args) => {
       const review = api.getReview(args.reviewId as string | undefined);
       if (!review) throw new Error('Review not found.');
+      return formatReview(review);
+    },
+  },
+  {
+    name: 'get_active_review',
+    title: 'Get the active review',
+    description:
+      'Get the review currently being worked on, with each thread and comment id, position, status, and text. Takes no arguments. Use the ids it returns to reply, resolve, edit, or delete.',
+    inputShape: {},
+    handler: async (api) => {
+      const review = api.getReview();
+      if (!review) return 'No active review yet. Posting a comment starts one.';
       return formatReview(review);
     },
   },
@@ -204,6 +251,46 @@ export const TOOLS: ToolDef[] = [
     handler: async (api, args) => {
       const thread = await api.resolve({ threadId: args.threadId as string, resolved: args.resolved as boolean });
       return `Thread ${thread.id} ${args.resolved ? 'resolved' : 'reopened'}.`;
+    },
+  },
+  {
+    name: 'edit_comment',
+    title: 'Edit a comment',
+    description:
+      'Rewrite one of your own comments (get_active_review lists comment ids). On a pull request only comments you authored can be edited, never anyone else\'s. `suggestion` replaces the proposed code, `null` removes the suggestion, and omitting it leaves the current one alone; a suggestion only applies to a thread on the "new" side.',
+    inputShape: {
+      threadId: z.string(),
+      commentId: z.string(),
+      body: z.string(),
+      suggestion: z.string().nullable().optional(),
+    },
+    handler: async (api, args) => {
+      const threadId = args.threadId as string;
+      const commentId = args.commentId as string;
+      requireEditable(api, threadId, commentId);
+      const thread = await api.editComment({
+        threadId,
+        commentId,
+        body: args.body as string,
+        suggestion: args.suggestion as string | null | undefined,
+      });
+      return `Edited comment ${commentId} in thread ${thread.id}.`;
+    },
+  },
+  {
+    name: 'delete_comment',
+    title: 'Delete a comment',
+    description:
+      "Remove one of your own comments (get_active_review lists comment ids). On a pull request only comments you authored can be deleted, never anyone else's. Deleting a thread's first comment removes the whole thread. A comment already posted on a pull request is deleted there when the review is submitted.",
+    inputShape: { threadId: z.string(), commentId: z.string() },
+    handler: async (api, args) => {
+      const threadId = args.threadId as string;
+      const commentId = args.commentId as string;
+      requireEditable(api, threadId, commentId);
+      const { threadDeleted } = await api.deleteComment({ threadId, commentId });
+      return threadDeleted
+        ? `Deleted comment ${commentId}; thread ${threadId} is gone with it.`
+        : `Deleted comment ${commentId} from thread ${threadId}.`;
     },
   },
 ];

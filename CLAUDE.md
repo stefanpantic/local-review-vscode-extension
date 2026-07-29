@@ -27,8 +27,9 @@ ReviewMate can run a local MCP server so you can take part in a review. Set it u
 Once connected, these tools are available:
 
 - `get_diff` — the diff under review as annotated patch text: each line is `<sign> <lineNo> | <code>` (`+` added, `-` removed, space context). To comment, use the shown line number with `side: "old"` for `-` lines and `side: "new"` for `+`/context lines. **Only lines shown here are commentable** (changed lines and their context); others are rejected.
-- `get_review` / `list_reviews` — read the current (or a named) review's threads, positions, status, and suggestions.
+- `get_active_review` — the review you are participating in, with every thread and comment id. `get_review` / `list_reviews` read a named review or list them all.
 - `post_comment` — add a comment on a line or range (`side` "new" for added/context lines, "old" for removed), optionally with a `suggestion`.
 - `reply` / `resolve` — respond in a thread or resolve/reopen it.
+- `edit_comment` / `delete_comment` — revise or withdraw a comment, addressed by its thread id and comment id (both shown by `get_active_review`). On a pull request only your own comments qualify, never a third party's; on a local review any comment does. Deleting a thread's first comment removes the thread.
 
 Comments you post are attributed to **"AI Agent"** and appear in the review UI exactly like the human's, anchored the same way. You never apply suggestions to files through ReviewMate — action them by editing files yourself.

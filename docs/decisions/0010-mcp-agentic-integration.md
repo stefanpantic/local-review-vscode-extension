@@ -17,6 +17,28 @@ Options considered: (a) a shared on-disk review store both sides read/write; (b)
 - **Local-only + opt-in.** Bound to `127.0.0.1`, guarded by a bearer token, **off by default**. Autostart on launch is opt-in (`localReview.mcp.autoStart`), and Start/Stop commands control it on demand. A "Set up MCP" command prompts for the port and autostart, persists the port so the URL survives restarts, and writes client-agnostic connect details (URL + token, with connect commands for Claude Code and other MCP clients as comments) to `.local-review/mcp.json` (gitignored); the notification points there. It is a standard MCP server, so it is not tool-specific. It never binds a non-loopback address, so "nothing leaves the box" holds.
 - **Never applies code.** Comments and suggestions are captured/exported only; the agent actions them by editing files itself.
 
+## Addendum (iteration 14): the tool surface includes edit and delete
+
+The iteration 9 surface above was add-only. Iteration 13 audited it for a permission check, found nothing to
+check, and pinned it shut. Iteration 14 opens it: `edit_comment` and `delete_comment` join the list, plus a
+zero-argument `get_active_review`.
+
+An agent that can only add cannot correct itself. It has to reply to its own wrong comment and leave a human
+to work out which of the two is current, and it can never withdraw one at all. Revising and retracting are
+part of reviewing, so the surface was the problem, not the missing check.
+
+The permission rule is `canEditComment` unchanged, with the agent as the viewer, which is the same rule the
+human UI applies to itself. On a remote review that resolves to agent-authored comments only, so an imported
+comment from a third party is never touchable. On a local review it resolves to every comment, because the
+only authors there are the human and the agent. The check lives in `src/mcp/tools.ts`, where it is pure and
+unit-tested, and the controller seam forwards to the same `editComment` / `deleteComment` the panel calls, so
+an agent's delete of a posted comment stages the remote delete and its edit reads as pending exactly as the
+human's would. `resolve` stays open to any thread: resolving someone else's thread is normal review behavior
+and GitHub allows it for anyone with access.
+
+Nothing about egress changes. The server stays loopback, token-guarded, opt-in, with no GitHub capability of
+its own.
+
 ## Consequences
 
 - No second source of truth and no IPC layer — the agent path and the UI path converge on one controller, so agent comments drift, persist, and render identically to human ones.

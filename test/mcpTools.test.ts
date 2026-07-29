@@ -50,6 +50,10 @@ class FakeApi implements McpReviewApi {
   posted: Parameters<McpReviewApi['addComment']>[0][] = [];
   replied: Parameters<McpReviewApi['reply']>[0][] = [];
   resolvedCalls: Parameters<McpReviewApi['resolve']>[0][] = [];
+  edited: Parameters<McpReviewApi['editComment']>[0][] = [];
+  deleted: Parameters<McpReviewApi['deleteComment']>[0][] = [];
+  /** Whether the next delete takes its thread with it (the root-comment case). */
+  deleteRemovesThread = false;
   constructor(
     private diff: ReviewDiff | undefined,
     private reviews: Review[] = [],
@@ -82,6 +86,35 @@ class FakeApi implements McpReviewApi {
     this.resolvedCalls.push(a);
     return makeThread('a.ts', 'new', 2, '', 'tester');
   }
+  async editComment(a: Parameters<McpReviewApi['editComment']>[0]) {
+    this.edited.push(a);
+    return makeThread('a.ts', 'new', 2, a.body, AGENT_AUTHOR);
+  }
+  async deleteComment(a: Parameters<McpReviewApi['deleteComment']>[0]) {
+    this.deleted.push(a);
+    return { threadId: a.threadId, threadDeleted: this.deleteRemovesThread };
+  }
+}
+
+/** A current review holding one thread, so the edit/delete guard has something to resolve ids against. */
+function reviewWith(thread: CommentThread, kind: 'local' | 'remote' = 'local'): Review {
+  const base = {
+    id: 'r1',
+    name: 'Review 1',
+    repoRoot: '/r',
+    branch: 'main',
+    createdAt: '',
+    updatedAt: '',
+    headSha: null,
+    threads: [thread],
+  };
+  return kind === 'local'
+    ? { ...base, kind: 'local' }
+    : {
+        ...base,
+        kind: 'remote',
+        remote: { provider: 'github', id: '1', owner: 'o', repo: 'r', baseSha: 'b', headSha: 'h' },
+      };
 }
 
 const tool = (name: string) => TOOLS.find((t) => t.name === name)!;
@@ -137,20 +170,71 @@ test('reply and resolve go through with the agent author / flag', async () => {
 });
 
 test('get_review returns the current review, or errors when none', async () => {
-  const review: Review = {
-    id: 'r1',
-    name: 'Review 1',
-    repoRoot: '/r',
-    branch: 'main',
-    createdAt: '',
-    updatedAt: '',
-    headSha: null,
-    kind: 'local',
-    threads: [makeThread('a.ts', 'new', 2, 'hi', 'tester')],
-  };
+  const review = reviewWith(makeThread('a.ts', 'new', 2, 'hi', 'tester'));
   const out = await tool('get_review').handler(new FakeApi(DIFF, [review]), {});
   assert.match(out, /Review "Review 1" \(main\)/);
   assert.match(out, /\[thread1\] a\.ts:2 \(new\)/);
   assert.match(out, /tester: hi/);
   await assert.rejects(() => tool('get_review').handler(new FakeApi(DIFF, []), {}), /Review not found/);
+});
+
+test('a formatted thread carries every comment id, so a comment can be addressed', async () => {
+  const review = reviewWith(makeThread('a.ts', 'new', 2, 'hi', 'tester'));
+  const out = await tool('get_review').handler(new FakeApi(DIFF, [review]), {});
+  assert.match(out, /\[c1\] tester: hi/);
+});
+
+test('get_active_review takes no id, and having no review yet is not an error', async () => {
+  const review = reviewWith(makeThread('a.ts', 'new', 2, 'hi', 'tester'));
+  const out = await tool('get_active_review').handler(new FakeApi(DIFF, [review]), {});
+  assert.match(out, /Review "Review 1" \(main\)/);
+  assert.match(out, /\[c1\] tester: hi/);
+  // No review is a normal state for a zero-argument read, so it reports rather than throws.
+  const empty = await tool('get_active_review').handler(new FakeApi(DIFF, []), {});
+  assert.match(empty, /No active review yet/);
+});
+
+test('edit_comment passes suggestion through as set, cleared, or left alone', async () => {
+  const agentThread = () => makeThread('a.ts', 'new', 2, 'nit', AGENT_AUTHOR);
+  const args = { threadId: 'thread1', commentId: 'c1', body: 'reworded' };
+
+  const set = new FakeApi(DIFF, [reviewWith(agentThread())]);
+  const res = await tool('edit_comment').handler(set, { ...args, suggestion: 'const x = 1;' });
+  assert.equal(set.edited[0].body, 'reworded');
+  assert.equal(set.edited[0].suggestion, 'const x = 1;');
+  assert.match(res, /Edited comment c1 in thread thread1/);
+
+  const cleared = new FakeApi(DIFF, [reviewWith(agentThread())]);
+  await tool('edit_comment').handler(cleared, { ...args, suggestion: null });
+  assert.equal(cleared.edited[0].suggestion, null); // explicit clear
+
+  const left = new FakeApi(DIFF, [reviewWith(agentThread())]);
+  await tool('edit_comment').handler(left, args);
+  assert.equal(left.edited[0].suggestion, undefined); // omitted leaves the existing one
+});
+
+test('delete_comment says whether the thread went with the comment', async () => {
+  const reply = new FakeApi(DIFF, [reviewWith(makeThread('a.ts', 'new', 2, 'nit', AGENT_AUTHOR))]);
+  const kept = await tool('delete_comment').handler(reply, { threadId: 'thread1', commentId: 'c1' });
+  assert.deepEqual(reply.deleted[0], { threadId: 'thread1', commentId: 'c1' });
+  assert.match(kept, /Deleted comment c1 from thread thread1/);
+
+  const root = new FakeApi(DIFF, [reviewWith(makeThread('a.ts', 'new', 2, 'nit', AGENT_AUTHOR))]);
+  root.deleteRemovesThread = true;
+  const gone = await tool('delete_comment').handler(root, { threadId: 'thread1', commentId: 'c1' });
+  assert.match(gone, /thread thread1 is gone with it/);
+});
+
+test('edit_comment and delete_comment reject ids that are not in the active review', async () => {
+  const api = new FakeApi(DIFF, [reviewWith(makeThread('a.ts', 'new', 2, 'nit', AGENT_AUTHOR))]);
+  await assert.rejects(
+    () => tool('edit_comment').handler(api, { threadId: 'nope', commentId: 'c1', body: 'x' }),
+    /was not found in thread nope/,
+  );
+  await assert.rejects(
+    () => tool('delete_comment').handler(api, { threadId: 'thread1', commentId: 'nope' }),
+    /Comment nope was not found/,
+  );
+  assert.equal(api.edited.length, 0);
+  assert.equal(api.deleted.length, 0);
 });
