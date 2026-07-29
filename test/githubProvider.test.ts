@@ -141,6 +141,7 @@ test('getThreads fetches raw threads and returns them mapped + anchored against 
         updatedAt: 't',
         url: 'cu',
         diffHunk: '@@ -1,3 +1,3 @@\n A\n B\n C',
+        isPending: false,
       },
     ],
   };

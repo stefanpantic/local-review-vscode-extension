@@ -23,7 +23,7 @@ import { parseRemoteUrl, type GithubProviderId } from './github/remote';
 import { getViewerLogin } from './github/auth';
 import { resolveProvider } from './review/resolveProvider';
 import { pendingChangeSet, type PendingSummary } from './review/pending';
-import { buildSubmitPlan, type SubmitCounts, type SubmitEvent } from './review/submit';
+import { buildSubmitPlan, unsubmittedRemoteReview, type SubmitCounts, type SubmitEvent } from './review/submit';
 import { reconcile, type OrphanReport } from './review/reconcile';
 import type { McpReviewApi } from './mcp/tools';
 import type { Events, EventType, PrDisplay, ReviewStatePayload, SyncState } from './protocol/messages';
@@ -700,6 +700,14 @@ export class ReviewController {
       if (counts.total === 0) {
         this.afterThreadChange();
         return { counts, orphans };
+      }
+
+      // Checked against the state the re-fetch above just brought in, so submitting that review on GitHub
+      // in the meantime clears this rather than blocking on a stale read.
+      if (unsubmittedRemoteReview(review, this.authorIdentity())) {
+        throw new Error(
+          'You have a review on this pull request that you never submitted on GitHub. Submit or discard it there, then Sync and retry.',
+        );
       }
 
       try {

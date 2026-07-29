@@ -869,6 +869,11 @@ body {
   color: var(--vscode-charts-blue, #3794ff);
   border-color: currentColor;
 }
+/* On GitHub but unsubmitted: near the local-draft blue, distinct enough that the two never read as one state. */
+.lr-badge-draft-remote {
+  color: var(--vscode-charts-purple, #b180d7);
+  border-color: currentColor;
+}
 .lr-badge-readonly {
   color: var(--vscode-descriptionForeground);
   border-color: currentColor;

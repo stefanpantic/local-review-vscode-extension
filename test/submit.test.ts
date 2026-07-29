@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSubmitPlan } from '../src/review/submit';
+import { buildSubmitPlan, unsubmittedRemoteReview } from '../src/review/submit';
 import { AGENT_AUTHOR } from '../src/model/Comment';
 import type { CommentThread, Comment, LocalReview, RemoteReview } from '../src/model/Comment';
 
@@ -166,4 +166,45 @@ test('a draft thread you replied to before submitting carries its follow-up repl
   assert.equal(input.newThreads[0].root.body, 'first');
   assert.deepEqual(input.newThreads[0].replies, ['second']);
   assert.equal(input.replies.length, 0); // it's a follow-up on a new thread, not an imported-thread reply
+});
+
+test('an unsubmitted review of yours on the remote is detected, whoever of you authored it', () => {
+  const mine = remoteReview([
+    thread({ remoteThreadId: 'T1', comments: [comment({ remoteId: '1', author: 'me', remotePending: true })] }),
+  ]);
+  const agents = remoteReview([
+    thread({
+      remoteThreadId: 'T1',
+      comments: [comment({ remoteId: '1', author: AGENT_AUTHOR, remotePending: true })],
+    }),
+  ]);
+  assert.equal(unsubmittedRemoteReview(mine, 'me'), true);
+  assert.equal(unsubmittedRemoteReview(agents, 'me'), true);
+});
+
+test('nothing unsubmitted, or unsubmitted content that is not yours, does not block a submit', () => {
+  const clean = remoteReview([thread({ remoteThreadId: 'T1', comments: [comment({ remoteId: '1' })] })]);
+  const theirs = remoteReview([
+    thread({
+      remoteThreadId: 'T1',
+      comments: [comment({ remoteId: '1', author: 'someone-else', remotePending: true })],
+    }),
+  ]);
+  assert.equal(unsubmittedRemoteReview(clean, 'me'), false);
+  assert.equal(unsubmittedRemoteReview(theirs, 'me'), false);
+});
+
+test('a local review can never hold an unsubmitted remote review', () => {
+  const local: LocalReview = {
+    kind: 'local',
+    id: 'l',
+    name: 'Local',
+    repoRoot: '/r',
+    branch: 'main',
+    createdAt: '',
+    updatedAt: '',
+    headSha: 'h',
+    threads: [thread({ comments: [comment({ remotePending: true })] })],
+  };
+  assert.equal(unsubmittedRemoteReview(local, 'me'), false);
 });

@@ -27,6 +27,9 @@ export interface Comment {
   remoteId?: string; // the comment id on the remote (edit/delete target) — opaque string
   remoteUrl?: string; // link to the comment on the remote
   remoteBody?: string; // the body as imported; a difference from `body` is a pending edit to submit
+  // On the remote, but inside a review its author has not submitted, so nobody else can see it yet.
+  // Refreshed from every fetch, so submitting that review upstream clears it on the next sync.
+  remotePending?: boolean;
   // Was posted on the remote by you, then deleted there: its remote link is dropped so it can repost, and
   // this marks it "local only" so the UI can flag it and you can repost on Submit or delete to discard.
   localOnly?: boolean;

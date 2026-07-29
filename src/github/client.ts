@@ -70,7 +70,7 @@ query ($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
         nodes {
           id isResolved isOutdated path diffSide line startLine originalLine originalStartLine
           comments(first: 100) {
-            nodes { id databaseId author { login } body createdAt updatedAt url diffHunk }
+            nodes { id databaseId author { login } body createdAt updatedAt url diffHunk state }
           }
         }
       }
@@ -103,6 +103,7 @@ interface ThreadsResponse {
               updatedAt: string;
               url: string;
               diffHunk: string;
+              state: 'PENDING' | 'SUBMITTED';
             }>;
           };
         }>;
@@ -220,6 +221,7 @@ class OctokitClient implements GithubWriteClient {
             updatedAt: c.updatedAt,
             url: c.url,
             diffHunk: c.diffHunk,
+            isPending: c.state === 'PENDING',
           })),
         });
       }
