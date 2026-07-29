@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.3.1...agentic-review-v0.4.0) (2026-07-29)
+
+
+### Features
+
+* let an agent edit and delete its own review comments over MCP ([#50](https://github.com/stefanpantic/local-review-vscode-extension/issues/50)) ([813fd00](https://github.com/stefanpantic/local-review-vscode-extension/commit/813fd00c7b8210550c7fc93fb40c74a0a551b4ea))
+
+
+### Bug Fixes
+
+* flag comments that sit in an unsubmitted GitHub review ([#49](https://github.com/stefanpantic/local-review-vscode-extension/issues/49)) ([165027a](https://github.com/stefanpantic/local-review-vscode-extension/commit/165027a79ee7f73d724120485ac3767cbaf086e9))
+
 ## [0.3.1](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.3.0...agentic-review-v0.3.1) (2026-07-28)
 
 
