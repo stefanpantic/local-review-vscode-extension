@@ -23,6 +23,58 @@ function lineLabel(t: CommentThread): string {
   return end > start ? `Lines ${start}–${end}` : `Line ${start}`;
 }
 
+/**
+ * The single badge saying where a thread's comments actually live, most specific first. These are competing
+ * claims about the same thing, so one wins instead of stacking: "deleted on GitHub" already says the comment
+ * is not there, and a thread can hold both a never-sent draft and a comment GitHub is holding back.
+ */
+function RemoteBadge({
+  deletedUpstream,
+  notOnRemote,
+  draftOnRemote,
+}: {
+  deletedUpstream: number; // yours, posted then deleted on GitHub, kept here
+  notOnRemote: boolean; // a local draft thread, never sent
+  draftOnRemote: number; // on GitHub, inside a review you have not submitted there
+}) {
+  if (deletedUpstream > 0) {
+    return (
+      <span
+        className="lr-badge lr-badge-localonly"
+        title={
+          deletedUpstream === 1
+            ? 'Your comment was deleted on GitHub. It is kept here: Submit reposts it, or delete it to discard.'
+            : `${deletedUpstream} of your comments were deleted on GitHub. They are kept here: Submit reposts them, or delete them to discard.`
+        }
+      >
+        deleted on GitHub
+      </span>
+    );
+  }
+  if (notOnRemote) {
+    return (
+      <span className="lr-badge lr-badge-pending" title="A local draft, not posted to GitHub">
+        not on GitHub
+      </span>
+    );
+  }
+  if (draftOnRemote > 0) {
+    return (
+      <span
+        className="lr-badge lr-badge-draft-remote"
+        title={
+          draftOnRemote === 1
+            ? 'Part of a review you have not submitted on GitHub. Only you can see it until you submit that review there.'
+            : `${draftOnRemote} comments here are part of a review you have not submitted on GitHub. Only you can see them until you submit that review there.`
+        }
+      >
+        draft on GitHub
+      </span>
+    );
+  }
+  return null;
+}
+
 /** A proposed change, rendered as a syntax-highlighted before→after diff (original removed, replacement added). */
 function Suggestion({
   original,
@@ -80,10 +132,12 @@ export function CommentThreadView({
   useEffect(() => setExpanded(!thread.resolved), [thread.resolved]);
 
   const canSuggest = thread.anchor.side === 'new';
-  // Comments of yours that were deleted on GitHub and kept here. A thread-level fact, so it belongs in the
-  // header badges rather than beside an author name: it stays visible when the thread is collapsed, and it
-  // keeps the comment rows to their content.
+  // Where this thread's comments stand on the remote. Thread-level facts, so they belong in the header badges
+  // rather than beside an author name: they stay visible when the thread is collapsed, and they keep the
+  // comment rows to their content.
   const deletedUpstream = thread.comments.filter((c) => c.localOnly).length;
+  // GitHub holds these inside a review you never submitted there, so nobody else can see them yet.
+  const draftOnRemote = thread.comments.filter((c) => c.remotePending).length;
 
   const head = (
     <div
@@ -105,25 +159,7 @@ export function CommentThreadView({
         {thread.status === 'moved' && <span className="lr-badge lr-badge-moved">moved</span>}
         {thread.status === 'outdated' && <span className="lr-badge lr-badge-outdated">outdated</span>}
         {thread.resolved && <span className="lr-badge lr-badge-resolved">resolved</span>}
-        {/* "deleted on GitHub" already says it is not there, so the two never stack: the specific one wins. */}
-        {deletedUpstream > 0 ? (
-          <span
-            className="lr-badge lr-badge-localonly"
-            title={
-              deletedUpstream === 1
-                ? 'Your comment was deleted on GitHub. It is kept here: Submit reposts it, or delete it to discard.'
-                : `${deletedUpstream} of your comments were deleted on GitHub. They are kept here: Submit reposts them, or delete them to discard.`
-            }
-          >
-            deleted on GitHub
-          </span>
-        ) : (
-          pendingOnRemote && (
-            <span className="lr-badge lr-badge-pending" title="A local draft, not posted to GitHub">
-              not on GitHub
-            </span>
-          )
-        )}
+        <RemoteBadge deletedUpstream={deletedUpstream} notOnRemote={pendingOnRemote} draftOnRemote={draftOnRemote} />
       </span>
     </div>
   );

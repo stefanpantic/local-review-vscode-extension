@@ -84,6 +84,7 @@ function mapComment(
   };
   if (c.databaseId != null) comment.remoteId = String(c.databaseId);
   if (c.url) comment.remoteUrl = c.url;
+  if (c.isPending) comment.remotePending = true;
   comment.remoteBody = comment.body; // baseline: a later change to `body` is a pending edit
   if (parsed) {
     const original = rangeText(diff, path, side, firstLine, lastLine);

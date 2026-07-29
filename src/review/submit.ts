@@ -98,6 +98,20 @@ function positionOf(t: CommentThread): { line: number; startLine?: number } {
 }
 
 /**
+ * Whether the remote already holds comments of yours inside a review you never submitted there. GitHub allows
+ * one unsubmitted review per person per pull request, so posting a batch while one is open is refused by the
+ * API; the caller checks this first to say something useful instead of surfacing that rejection.
+ *
+ * Anything unsubmitted we can see must be ours, since a provider does not expose other people's drafts, but
+ * keying on the author costs nothing and keeps the claim exact.
+ */
+export function unsubmittedRemoteReview(review: Review, viewer?: string): boolean {
+  if (review.kind !== 'remote') return false;
+  const mine = (author: string): boolean => author === viewer || author === AGENT_AUTHOR;
+  return review.threads.some((t) => t.comments.some((c) => c.remotePending === true && mine(c.author)));
+}
+
+/**
  * Build the submit batch from a review's pending change set (the diff from the imported baseline):
  * - a local-draft thread (no remote thread id) becomes a new thread: its root is a positioned top-level
  *   comment, and any follow-up comments you added to it locally are its replies (posted after the root);
