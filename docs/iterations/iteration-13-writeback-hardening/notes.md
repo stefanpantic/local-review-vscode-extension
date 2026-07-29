@@ -4,6 +4,11 @@ Deviations from the refinement and calls made while building. Everything else la
 
 ## #16 is a reduction: there is no MCP edit or delete surface to restrict
 
+> **Superseded by iteration 14.** The reduction below was right about the state of the code and wrong about
+> the end state: an agent that can only add cannot correct itself. Iteration 14 adds `edit_comment` and
+> `delete_comment` and enforces the `canEditComment` rule this section describes. The reasoning is kept as the
+> record of what was true at the time.
+
 The item reads "audit the MCP write tools so an agent can only edit/delete comments it (or the human)
 authored". The audit found there is nothing to enforce. `src/mcp/tools.ts` exposes `list_reviews`,
 `get_review`, `get_diff`, `post_comment`, `reply`, and `resolve`, and the `McpReviewApi` seam the controller

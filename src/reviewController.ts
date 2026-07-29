@@ -1030,9 +1030,11 @@ export class ReviewController {
   /**
    * The narrow surface the in-process MCP server calls — just another client of this controller.
    *
-   * Deliberately add-only: an agent can create a comment, reply, and resolve. There is no edit or delete
-   * here, so it cannot alter or remove anyone's content, least of all a third party's. Anything added later
-   * must enforce the same rule the human UI does (`canEditComment`: your own and agent-authored only).
+   * An agent can create, reply, resolve, edit, and delete. Editing and deleting are limited to content it may
+   * change by the same `canEditComment` rule the human UI applies, enforced in `src/mcp/tools.ts` where the
+   * check is pure and testable: on a pull request that is agent-authored comments only, so a third party's
+   * imported comment is never touchable. The methods below are the same ones the panel calls, so an agent's
+   * delete of a posted comment stages the remote delete and its edit reads as pending, exactly as yours would.
    */
   mcpApi(): McpReviewApi {
     return {
@@ -1063,6 +1065,8 @@ export class ReviewController {
       addComment: (a) => this.addComment(a),
       reply: (a) => this.replyComment(a.threadId, a.body, undefined, a.author),
       resolve: (a) => this.resolveThread(a.threadId, a.resolved),
+      editComment: (a) => this.editComment(a.threadId, a.commentId, a.body, a.suggestion),
+      deleteComment: (a) => this.deleteComment(a.threadId, a.commentId),
     };
   }
 }

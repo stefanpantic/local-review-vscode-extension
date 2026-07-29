@@ -128,7 +128,8 @@ rendering scale-out. Grouped below; item numbers match the ideation list for tra
 - [x] Repeated poll failures surface a "sync paused" state with manual retry (#15).
 - [x] The MCP write tools reject editing/deleting comments the caller did not author (#16). _(Audit found no
       edit or delete surface exists; kept that way and pinned by `test/mcpPermissions.test.ts`. See
-      `notes.md`.)_
+      `notes.md`. **Superseded by iteration 14**, which adds `edit_comment` / `delete_comment` and enforces
+      the rule this item specified.)_
 - [x] The submit confirmation makes agent-authored items visible before posting (#17).
 - [ ] Gates green (`format:check`, `lint`, `typecheck`, `test`, `build`, `package`); docs updated where
       behavior changed (protocol/README; ADR addendum if the sync/egress contract shifts).
