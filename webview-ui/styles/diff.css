@@ -935,7 +935,10 @@ body {
   border-radius: 4px;
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 12px;
-  white-space: pre;
+  /* Soft-wrap long lines so the end of one stays visible while typing. Wrapping adds no characters, so the
+     submitted text is unaffected. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .lr-suggest-input:focus {
   outline: none;
@@ -955,14 +958,18 @@ body {
   color: var(--vscode-descriptionForeground);
   border-bottom: 1px solid var(--lr-border);
 }
+/* Always wrapped, never scrolled: the card is fixed-width, and a line's tint only covers its own box, so
+   overflowing text would render untinted. Wrapping keeps each box as tall as its text and the tint with it. */
 .lr-suggestion-diff {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 12px;
-  white-space: pre;
-  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
+/* Hanging indent, so a wrapped row reads as a continuation rather than as another line of the suggestion. */
 .lr-sugg-line {
-  padding: 0 8px;
+  padding: 0 8px 0 24px;
+  text-indent: -16px;
 }
 .lr-sugg-del {
   background: var(--lr-del-bg);
