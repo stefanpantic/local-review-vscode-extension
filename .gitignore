@@ -9,3 +9,6 @@ coverage/
 
 # Claude Code: share skills, keep per-user settings local
 .claude/settings.local.json
+
+# VSCode local settings
+.vscode/settings.local.json
