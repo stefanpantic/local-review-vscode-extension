@@ -10,5 +10,5 @@ coverage/
 # Claude Code: share skills, keep per-user settings local
 .claude/settings.local.json
 
-# VSCode local settings
-.vscode/settings.local.json
+# VSCode: the shared launch/task configs stay tracked, everything else is per-user
+.vscode/
