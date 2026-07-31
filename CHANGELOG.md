@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.4.1...agentic-review-v0.4.2) (2026-07-31)
+
+
+### Bug Fixes
+
+* stop a build from reloading the review ([#56](https://github.com/stefanpantic/local-review-vscode-extension/issues/56)) ([70bd2ed](https://github.com/stefanpantic/local-review-vscode-extension/commit/70bd2ed71a7234d274edcd09ff4662635b962e88))
+
 ## [0.4.1](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.4.0...agentic-review-v0.4.1) (2026-07-30)
 
 
