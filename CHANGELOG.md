@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.4.0...agentic-review-v0.4.1) (2026-07-30)
+
+
+### Bug Fixes
+
+* wrap suggestion code in comments so the diff tint covers long lines ([#53](https://github.com/stefanpantic/local-review-vscode-extension/issues/53)) ([b32a5b7](https://github.com/stefanpantic/local-review-vscode-extension/commit/b32a5b748c45ead263fca96dfc25273e483c8ccc))
+
 ## [0.4.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.3.1...agentic-review-v0.4.0) (2026-07-29)
 
 
