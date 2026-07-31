@@ -31,6 +31,13 @@ webview main thread cause it:
 - **Lazy expand-context tokens.** `newLineToks` used to tokenize every file's whole new text up front to feed
   the "expand context" feature, a full extra Shiki pass that first paint never uses. It now tokenizes a file
   only once that file has context expanded. Removes a redundant whole-diff pass. (`DiffView.tsx`.)
+- **An unchanged diff no longer rebuilds anything.** A refresh that found no change used to redo both passes
+  in full: the diff arrived with a fresh `generatedAt` and as a freshly deserialized object, so the loading
+  gate flashed and every `[diff]`-keyed memo and effect re-ran. A `ReviewDiff` now carries a `contentId`
+  fingerprint of its content (not its timestamp), and `main.tsx` carries the previous diff object into a
+  payload whose fingerprint matches, so identity holds and nothing downstream rebuilds. This removed the
+  refresh-triggered rebuilds, and with them the lost scroll position; the first build of a large diff is
+  untouched and still needs the work below. (`src/git/diffId.ts`, `main.tsx`.)
 
 These stay. They are the right UX layer regardless of the structural fix below.
 

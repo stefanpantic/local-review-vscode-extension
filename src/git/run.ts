@@ -19,3 +19,18 @@ export function gitAllowFail(cwd: string, args: string[]): Promise<string> {
     execFile('git', args, { cwd, maxBuffer: MAX_BUFFER }, (_err, stdout) => resolve(stdout ?? ''));
   });
 }
+
+/**
+ * Run git with `input` on stdin, resolving stdout regardless of exit code (`check-ignore` exits 1 when
+ * nothing matched). A process that cannot even start resolves empty, so a broken git degrades to "no
+ * answer" rather than a rejected promise the caller has to defend against.
+ */
+export function gitWithInput(cwd: string, args: string[], input: string): Promise<string> {
+  return new Promise((resolve) => {
+    const child = execFile('git', args, { cwd, maxBuffer: MAX_BUFFER }, (_err, stdout) => resolve(stdout ?? ''));
+    child.on('error', () => resolve(''));
+    // The pipe closes under us when git rejects the arguments outright; that path is the callback's.
+    child.stdin?.on('error', () => undefined);
+    child.stdin?.end(input);
+  });
+}

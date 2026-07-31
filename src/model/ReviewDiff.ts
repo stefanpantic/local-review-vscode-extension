@@ -59,6 +59,9 @@ export interface ReviewDiff {
   files: FileDiff[];
   generatedAt: string; // ISO
   pr?: PrRef; // present when source === 'pr'
+  // Fingerprint of the content above, stamped once the file list is final. Equal fingerprints mean the diff
+  // shows the same thing, so the view can keep what it built. Absent means "assume it changed".
+  contentId?: string;
 }
 
 /**

@@ -56,6 +56,11 @@ interface ReviewDiff {
   files: FileDiff[];
   generatedAt: string; // ISO timestamp, stamped by the host
   pr?: PrRef; // [it.11] set when source === 'pr'
+  // Fingerprint of the content above (source, refs, shas, files), stamped by the host once the file list is
+  // final. Excludes `generatedAt`, so a re-diff that found no change fingerprints the same. Equal fingerprints
+  // mean the diff renders identically and the webview keeps the view it already built; absent means
+  // "assume it changed".
+  contentId?: string;
 }
 
 interface FileDiff {
