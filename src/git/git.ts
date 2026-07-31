@@ -11,6 +11,7 @@ import { git, gitAllowFail } from './run';
 import { prRefs, retireLegacyPrRef } from './prRefs';
 
 export { prRefs, prRefsPresent } from './prRefs';
+export { hasRelevantChange } from './ignore';
 
 async function isUnbornHead(repoRoot: string): Promise<boolean> {
   try {

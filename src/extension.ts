@@ -6,7 +6,7 @@ import { FilesView } from './webview/filesView';
 import { CommentsView } from './webview/commentsView';
 import { ReviewsView } from './webview/reviewsView';
 import { ReviewPanel } from './webview/ReviewPanel';
-import { listBranches } from './git/git';
+import { hasRelevantChange, listBranches } from './git/git';
 import { watchRepoChanges } from './git/watch';
 import { startMcpServer, type McpServerHandle } from './mcp/server';
 import { exportReviewMarkdown, type ExportMeta } from './export/exportMarkdown';
@@ -226,9 +226,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('agenticReview.prevComment', () => controller.navigate('comment', 'prev')),
     // A PR diff is pinned to fetched refs, so working-tree / git-state changes (including our own fetch)
     // must not re-diff it — that would reset the "loading" state mid-review. Local sources still live-refresh.
-    watchRepoChanges(() => {
-      if (controller.source !== 'pr') void controller.refresh();
-    }),
+    watchRepoChanges(
+      () => {
+        if (controller.source !== 'pr') void controller.refresh();
+      },
+      {
+        // Ignored paths (build output, logs) cannot change the diff, so a build must not refresh the review.
+        // The PR test only avoids asking git a question whose answer is already moot — the guard above is
+        // what actually holds in PR mode, because pathless git events never reach this filter.
+        relevant: async (paths) => controller.source !== 'pr' && (await hasRelevantChange(controller.repoRoot, paths)),
+      },
+    ),
     vscode.commands.registerCommand('agenticReview.startReview', async () => {
       await controller.refresh();
       ReviewPanel.show(context.extensionUri, controller);

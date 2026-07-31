@@ -5,6 +5,7 @@ import { request, on } from './rpcClient';
 import type { ReviewStatePayload } from '../src/protocol/messages';
 import type { ViewMode } from '../src/model/ReviewDiff';
 import { DiffView } from './render/DiffView';
+import { carryDiff } from './carryDiff';
 
 function cssEscape(v: string): string {
   return typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(v) : v.replace(/"/g, '\\"');
@@ -118,7 +119,7 @@ function App() {
         }
       });
 
-    const offState = on('stateChanged', (s) => setState(s));
+    const offState = on('stateChanged', (s) => setState((prev) => carryDiff(prev, s)));
     const offViewed = on('viewedUpdated', ({ viewed }) => setState((prev) => (prev ? { ...prev, viewed } : prev)));
     const offThreads = on('threadsUpdated', ({ threads, pending }) =>
       setState((prev) => (prev ? { ...prev, threads, pending } : prev)),

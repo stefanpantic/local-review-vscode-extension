@@ -13,6 +13,7 @@ import {
   prRefsPresent,
   getRemoteUrl,
 } from './git/git';
+import { diffContentId } from './git/diffId';
 import { orderByTree } from './fileTree';
 import type { DiffResult, DiffSource, FileDiff, PrRef, RepoInfo, ReviewDiff, ViewMode } from './model/ReviewDiff';
 import { prBranchKey, prViewedNamespace } from './model/ReviewDiff';
@@ -509,6 +510,9 @@ export class ReviewController {
       }
       if (this.current.state === 'ok' && this.current.diff) {
         this.current.diff.files = orderByTree(this.current.diff.files);
+        // Stamped last, once the file list is settled, so the view can tell a re-diff that found nothing new
+        // from one that did and skip rebuilding for the former.
+        this.current.diff.contentId = diffContentId(this.current.diff);
       }
     }
     void vscode.commands.executeCommand('setContext', 'agenticReview.emptyReason', this.current.state);
