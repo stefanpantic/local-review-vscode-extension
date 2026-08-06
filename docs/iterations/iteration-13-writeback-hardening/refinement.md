@@ -1,6 +1,6 @@
 # Iteration 13 — Write-back hardening (refinement)
 
-> **Status: open.** Iteration 12 is merged. Prioritized **before** the scale-out/virtualization work
+> **Status: shipped.** Was prioritized **before** the scale-out/virtualization work
 > (iteration 10). Nothing here extends iteration 12; these are the flow/UX gaps found by pressure-testing the
 > write-back + live-sync surface, batched into one hardening pass. The three key design decisions below were
 > confirmed at the gate and are implemented as stated.
@@ -131,9 +131,9 @@ rendering scale-out. Grouped below; item numbers match the ideation list for tra
       `notes.md`. **Superseded by iteration 14**, which adds `edit_comment` / `delete_comment` and enforces
       the rule this item specified.)_
 - [x] The submit confirmation makes agent-authored items visible before posting (#17).
-- [ ] Gates green (`format:check`, `lint`, `typecheck`, `test`, `build`, `package`); docs updated where
+- [x] Gates green (`format:check`, `lint`, `typecheck`, `test`, `build`, `package`); docs updated where
       behavior changed (protocol/README; ADR addendum if the sync/egress contract shifts).
-      _(Automated gates green and docs updated. Awaiting the manual F5 pass on github.com + GHE, which also
+      _(All six gates green and docs updated. The manual F5 pass on github.com + GHE is done, which also
       closes iteration 12's outstanding AC.)_
 
 ## Scope
