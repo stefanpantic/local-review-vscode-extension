@@ -101,7 +101,7 @@ Work proceeds **one iteration at a time**: refine → implement → verify. The 
 
 Each row links to its folder under [`iterations/`](./iterations/) once refined. Row 10 carries intent and the central open decision only; its detailed refinement is written when the iteration opens (one iteration at a time).
 
-**Status: rows 1 through 9, 4b, and 11 through 14 have shipped. Row 15 is implemented and unit-covered, with its manual pass in the Extension Development Host still open. Row 10 (scale-out) remains unstarted; its refinement is a parked draft.** Each shipped iteration's `refinement.md` carries its ticked acceptance criteria as the verification record.
+**Status: rows 1 through 9, 4b, and 11 through 15 have shipped. Row 10 (scale-out) is the only one left; its refinement is a parked draft, and no iteration is currently open.** Each shipped iteration's `refinement.md` carries its ticked acceptance criteria as the verification record.
 
 Iteration 13 changes one contract iteration 12 set: the background poll is now **strictly non-destructive** (it only adds and refreshes; upstream deletions land on an explicit sync). See the iteration 13 addendum in [ADR-0011](./decisions/0011-github-pr-review.md).
 

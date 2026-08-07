@@ -1,8 +1,6 @@
 # Iteration 15 — Comment filtering, sorting, and grouping
 
-> **Status: implemented, manual pass pending.** Acceptance criteria below are ticked in place as the
-> verification record. The logic is unit-covered and the gates are green; the criteria that need a running
-> Extension Development Host are still open and are marked as such.
+> **Status: shipped.** Acceptance criteria below are ticked in place as the verification record.
 
 The sidebar "Current Review" view lists every thread in the active review, always grouped by file and always
 sorted by line. On a real review that list grows past the point of being scannable: resolved threads stay in
@@ -136,13 +134,13 @@ True by construction:
 - [x] The diff panel still shows resolved threads under any filter: no webview file, message, or payload
       field changed, so the panel cannot see the filter at all.
 
-Pending a manual pass in the Extension Development Host (F5) — the surface behavior these describe is not
-observable from the unit suites:
+Verified by a manual pass in the Extension Development Host (F5) — the surface behavior these describe is
+not observable from the unit suites:
 
-- [ ] A filter matching nothing shows an explanatory row that clears the filter when clicked, and never the
+- [x] A filter matching nothing shows an explanatory row that clears the filter when clicked, and never the
       empty-review welcome view.
-- [ ] The view header names the active filter with an `N of M` tally, and names a non-default arrangement.
-- [ ] The title-bar funnel switches to its filled form when a filter is set.
-- [ ] Filter, group, and sort survive a window reload and a diff refresh, and changing one does not reset
+- [x] The view header names the active filter with an `N of M` tally, and names a non-default arrangement.
+- [x] The title-bar funnel switches to its filled form when a filter is set.
+- [x] Filter, group, and sort survive a window reload and a diff refresh, and changing one does not reset
       the others.
-- [ ] Clicking a thread still reveals it in the panel under every grouping mode.
+- [x] Clicking a thread still reveals it in the panel under every grouping mode.
