@@ -23,7 +23,7 @@ It can also write your PR review back to GitHub on one explicit Submit.
 2. `docs/protocol.md`. The data model and the host/webview message contract. Every type is tagged with the iteration that introduced it.
 3. `docs/decisions/`. The ADRs (why the contestable calls were made). ADR-0011 covers GitHub PR review and write-back.
 4. `CLAUDE.md`. The short working rules for this repo.
-5. The open iteration under `docs/iterations/`. Each folder has a `refinement.md` with scope and acceptance criteria. Check the roadmap in `docs/spec.md` for which one is current.
+5. The current iteration under `docs/iterations/`. Each folder has a `refinement.md` with scope and acceptance criteria, ticked in place once built. The status line under the roadmap table in `docs/spec.md` section 8 says which rows have shipped and which one is open, and each `refinement.md` repeats its own status at the top.
 
 ## Architecture
 
@@ -73,11 +73,11 @@ One iteration at a time. The rhythm is refine, implement, verify.
 
 ## MCP
 
-A local MCP server lets a coding agent join a review. Set it up with the "ReviewMate: Set up MCP" command. It binds to `127.0.0.1` and is token-guarded. Tools: `get_diff`, `get_review`, `list_reviews`, `post_comment`, `reply`, `resolve`. It never writes your files and has no GitHub or network capability. Agent comments are attributed to "AI Agent" and anchor like a human's.
+A local MCP server lets a coding agent join a review. Set it up with the "ReviewMate: Set up MCP" command. It binds to `127.0.0.1` and is token-guarded. Tools: `get_diff`, `get_review`, `get_active_review`, `list_reviews`, `post_comment`, `reply`, `resolve`, `edit_comment`, `delete_comment`. Edit and delete follow the same `canEditComment` rule the human UI enforces, so on a PR an agent can only touch its own comments. It never writes your files and has no GitHub or network capability. Agent comments are attributed to "AI Agent" and anchor like a human's.
 
 ## Invariants to respect
 
 - The host owns the truth. The webview never persists durable data.
 - Comments anchor by content match scoped to the current diff. A line that leaves the diff goes outdated and is kept, never deleted.
-- The renderer consumes a flat row model, so windowed virtualization can drop in later.
+- The flat row model (`RenderRow` in `docs/protocol.md` section 3) is the contract the renderer is meant to consume, so windowed virtualization can drop in later. It is not realized yet: `DiffView.tsx` still walks files, then hunks, then rows, and puts comment threads inline under their code row. Flattening it is the first sub-step of iteration 10, so do not build on the assumption that it is already in force.
 - Network egress lives only in `src/github/` and runs only on an explicit human action (open a PR, submit a review). The MCP server stays loopback with no GitHub capability.

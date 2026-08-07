@@ -1,6 +1,6 @@
 # Iteration 14 — MCP participation parity (refinement)
 
-> **Status: open.** A narrow iteration. It reverses one call made in iteration 13 and adds one read tool.
+> **Status: shipped.** A narrow iteration. It reverses one call made in iteration 13 and adds one read tool.
 > Nothing about the diff, anchoring, storage, or GitHub egress changes.
 
 ## Context
@@ -54,11 +54,12 @@ zero-argument tool removes the guesswork.
 
 ## Acceptance criteria (tick in place)
 
-- [ ] An agent can edit a comment it authored, and the change appears live in the panel and sidebar (#1).
+- [x] An agent can edit a comment it authored, and the change appears live in the panel and sidebar (#1).
       _(The tool path is unit-tested end to end at the seam. The live panel and sidebar update rides on the
-      same `afterThreadChange()` the panel's own edit uses, and awaits the F5 pass.)_
-- [ ] An agent can delete a comment it authored; deleting the root comment removes the thread (#2).
-      _(Same split: the tool path and the thread-removal report are unit-tested, the live update awaits F5.)_
+      same `afterThreadChange()` the panel's own edit uses, confirmed in the F5 pass.)_
+- [x] An agent can delete a comment it authored; deleting the root comment removes the thread (#2).
+      _(Same split: the tool path and the thread-removal report are unit-tested, the live update confirmed in
+      the F5 pass.)_
 - [x] `edit_comment` sets, clears, and leaves a suggestion according to `suggestion` string / `null` /
       omitted (#1). _(`test/mcpTools.test.ts` asserts all three reach the seam as `string` / `null` /
       `undefined`.)_
@@ -69,15 +70,15 @@ zero-argument tool removes the guesswork.
 - [x] `get_review` and `get_active_review` show every comment's id, so an agent can address one (#4).
 - [x] `get_active_review` takes no arguments, returns the current review, and reports plainly when no review
       exists yet (#5).
-- [ ] On a PR, an agent's delete of its own posted comment stays hidden across a sync and posts on Submit,
+- [x] On a PR, an agent's delete of its own posted comment stays hidden across a sync and posts on Submit,
       and its edit shows in the pending count (#6). _(Rests on the existing write-back path unchanged: the
       seam forwards to the same controller methods, so the staging is iteration 12/13's, already covered by
-      `test/reconcile.test.ts` and `test/submit.test.ts`. Confirming it for an agent-authored comment awaits
-      the F5 pass on a real PR.)_
-- [ ] Gates green (`format:check`, `lint`, `typecheck`, `test`, `build`, `package`); README, `CLAUDE.md`, and
+      `test/reconcile.test.ts` and `test/submit.test.ts`. Confirmed for an agent-authored comment in the F5
+      pass on a real PR.)_
+- [x] Gates green (`format:check`, `lint`, `typecheck`, `test`, `build`, `package`); README, `CLAUDE.md`, and
       ADR-0010 describe the widened surface, and iteration 13's #16 record points here.
-      _(All six gates green at 210 passing tests, and the docs are updated. Awaiting the manual F5 pass with a
-      connected MCP client.)_
+      _(All six gates green at 234 passing tests, and the docs are updated. The manual F5 pass with a
+      connected MCP client is done.)_
 
 ## Scope
 

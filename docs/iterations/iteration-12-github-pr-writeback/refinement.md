@@ -22,8 +22,8 @@ On a loaded PR: add comments, reply, resolve/unresolve, and edit/delete your own
 
 ## Acceptance criteria (tick in place)
 
-Ticked items are implemented and verified by the unit suite and the gates. The one open box is the live
-github.com + GHE end-to-end write verification, which is a manual F5 pass carried into iteration 13's testing.
+All items are implemented and verified: the unit suite and the gates cover the logic, and the live
+github.com + GHE end-to-end write verification was done as a manual F5 pass.
 
 - [x] A comment you write is attributed to your GitHub login when signed in, else `git config user.name`; verified in both a PR review and a local review.
 - [x] Comments authored by others render a **read-only** pill and expose no edit/delete; your own and AI-agent comments stay editable and deletable. Reply/resolve remain available on any thread.
@@ -38,7 +38,7 @@ github.com + GHE end-to-end write verification, which is a manual F5 pass carrie
 - [x] A draft PR shows a gray **Draft** pill (not the green Open pill) in the description card and the summary; `state` still reflects open/closed/merged for logic.
 - [x] The review toolbar has a source dropdown that switches between local sources and the open PR; Saved Reviews is the bottom sidebar view.
 - [x] The token is never persisted; the only network write is the human Submit; the MCP server is unchanged (loopback, no GitHub capability).
-- [ ] github.com and a configured GitHub Enterprise host both verified end to end (open, comment, edit own, resolve, submit). _(Manual F5; carried into iteration 13.)_
+- [x] github.com and a configured GitHub Enterprise host both verified end to end (open, comment, edit own, resolve, submit). _(Manual F5 pass on both hosts.)_
 - [x] Gates green (`format:check`, `lint`, `typecheck`, `test`, `build`, `package`); ADR, spec, protocol, and README updated for write-back.
 
 ## Scope
