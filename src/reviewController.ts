@@ -396,7 +396,7 @@ export class ReviewController {
    * signed in, else the login cached on the open PR review, else git user.name. The cached fallback is what
    * keeps your own comments editable when a session lapses mid-review — a write re-auths on its own.
    */
-  private authorIdentity(): string {
+  authorIdentity(): string {
     return this.viewerLogin ?? this.cachedViewer() ?? this.userName ?? UNKNOWN_AUTHOR;
   }
 

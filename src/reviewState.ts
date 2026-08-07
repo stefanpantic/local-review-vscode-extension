@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { DiffSource, PrRef, ViewMode } from './model/ReviewDiff';
+import type { CommentGroupBy, CommentSortBy } from './review/commentGroups';
 
 export interface Pref {
   repoRoot?: string;
@@ -10,6 +11,9 @@ export interface Pref {
   wrap: boolean; // true = wrap long lines instead of scrolling horizontally
   pr?: PrRef; // the pull request under review; present (and restored on reload) when source === 'pr'
   prFilter?: string; // filter tokens narrowing the Pull Requests list; stored as text and re-parsed on read
+  commentFilter?: string; // filter tokens narrowing the Current Review list; stored as text, re-parsed on read
+  commentGroup?: CommentGroupBy; // how the Current Review list is grouped
+  commentSort?: CommentSortBy; // how the Current Review list is ordered
 }
 
 const PREF_KEY = 'agenticReview.pref';
