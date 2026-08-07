@@ -13,7 +13,8 @@ import { exportReviewMarkdown, type ExportMeta } from './export/exportMarkdown';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import type { DiffSource } from './model/ReviewDiff';
-import type { Review } from './model/Comment';
+import type { CommentThread, Review } from './model/Comment';
+import { AGENT_AUTHOR } from './model/Comment';
 import { parsePrReference, type GithubProviderId } from './github/remote';
 import { githubTokenSource } from './github/auth';
 import { githubErrorText } from './github/errors';
@@ -22,6 +23,8 @@ import type { OrphanReport } from './review/reconcile';
 import { PullRequestsView } from './webview/pullRequestsView';
 import type { ReviewProvider, RemoteRepoRef, PullRequestSummary } from './review/provider';
 import { applyPrFilter, formatPrFilter, parsePrFilter, type Viewer } from './review/prFilter';
+import { applyCommentFilter, formatCommentFilter, parseCommentFilter } from './review/commentFilter';
+import type { CommentGroupBy, CommentSortBy } from './review/commentGroups';
 
 /** Narrow a command argument (tree node or selection) to a Review. */
 function asReview(x: unknown): Review | undefined {
@@ -38,11 +41,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     showCollapseAll: true,
   });
 
-  const commentsView = new CommentsView(controller);
+  const commentsView = new CommentsView(controller, state);
   const commentsTree = vscode.window.createTreeView('agenticReview.comments', {
     treeDataProvider: commentsView,
     showCollapseAll: true,
   });
+  commentsView.bind(commentsTree);
 
   const reviewsView = new ReviewsView(controller);
   const reviewsTree = vscode.window.createTreeView('agenticReview.reviews', { treeDataProvider: reviewsView });
@@ -263,6 +267,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       filterPullRequests(pullRequestsView),
     ),
     vscode.commands.registerCommand('agenticReview.clearPullRequestFilter', () => pullRequestsView.setFilter('')),
+    // Same two-commands-one-handler shape as the pull request filter above, for the Current Review list.
+    vscode.commands.registerCommand('agenticReview.filterComments', () => filterComments(commentsView)),
+    vscode.commands.registerCommand('agenticReview.changeCommentFilter', () => filterComments(commentsView)),
+    vscode.commands.registerCommand('agenticReview.clearCommentFilter', () => commentsView.setFilter('')),
+    vscode.commands.registerCommand('agenticReview.groupComments', () => groupComments(commentsView)),
+    vscode.commands.registerCommand('agenticReview.sortComments', () => sortComments(commentsView)),
     vscode.commands.registerCommand('agenticReview.openPullRequestFromList', (n: number) =>
       openPullRequestFromList(controller, context.extensionUri, n),
     ),
@@ -852,6 +862,117 @@ function pickPrFilter(current: string, prs: PullRequestSummary[], viewer: Viewer
       qp.dispose();
     });
   });
+}
+
+/** Open the filter box for the Current Review list, then apply whatever it returns. */
+async function filterComments(view: CommentsView): Promise<void> {
+  const tokens = await pickCommentFilter(formatCommentFilter(view.filter()), view.threads(), view.viewer());
+  if (tokens !== undefined) await view.setFilter(tokens);
+}
+
+/**
+ * The comment filter box: presets for the states a thread can be in, the authors actually present in the
+ * review, and free-typed tokens. Every row reports how many threads it would leave, so the effect is visible
+ * before it is applied. Runs entirely against the threads already loaded.
+ */
+function pickCommentFilter(current: string, threads: CommentThread[], viewer: string): Promise<string | undefined> {
+  const qp = vscode.window.createQuickPick<FilterItem>();
+  qp.title = 'Filter comments';
+  qp.placeholder = 'is:unresolved · is:outdated · author:@me · author:@agent';
+  qp.value = current;
+  qp.matchOnDescription = true;
+
+  const matches = (tokens: string): string =>
+    `${applyCommentFilter(threads, parseCommentFilter(tokens), viewer).length} of ${threads.length}`;
+
+  // The box is also where a filter gets cleared, so the title-bar funnel can stay non-destructive.
+  const clearRow: FilterItem = current
+    ? { label: 'Clear filter', description: `show all ${threads.length} comments`, tokens: '' }
+    : { label: 'All comments', description: `no filter · ${threads.length}`, tokens: '' };
+
+  const presets: FilterItem[] = [
+    clearRow,
+    { label: 'Unresolved', description: `is:unresolved · ${matches('is:unresolved')}`, tokens: 'is:unresolved' },
+    { label: 'Resolved', description: `is:resolved · ${matches('is:resolved')}`, tokens: 'is:resolved' },
+    { label: 'Outdated', description: `is:outdated · ${matches('is:outdated')}`, tokens: 'is:outdated' },
+    { label: 'Moved', description: `is:moved · ${matches('is:moved')}`, tokens: 'is:moved' },
+    { label: 'Mine', description: `author:@me · ${viewer} · ${matches('author:@me')}`, tokens: 'author:@me' },
+    { label: AGENT_AUTHOR, description: `author:@agent · ${matches('author:@agent')}`, tokens: 'author:@agent' },
+  ].map((p) => ({ ...p, alwaysShow: true }));
+
+  // Everyone who wrote anything in the review, most-prolific first. Counted per thread, not per comment, so
+  // the number matches what picking the row would actually leave in the list.
+  const counted = new Map<string, number>();
+  for (const t of threads) {
+    for (const name of new Set(t.comments.map((c) => c.author).filter(Boolean))) {
+      counted.set(name, (counted.get(name) ?? 0) + 1);
+    }
+  }
+  const authors: FilterItem[] = [...counted.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([name, n]) => ({ label: name, description: `${n}`, tokens: `author:${name}` }));
+
+  const render = (): void => {
+    // Whatever is typed leads the list, so Enter always applies what the box shows.
+    const typed = qp.value.trim();
+    const head: FilterItem[] = typed
+      ? [{ label: `Filter by "${typed}"`, description: matches(typed), tokens: typed, alwaysShow: true }]
+      : [];
+    const section = (title: string, rows: FilterItem[]): FilterItem[] =>
+      rows.length ? [{ label: title, kind: vscode.QuickPickItemKind.Separator }, ...rows] : [];
+    qp.items = [...head, ...section('Presets', presets), ...section('Authors in this review', authors)];
+  };
+  render();
+  qp.onDidChangeValue(render);
+  qp.show();
+
+  return new Promise((resolve) => {
+    qp.onDidAccept(() => {
+      const picked = qp.selectedItems[0];
+      resolve(picked?.tokens ?? qp.value.trim());
+      qp.hide();
+    });
+    qp.onDidHide(() => {
+      resolve(undefined);
+      qp.dispose();
+    });
+  });
+}
+
+/** Mark the option currently in force, so the box shows where you are before you change it. */
+function currentMark<T>(value: T, current: T): string | undefined {
+  return value === current ? 'current' : undefined;
+}
+
+async function groupComments(view: CommentsView): Promise<void> {
+  const current = view.groupBy();
+  const pick = await vscode.window.showQuickPick(
+    [
+      { label: 'By file', description: currentMark<CommentGroupBy>('file', current), value: 'file' as const },
+      { label: 'By author', description: currentMark<CommentGroupBy>('author', current), value: 'author' as const },
+      { label: 'Ungrouped', description: currentMark<CommentGroupBy>('none', current), value: 'none' as const },
+    ],
+    { title: 'Group comments' },
+  );
+  if (pick) await view.setArrangement({ groupBy: pick.value });
+}
+
+async function sortComments(view: CommentsView): Promise<void> {
+  const current = view.sortBy();
+  const pick = await vscode.window.showQuickPick(
+    [
+      {
+        label: 'By position',
+        description: currentMark<CommentSortBy>('position', current),
+        detail: 'File, then line',
+        value: 'position' as const,
+      },
+      { label: 'Newest first', description: currentMark<CommentSortBy>('newest', current), value: 'newest' as const },
+      { label: 'Oldest first', description: currentMark<CommentSortBy>('oldest', current), value: 'oldest' as const },
+    ],
+    { title: 'Sort comments' },
+  );
+  if (pick) await view.setArrangement({ sortBy: pick.value });
 }
 
 function errorText(err: unknown): string {

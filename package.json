@@ -173,6 +173,36 @@
         "category": "ReviewMate"
       },
       {
+        "command": "agenticReview.filterComments",
+        "title": "Filter Comments",
+        "category": "ReviewMate",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "agenticReview.changeCommentFilter",
+        "title": "Change Comment Filter",
+        "category": "ReviewMate",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "agenticReview.clearCommentFilter",
+        "title": "Clear Comment Filter",
+        "category": "ReviewMate",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "agenticReview.groupComments",
+        "title": "Group Comments",
+        "category": "ReviewMate",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "agenticReview.sortComments",
+        "title": "Sort Comments",
+        "category": "ReviewMate",
+        "icon": "$(sort-precedence)"
+      },
+      {
         "command": "agenticReview.github.submitReview",
         "title": "Submit Review to GitHub",
         "category": "ReviewMate",
@@ -324,9 +354,34 @@
           "group": "navigation@1"
         },
         {
+          "command": "agenticReview.filterComments",
+          "when": "view == agenticReview.comments && !agenticReview.commentFilterActive",
+          "group": "navigation@1"
+        },
+        {
+          "command": "agenticReview.changeCommentFilter",
+          "when": "view == agenticReview.comments && agenticReview.commentFilterActive",
+          "group": "navigation@1"
+        },
+        {
           "command": "agenticReview.exportReview",
           "when": "view == agenticReview.comments",
-          "group": "navigation@1"
+          "group": "navigation@2"
+        },
+        {
+          "command": "agenticReview.groupComments",
+          "when": "view == agenticReview.comments",
+          "group": "1_arrange@1"
+        },
+        {
+          "command": "agenticReview.sortComments",
+          "when": "view == agenticReview.comments",
+          "group": "1_arrange@2"
+        },
+        {
+          "command": "agenticReview.clearCommentFilter",
+          "when": "view == agenticReview.comments && agenticReview.commentFilterActive",
+          "group": "1_arrange@3"
         },
         {
           "command": "agenticReview.github.submitReview",
@@ -425,6 +480,14 @@
         {
           "command": "agenticReview.clearPullRequestFilter",
           "when": "agenticReview.prFilterActive"
+        },
+        {
+          "command": "agenticReview.changeCommentFilter",
+          "when": "agenticReview.commentFilterActive"
+        },
+        {
+          "command": "agenticReview.clearCommentFilter",
+          "when": "agenticReview.commentFilterActive"
         },
         {
           "command": "agenticReview.github.submitReview",
