@@ -53,7 +53,7 @@ function statusTag(t: CommentThread): string {
 function lineLabel(t: CommentThread): string {
   const start = startLine(t);
   const end = endLine(t);
-  return end > start ? `Lines ${start}–${end}` : `Line ${start}`;
+  return end > start ? `Lines ${start}-${end}` : `Line ${start}`;
 }
 
 /**

@@ -57,8 +57,8 @@ export class ReviewStore {
    * remote-kind review (a fetched pull/merge request) carrying that request's metadata.
    */
   async create(repoRoot: string, branch: string, headSha: string | null, remote?: RemoteRef): Promise<Review> {
-    const n = this.forBranch(repoRoot, branch).length + 1;
-    const name = remote ? remoteName(remote) : `Review ${n}`;
+    const siblings = this.forBranch(repoRoot, branch);
+    const name = remote ? remoteName(remote, siblings) : `Review ${siblings.length + 1}`;
     const review = newReview(repoRoot, branch, name, headSha, remote);
     const map = this.allMap();
     map[repoRoot] = [...(map[repoRoot] ?? []), review];
@@ -209,8 +209,19 @@ export class ReviewStore {
 }
 
 /** A display name for a remote review: the request title, falling back to `#<number>`. */
-function remoteName(remote: RemoteRef): string {
-  return remote.title ?? `#${remote.number ?? remote.id}`;
+/**
+ * The default name for a review of a pull request. Its number rather than its title: a title is long,
+ * and it can be edited upstream, which would leave the label describing something that no longer exists.
+ * A second review of the same request takes the next free suffix, so reviewing one twice reads as two
+ * passes over the same thing. The name is a local label either way and Rename overrides it.
+ */
+function remoteName(remote: RemoteRef, siblings: Review[]): string {
+  const base = `PR ${remote.number ?? remote.id} review`;
+  const taken = new Set(siblings.map((r) => r.name));
+  if (!taken.has(base)) return base;
+  let n = 2;
+  while (taken.has(`${base} ${n}`)) n++;
+  return `${base} ${n}`;
 }
 
 function newReview(repoRoot: string, branch: string, name: string, headSha: string | null, remote?: RemoteRef): Review {

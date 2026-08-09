@@ -153,7 +153,6 @@ Prefer a packaged `.vsix`? Download `agentic-review-<version>.vsix` from [Releas
 | `agenticReview.defaultWrap`           | `false`            | Wrap long lines instead of scrolling horizontally.                          |
 | `agenticReview.includeUntracked`      | `true`             | Include untracked files (ignores `.gitignore`d files).                      |
 | `agenticReview.largeFileThreshold`    | `1000`             | Files with more changed lines than this start collapsed.                    |
-| `agenticReview.contextLines`          | `3`                | Lines of surrounding context captured for comments and export.              |
 | `agenticReview.github.enterpriseUri`  | `""`               | GitHub Enterprise Server base URL. Empty uses github.com.                   |
 | `agenticReview.github.pollInterval`   | `60`               | Seconds between polls of an open PR for upstream changes. `0` turns it off. |
 | `agenticReview.mcp.autoStart`         | `false`            | Start the MCP server when VS Code launches.                                 |

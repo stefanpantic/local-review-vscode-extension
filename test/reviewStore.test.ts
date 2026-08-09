@@ -151,19 +151,44 @@ test('create tags a local-kind review by default', async () => {
   assert.ok(!('remote' in r));
 });
 
-test('create with a remote ref makes a remote-kind review named from the title', async () => {
+test('create with a remote ref makes a remote-kind review named by request number', async () => {
   const store = new ReviewStore(new FakeStore());
   const r = await store.create('/r', 'pr/github/42', 'bbbbbbb', remoteRef());
   assert.equal(r.kind, 'remote');
   if (r.kind !== 'remote') return; // narrow the union for the assertions below
-  assert.equal(r.name, 'Add widget');
+  assert.equal(r.name, 'PR 42 review');
   assert.deepEqual(r.remote, remoteRef());
 });
 
-test('create names a titleless remote review by number', async () => {
+test('the request title never reaches the default name, however long it is', async () => {
   const store = new ReviewStore(new FakeStore());
-  const r = await store.create('/r', 'pr/github/42', 'bbbbbbb', remoteRef({ title: undefined }));
-  assert.equal(r.name, '#42');
+  const r = await store.create('/r', 'pr/github/42', 'bbbbbbb', remoteRef({ title: 'A very long title indeed' }));
+  assert.equal(r.name, 'PR 42 review');
+});
+
+test('a second review of the same request takes a suffix', async () => {
+  const store = new ReviewStore(new FakeStore());
+  const first = await store.create('/r', 'pr/github/42', 'bbbbbbb', remoteRef());
+  const second = await store.create('/r', 'pr/github/42', 'bbbbbbb', remoteRef());
+  const third = await store.create('/r', 'pr/github/42', 'bbbbbbb', remoteRef());
+  assert.equal(first.name, 'PR 42 review');
+  assert.equal(second.name, 'PR 42 review 2');
+  assert.equal(third.name, 'PR 42 review 3');
+});
+
+test('a suffix fills the first free slot rather than colliding with a survivor', async () => {
+  const store = new ReviewStore(new FakeStore());
+  const first = await store.create('/r', 'pr/github/42', 'bbbbbbb', remoteRef());
+  await store.create('/r', 'pr/github/42', 'bbbbbbb', remoteRef()); // "PR 42 review 2"
+  await store.remove('/r', first.id);
+  const next = await store.create('/r', 'pr/github/42', 'bbbbbbb', remoteRef());
+  assert.equal(next.name, 'PR 42 review'); // the base freed up; the surviving "2" is not reused
+});
+
+test('a request with no numeric number falls back to its opaque id', async () => {
+  const store = new ReviewStore(new FakeStore());
+  const r = await store.create('/r', 'pr/github/42', 'bbbbbbb', remoteRef({ number: undefined }));
+  assert.equal(r.name, 'PR 42 review');
 });
 
 test('ensureCurrent creates a remote review once, then refreshes its metadata', async () => {
