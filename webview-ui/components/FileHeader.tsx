@@ -30,7 +30,7 @@ export function FileHeader({
       {showStat && (
         <span className="lr-stat">
           {file.additions > 0 && <span className="lr-add-count">+{file.additions}</span>}
-          {file.deletions > 0 && <span className="lr-del-count">−{file.deletions}</span>}
+          {file.deletions > 0 && <span className="lr-del-count">-{file.deletions}</span>}
         </span>
       )}
       {file.note && <span className="lr-note">{file.note}</span>}

@@ -208,7 +208,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     controller.onDidChange(updateBadge),
     controller.onDidChange(updateSourceHeader),
     controller.onDidChange(() => void updateHasRemote()),
-    vscode.commands.registerCommand('agenticReview.newReview', () => controller.newReview()),
+    vscode.commands.registerCommand('agenticReview.newReview', () => newReview(controller)),
     vscode.commands.registerCommand('agenticReview.switchReview', (r) => {
       const rev = asReview(r);
       if (rev) void controller.switchReview(rev.id);
@@ -603,6 +603,37 @@ async function askReviewSummary(): Promise<string | undefined> {
     prompt: 'Posted as the body of the review. Leave empty to submit the comments on their own.',
     placeHolder: 'Summarize your review…',
   });
+}
+
+/**
+ * Start a review. On a pull request this forks a second pass over the same request, which is rarely what
+ * someone reaching for a generic "new review" button intends, so there it is confirmed and spelled out.
+ * Everything else in the PR flow continues the review you already have.
+ */
+async function newReview(controller: ReviewController): Promise<void> {
+  const onPr = controller.source === 'pr';
+  if (onPr) {
+    const start = 'Start a second review';
+    const choice = await vscode.window.showWarningMessage(
+      'Start a second review of this pull request?',
+      {
+        modal: true,
+        detail:
+          "The review you are on now is kept and stays where it is. A new one starts alongside it, with this pull request's comments imported fresh from GitHub. Cancel to carry on with the review you already have.",
+      },
+      start,
+    );
+    if (choice !== start) return;
+  }
+  try {
+    if (!onPr) return await controller.newReview();
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'Starting a second review…' },
+      () => controller.newReview(),
+    );
+  } catch (err) {
+    void vscode.window.showErrorMessage(`ReviewMate: could not start the review. ${errorText(err)}`);
+  }
 }
 
 /** Apply the "new commits" banner: re-fetch the open PR's advanced head, re-diff, and re-import in place. */

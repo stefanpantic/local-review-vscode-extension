@@ -72,7 +72,7 @@ export function SummaryBar({
         {n} file{n === 1 ? '' : 's'} changed
       </span>
       {additions > 0 && <span className="lr-add-count">+{additions}</span>}
-      {deletions > 0 && <span className="lr-del-count">−{deletions}</span>}
+      {deletions > 0 && <span className="lr-del-count">-{deletions}</span>}
       <span className="lr-source" title="Diff source">
         {label}
       </span>

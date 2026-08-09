@@ -582,11 +582,6 @@
           "default": 1000,
           "description": "Files with more than this many changed lines start collapsed."
         },
-        "agenticReview.contextLines": {
-          "type": "number",
-          "default": 3,
-          "description": "Lines of surrounding context captured for comments and export (used from Iteration 4)."
-        },
         "agenticReview.mcp.autoStart": {
           "type": "boolean",
           "default": false,

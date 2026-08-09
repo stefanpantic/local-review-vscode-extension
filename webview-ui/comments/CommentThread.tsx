@@ -20,7 +20,7 @@ export type Tokenize = (text: string) => Tok[][];
 function lineLabel(t: CommentThread): string {
   const start = t.resolvedLine ?? t.anchor.lineNumber;
   const end = t.resolvedEndLine ?? t.anchor.endLineNumber ?? start;
-  return end > start ? `Lines ${start}–${end}` : `Line ${start}`;
+  return end > start ? `Lines ${start}-${end}` : `Line ${start}`;
 }
 
 /**

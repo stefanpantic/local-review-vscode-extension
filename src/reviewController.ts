@@ -24,6 +24,7 @@ import { parseRemoteUrl, type GithubProviderId } from './github/remote';
 import { getViewerLogin } from './github/auth';
 import { resolveProvider } from './review/resolveProvider';
 import { pendingChangeSet, type PendingSummary } from './review/pending';
+import { mergeRequestMeta } from './review/requestMeta';
 import { buildSubmitPlan, unsubmittedRemoteReview, type SubmitCounts, type SubmitEvent } from './review/submit';
 import { reconcile, type OrphanReport } from './review/reconcile';
 import type { McpReviewApi } from './mcp/tools';
@@ -275,11 +276,29 @@ export class ReviewController {
     return this.branches;
   }
 
-  /** Start a fresh empty review on the current branch and make it current. */
+  /**
+   * Start a fresh review on the current branch and make it current. A second pass over a pull request is
+   * still a pull request review: it carries the same request and imports that request's threads from the
+   * remote, so it behaves exactly like the first one rather than degrading into a bare local review.
+   * Continuing an existing review is the default everywhere else; only this call ever forks one.
+   */
   async newReview(): Promise<void> {
     const repoRoot = this.repoRootOrThrow();
-    await this.reviewStore.create(repoRoot, this.branchKey(repoRoot), this.headShaFor(repoRoot));
-    this.afterThreadChange();
+    const branch = this.branchKey(repoRoot);
+    const current = this.reviewStore.current(repoRoot, branch);
+    if (current?.kind !== 'remote') {
+      await this.reviewStore.create(repoRoot, branch, this.headShaFor(repoRoot));
+      this.afterThreadChange();
+      return;
+    }
+    const ref = current.remote;
+    await this.withPrLock(async () => {
+      const review = await this.reviewStore.create(repoRoot, branch, this.headShaFor(repoRoot), ref);
+      const remote = await this.currentRemote();
+      // Signed out or no remote resolvable: the review is still a remote one, just empty until a sync.
+      if (remote) await this.syncFromRemote(repoRoot, review.id, remote, ref.number ?? Number(ref.id));
+      this.afterThreadChange();
+    });
   }
 
   /**
@@ -638,10 +657,15 @@ export class ReviewController {
       const number = review.remote.number ?? Number(review.remote.id);
       const orphans = await this.syncFromRemote(repoRoot, review.id, remote, number);
       // Same head check the poll does, so pressing Sync raises the "new commits" banner rather than leaving
-      // it to the next tick. A failure here is not worth failing the whole sync over.
+      // it to the next tick. The same fetch carries the request's own metadata (description, title, state,
+      // draft flag), which is refreshed here so an edit upstream shows up on a sync. Only those display
+      // fields move: the shas stay pinned to the revision being reviewed. A failure here is not worth
+      // failing the whole sync over.
       try {
         const detail = await remote.provider.getRequest(remote.repo, number);
         this.headStale = detail.headSha !== review.remote.headSha;
+        const meta = mergeRequestMeta(review.remote, detail);
+        if (meta) await this.reviewStore.setRemote(repoRoot, review.id, meta);
       } catch {
         /* the comments did sync; the next poll retries the head */
       }
@@ -809,12 +833,20 @@ export class ReviewController {
     const number = review.remote.number ?? Number(review.remote.id);
 
     let headChanged = false;
+    let metaChanged = false;
     let failed = false;
     try {
       const detail = await remote.provider.getRequest(remote.repo, number);
       if (detail.headSha !== review.remote.headSha && !this.headStale) {
         this.headStale = true;
         headChanged = true;
+      }
+      // The request's own metadata is the remote's to own, so a tick takes it. This only refreshes what
+      // is displayed and removes nothing, so it stays within what a background tick is allowed to do.
+      const meta = mergeRequestMeta(review.remote, detail);
+      if (meta) {
+        await this.reviewStore.setRemote(repoRoot, review.id, meta);
+        metaChanged = true;
       }
     } catch {
       failed = true;
@@ -847,7 +879,7 @@ export class ReviewController {
 
     this.pollFailures = failed ? this.pollFailures + 1 : 0;
     if (threadsChanged) this.afterThreadChange();
-    if (headChanged || incoming || failed) {
+    if (headChanged || metaChanged || incoming || failed) {
       this._onDidChange.fire();
       this.panelPost?.('stateChanged', this.buildState());
     }

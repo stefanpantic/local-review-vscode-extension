@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { ReviewController } from '../reviewController';
 import type { Review } from '../model/Comment';
+import { prStateLabel } from '../protocol/messages';
 
 interface ReviewGroup {
   groupKey: string; // the git branch, or a PR's synthetic `pr/<provider>/<number>` key
@@ -104,7 +105,8 @@ function prGroupItem(group: ReviewGroup): vscode.TreeItem {
   item.iconPath = new vscode.ThemeIcon('git-pull-request');
   const bits: string[] = [];
   if (remote?.number != null) bits.push(`#${remote.number}`);
-  if (remote?.state) bits.push(remote.state);
+  const state = prStateLabel(remote?.state, remote?.isDraft);
+  if (state) bits.push(state);
   item.description = bits.join(' · ') || `${group.reviews.length}`;
   item.tooltip = remote?.url
     ? new vscode.MarkdownString(`[**${title}**](${remote.url})\n\n${bits.join(' · ')}`)
