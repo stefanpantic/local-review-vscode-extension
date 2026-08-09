@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.4.2...agentic-review-v0.5.0) (2026-08-09)
+
+
+### Features
+
+* filter, sort, and group review comments ([#61](https://github.com/stefanpantic/local-review-vscode-extension/issues/61)) ([01edf22](https://github.com/stefanpantic/local-review-vscode-extension/commit/01edf22456ce501a73700bc7d82a1e008ec89fe3))
+
+
+### Bug Fixes
+
+* refresh pull request metadata on sync and fix second reviews ([#66](https://github.com/stefanpantic/local-review-vscode-extension/issues/66)) ([bdc9c6a](https://github.com/stefanpantic/local-review-vscode-extension/commit/bdc9c6a04c224ae56417df80fa23fc711671c9bc))
+
 ## [0.4.2](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.4.1...agentic-review-v0.4.2) (2026-07-31)
 
 
