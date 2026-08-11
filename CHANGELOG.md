@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.5.0...agentic-review-v0.6.0) (2026-08-11)
+
+
+### Features
+
+* include the pull request description and commits in get_diff ([#67](https://github.com/stefanpantic/local-review-vscode-extension/issues/67)) ([2b8c753](https://github.com/stefanpantic/local-review-vscode-extension/commit/2b8c7534ed0b992de2df14cef010b7e13bb40366))
+
 ## [0.5.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.4.2...agentic-review-v0.5.0) (2026-08-09)
 
 
