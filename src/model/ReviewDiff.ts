@@ -51,6 +51,14 @@ export interface PrRef {
   headRef?: string; // local head ref name (display)
 }
 
+/** One commit that makes up a pull/merge request, read from the local object store. */
+export interface PrCommit {
+  sha: string; // full sha; callers abbreviate for display
+  author: string; // author name as recorded on the commit
+  date: string; // author date, ISO 8601
+  subject: string; // first line of the message
+}
+
 export interface ReviewDiff {
   repoRoot: string;
   source: DiffSource;

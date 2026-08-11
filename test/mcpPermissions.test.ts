@@ -53,6 +53,7 @@ function api(r: Review): McpReviewApi & { mutations: string[] } {
   return {
     mutations,
     getDiff: () => undefined,
+    getPrContext: async () => undefined,
     listReviews: () => [],
     getReview: () => r,
     addComment: async () => thread,
@@ -91,6 +92,7 @@ test('the host surface handed to MCP is exactly these methods', () => {
   // Compile-time: this list is the whole interface, so adding a method to McpReviewApi breaks the build here.
   const keys: Record<keyof McpReviewApi, true> = {
     getDiff: true,
+    getPrContext: true,
     listReviews: true,
     getReview: true,
     addComment: true,
@@ -104,6 +106,7 @@ test('the host surface handed to MCP is exactly these methods', () => {
     'deleteComment',
     'editComment',
     'getDiff',
+    'getPrContext',
     'getReview',
     'listReviews',
     'reply',

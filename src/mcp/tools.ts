@@ -1,17 +1,39 @@
 // MCP tool adapters — pure over a narrow `McpReviewApi` seam (no vscode/SDK imports), so they unit-test under tsx.
 // Handlers return readable text (or throw Error on failure); the server wraps both into MCP content.
 import { z } from 'zod';
-import type { ReviewDiff, Side } from '../model/ReviewDiff';
+import type { PrCommit, ReviewDiff, Side } from '../model/ReviewDiff';
 import type { Comment, CommentThread, Review } from '../model/Comment';
 import { AGENT_AUTHOR, canEditComment } from '../model/Comment';
 
 // Re-exported for existing importers; the definition now lives in the shared model.
 export { AGENT_AUTHOR };
 
+/**
+ * What the pull request under review is, beyond its lines: which request, what its author asked for, and
+ * the commits it carries. Everything here is already on the host, so assembling it costs no network.
+ */
+export interface PrContext {
+  number: number;
+  title?: string;
+  author?: string; // login
+  state?: string; // 'open' | 'closed' | 'merged'
+  isDraft?: boolean;
+  url?: string;
+  body?: string; // the description (markdown); empty when there is none
+  baseRef?: string;
+  headRef?: string;
+  baseSha: string;
+  headSha: string;
+  commits: PrCommit[]; // newest first, capped
+  total: number; // how many commits there are, which may exceed `commits.length`
+}
+
 /** The narrow host surface the MCP tools need. Implemented by `ReviewController`; faked in tests. */
 export interface McpReviewApi {
   /** The current normalized diff, or undefined when no repo/changes are loaded. */
   getDiff(): ReviewDiff | undefined;
+  /** The pull request the current diff belongs to, or undefined when it is a local diff. */
+  getPrContext(): Promise<PrContext | undefined>;
   /** All reviews for the current repo, current one flagged. */
   listReviews(): { id: string; name: string; branch: string; current: boolean; updatedAt: string; threads: number }[];
   /** A review (default: the current one), threads re-anchored against the current diff. */
@@ -50,7 +72,7 @@ function indent(text: string, spaces: number): string {
   const pad = ' '.repeat(spaces);
   return text
     .split('\n')
-    .map((l) => pad + l)
+    .map((l) => (l ? pad + l : l)) // a blank line stays blank rather than becoming trailing whitespace
     .join('\n');
 }
 
@@ -75,6 +97,37 @@ function formatReviews(list: ReturnType<McpReviewApi['listReviews']>): string {
   return list
     .map((r) => `${r.current ? '*' : ' '} [${r.id}] "${r.name}" (${r.branch}), ${r.threads} thread(s)`)
     .join('\n');
+}
+
+/** A ref and the commit it points at, or just the commit when the branch name is unknown. */
+function revLabel(sha: string, ref?: string): string {
+  const short = sha.slice(0, 7);
+  return ref ? `${ref} (${short})` : short;
+}
+
+/**
+ * The pull request itself, as the preamble to its diff: which request, its description, and its commits.
+ * Without this a reader has the changed lines and no idea what they were meant to achieve.
+ */
+export function formatPrContext(ctx: PrContext): string {
+  const state = ctx.isDraft ? 'draft' : (ctx.state ?? 'unknown state');
+  const out = [`Pull request #${ctx.number} · ${state}${ctx.author ? ` · author ${ctx.author}` : ''}`];
+  if (ctx.title) out.push(ctx.title);
+  out.push(`base ${revLabel(ctx.baseSha, ctx.baseRef)} → head ${revLabel(ctx.headSha, ctx.headRef)}`);
+  if (ctx.url) out.push(ctx.url);
+
+  out.push('', 'Description:', indent(ctx.body?.trim() || '(no description)', 2));
+
+  if (ctx.commits.length > 0) {
+    const width = Math.max(...ctx.commits.map((c) => c.author.length));
+    out.push('', `Commits (${ctx.total}), newest first:`);
+    for (const c of ctx.commits) {
+      out.push(`  ${c.sha.slice(0, 7)}  ${c.author.padEnd(width)}  ${c.date.slice(0, 10)}  ${c.subject}`);
+    }
+    const rest = ctx.total - ctx.commits.length;
+    if (rest > 0) out.push(`  (and ${rest} older commit${rest === 1 ? '' : 's'})`);
+  }
+  return out.join('\n');
 }
 
 /** The diff as annotated patch text: `<sign> <lineNo> | <code>` (sign: + add, - remove, space context). */
@@ -190,9 +243,13 @@ export const TOOLS: ToolDef[] = [
     name: 'get_diff',
     title: 'Get diff',
     description:
-      'Get the diff under review as annotated patch text. Each line is "<sign> <lineNo> | <code>", where the sign is + (added), - (removed), or space (context). To comment, use the shown line number with side="old" for - lines and side="new" for + or context lines. Only lines shown here are commentable.',
+      'Get the diff under review as annotated patch text. Each line is "<sign> <lineNo> | <code>", where the sign is + (added), - (removed), or space (context). To comment, use the shown line number with side="old" for - lines and side="new" for + or context lines. Only lines shown here are commentable. On a pull request the diff is preceded by the request itself: its number, title, state, base and head, description, and commits.',
     inputShape: {},
-    handler: async (api) => formatDiff(requireDiff(api)),
+    handler: async (api) => {
+      const diff = requireDiff(api);
+      const pr = await api.getPrContext();
+      return pr ? `${formatPrContext(pr)}\n\n${formatDiff(diff)}` : formatDiff(diff);
+    },
   },
   {
     name: 'post_comment',

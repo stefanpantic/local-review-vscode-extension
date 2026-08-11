@@ -10,6 +10,7 @@ import {
   listBranches,
   getUserName,
   fetchPr,
+  prCommits,
   prRefsPresent,
   getRemoteUrl,
 } from './git/git';
@@ -1083,6 +1084,29 @@ export class ReviewController {
   mcpApi(): McpReviewApi {
     return {
       getDiff: () => this.currentDiff(),
+      // The request behind the diff, so a reader has the intent along with the lines and never has to go
+      // digging for it. The commits come from the refs the fetch already pinned, so this stays local.
+      getPrContext: async () => {
+        const pref = this.state.getPref();
+        if (pref.source !== 'pr' || !pref.pr || !pref.repoRoot) return undefined;
+        const display = this.prDisplay(pref);
+        const { commits, total } = await prCommits(pref.repoRoot, pref.pr.baseSha, pref.pr.headSha);
+        return {
+          number: pref.pr.number,
+          title: display?.title,
+          author: display?.author,
+          state: display?.state,
+          isDraft: display?.isDraft,
+          url: display?.url,
+          body: display?.body,
+          baseRef: pref.pr.baseRef,
+          headRef: pref.pr.headRef,
+          baseSha: pref.pr.baseSha,
+          headSha: pref.pr.headSha,
+          commits,
+          total,
+        };
+      },
       listReviews: () => {
         const repoRoot = this.state.getPref().repoRoot;
         if (!repoRoot) return [];
