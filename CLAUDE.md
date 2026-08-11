@@ -26,7 +26,7 @@ ReviewMate can run a local MCP server so you can take part in a review. Set it u
 
 Once connected, these tools are available:
 
-- `get_diff` — the diff under review as annotated patch text: each line is `<sign> <lineNo> | <code>` (`+` added, `-` removed, space context). To comment, use the shown line number with `side: "old"` for `-` lines and `side: "new"` for `+`/context lines. **Only lines shown here are commentable** (changed lines and their context); others are rejected.
+- `get_diff` — the diff under review as annotated patch text: each line is `<sign> <lineNo> | <code>` (`+` added, `-` removed, space context). To comment, use the shown line number with `side: "old"` for `-` lines and `side: "new"` for `+`/context lines. **Only lines shown here are commentable** (changed lines and their context); others are rejected. On a pull request the patch is preceded by the request itself: number, title, state, base and head, description, and commits.
 - `get_active_review` — the review you are participating in, with every thread and comment id. `get_review` / `list_reviews` read a named review or list them all.
 - `post_comment` — add a comment on a line or range (`side` "new" for added/context lines, "old" for removed), optionally with a `suggestion`.
 - `reply` / `resolve` — respond in a thread or resolve/reopen it.

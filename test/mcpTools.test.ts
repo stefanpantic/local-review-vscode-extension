@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TOOLS, lineInDiff, AGENT_AUTHOR, type McpReviewApi } from '../src/mcp/tools';
+import { TOOLS, formatDiff, lineInDiff, AGENT_AUTHOR, type McpReviewApi, type PrContext } from '../src/mcp/tools';
 import type { CommentThread, Review } from '../src/model/Comment';
-import type { ReviewDiff, Side } from '../src/model/ReviewDiff';
+import type { PrCommit, ReviewDiff, Side } from '../src/model/ReviewDiff';
 
 const DIFF: ReviewDiff = {
   repoRoot: '/r',
@@ -54,12 +54,17 @@ class FakeApi implements McpReviewApi {
   deleted: Parameters<McpReviewApi['deleteComment']>[0][] = [];
   /** Whether the next delete takes its thread with it (the root-comment case). */
   deleteRemovesThread = false;
+  /** The request the diff belongs to; left unset the diff is a local one. */
+  pr: PrContext | undefined;
   constructor(
     private diff: ReviewDiff | undefined,
     private reviews: Review[] = [],
   ) {}
   getDiff() {
     return this.diff;
+  }
+  async getPrContext() {
+    return this.pr;
   }
   listReviews() {
     return this.reviews.map((r) => ({
@@ -132,6 +137,65 @@ test('get_diff renders annotated patch text with line numbers and signs', async 
   assert.match(out, /# a\.ts \(modified\)/);
   assert.match(out, /\+ 2 \| new/); // added line, new-side number
   assert.match(out, /- 2 \| old/); // removed line, old-side number
+});
+
+test('get_diff on a local diff is the patch text alone, with no request preamble', async () => {
+  const out = await tool('get_diff').handler(new FakeApi(DIFF), {});
+  assert.equal(out, formatDiff(DIFF));
+});
+
+/** A commit as the log module reports it: full sha, author name, ISO author date, subject. */
+function commit(sha: string, subject: string): PrCommit {
+  return { sha: sha.padEnd(40, '0'), author: 'Ada Lovelace', date: '2026-08-11T10:00:00+02:00', subject };
+}
+
+const PR: PrContext = {
+  number: 61,
+  title: 'feat: filter, sort, and group review comments',
+  author: 'stefanpantic',
+  state: 'open',
+  url: 'https://github.com/o/r/pull/61',
+  body: 'Adds a filter box.\n\nCloses #42.',
+  baseRef: 'main',
+  headRef: 'feat/filtering',
+  baseSha: 'abcdef1234567890',
+  headSha: '1234567890abcdef',
+  commits: [commit('aaaaaaa', 'feat: add the filter box'), commit('bbbbbbb', 'test: cover the filter')],
+  total: 2,
+};
+
+test('get_diff on a pull request leads with the request, its description, and its commits', async () => {
+  const api = new FakeApi(DIFF);
+  api.pr = PR;
+  const out = await tool('get_diff').handler(api, {});
+  assert.match(out, /^Pull request #61 · open · author stefanpantic\n/);
+  assert.match(out, /feat: filter, sort, and group review comments/);
+  assert.match(out, /base main \(abcdef1\) → head feat\/filtering \(1234567\)/);
+  assert.match(out, /https:\/\/github\.com\/o\/r\/pull\/61/);
+  assert.match(out, /Description:\n {2}Adds a filter box\.\n\n {2}Closes #42\./);
+  assert.match(
+    out,
+    /Commits \(2\), newest first:\n {2}aaaaaaa {2}Ada Lovelace {2}2026-08-11 {2}feat: add the filter box/,
+  );
+  // The patch text still follows in full, unchanged.
+  assert.ok(out.endsWith(formatDiff(DIFF)));
+});
+
+test('get_diff says how many commits it left out when the request is long', async () => {
+  const api = new FakeApi(DIFF);
+  api.pr = { ...PR, total: 51 };
+  const out = await tool('get_diff').handler(api, {});
+  assert.match(out, /Commits \(51\), newest first:/);
+  assert.match(out, /\(and 49 older commits\)/);
+});
+
+test('get_diff on a draft request with no description says so rather than showing a gap', async () => {
+  const api = new FakeApi(DIFF);
+  api.pr = { ...PR, isDraft: true, body: '', commits: [], total: 0 };
+  const out = await tool('get_diff').handler(api, {});
+  assert.match(out, /^Pull request #61 · draft · author stefanpantic\n/);
+  assert.match(out, /Description:\n {2}\(no description\)/);
+  assert.doesNotMatch(out, /Commits/);
 });
 
 test('post_comment on an in-diff line stamps the AI Agent author and confirms the thread', async () => {
