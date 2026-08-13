@@ -30,6 +30,6 @@ Once connected, these tools are available:
 - `get_active_review` — the review you are participating in, with every thread and comment id. `get_review` / `list_reviews` read a named review or list them all.
 - `post_comment` — add a comment on a line or range (`side` "new" for added/context lines, "old" for removed), optionally with a `suggestion`.
 - `reply` / `resolve` — respond in a thread or resolve/reopen it.
-- `edit_comment` / `delete_comment` — revise or withdraw a comment, addressed by its thread id and comment id (both shown by `get_active_review`). On a pull request only your own comments qualify, never a third party's; on a local review any comment does. Deleting a thread's first comment removes the thread.
+- `edit_comment` / `delete_comment` — revise or withdraw a comment, addressed by its thread id and comment id (both shown by `get_active_review`). On a pull request your own comments and the human reviewer's qualify, never a third party's; on a local review any comment does. Deleting a thread's first comment removes the thread.
 
-Comments you post are attributed to **"AI Agent"** and appear in the review UI exactly like the human's, anchored the same way. You never apply suggestions to files through ReviewMate — action them by editing files yourself.
+Comments you post are attributed to **"AI Agent"** and appear in the review UI exactly like the human's, anchored the same way. They keep that attribution after the human submits the review, even though GitHub records them under the human's account, so a comment you wrote stays yours to revise for a second Submit. You never apply suggestions to files through ReviewMate — action them by editing files yourself.

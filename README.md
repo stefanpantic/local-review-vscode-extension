@@ -89,13 +89,13 @@ For **GitHub Enterprise**, set `agenticReview.github.enterpriseUri` to your serv
 
 ## Agent integration (MCP)
 
-ReviewMate runs a standard, local MCP server (bound to `127.0.0.1`, token-guarded, off by default) that any MCP client can use. You comment and the agent acts on it. The agent can also post its own comments, replies, and suggestions. They show up in the panel attributed to "AI Agent", anchored like yours, and on a pull request they post to GitHub with the rest of your review.
+ReviewMate runs a standard, local MCP server (bound to `127.0.0.1`, token-guarded, off by default) that any MCP client can use. You comment and the agent acts on it. The agent can also post its own comments, replies, and suggestions. They show up in the panel attributed to "AI Agent", anchored like yours, and on a pull request they post to GitHub with the rest of your review, under your account. They keep the "AI Agent" label in your review afterwards, so you can still tell which comments it wrote.
 
 1. Run **ReviewMate: Set up MCP**. Pick a port and whether to start it on launch.
 2. It generates an mcp.json (URL, token, and ready-to-run connect commands: Claude Code, plus a generic `mcpServers` config for other clients) and opens it. Reopen it anytime with **Open MCP Config**. It lives in the extension's per-workspace storage, not in your repo.
 3. Connect your client. Use **Start MCP Server** / **Stop MCP Server** to control it anytime.
 
-Tools the agent gets: `get_diff`, `get_active_review`, `get_review`, `list_reviews`, `post_comment`, `reply`, `resolve`, `edit_comment`, `delete_comment`. On a pull request, `get_diff` hands over the request as well as its lines: number, title, state, base and head, the description, and the commits, all read locally. It can revise and withdraw its own comments, under the same rule you get: on a pull request only its own comments, so someone else's is never touchable, and on a local review any comment, because the only authors there are you and it. It never writes to your files: it posts comments and makes the changes by editing code itself. The server is loopback-only and has no GitHub access of its own.
+Tools the agent gets: `get_diff`, `get_active_review`, `get_review`, `list_reviews`, `post_comment`, `reply`, `resolve`, `edit_comment`, `delete_comment`. On a pull request, `get_diff` hands over the request as well as its lines: number, title, state, base and head, the description, and the commits, all read locally. It can revise and withdraw comments under the same rule you get, measured against the same identity: on a pull request its own comments and yours, so someone else's is never touchable, and on a local review any comment, because the only authors there are you and it. It never writes to your files: it posts comments and makes the changes by editing code itself. The server is loopback-only and has no GitHub access of its own.
 
 ### Or export a work list
 

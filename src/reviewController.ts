@@ -1077,13 +1077,15 @@ export class ReviewController {
    *
    * An agent can create, reply, resolve, edit, and delete. Editing and deleting are limited to content it may
    * change by the same `canEditComment` rule the human UI applies, enforced in `src/mcp/tools.ts` where the
-   * check is pure and testable: on a pull request that is agent-authored comments only, so a third party's
-   * imported comment is never touchable. The methods below are the same ones the panel calls, so an agent's
-   * delete of a posted comment stages the remote delete and its edit reads as pending, exactly as yours would.
+   * check is pure and testable: measured against the same identity, so the agent may change whatever you may
+   * change and a third party's imported comment is never touchable. The methods below are the same ones the
+   * panel calls, so an agent's delete of a posted comment stages the remote delete and its edit reads as
+   * pending, exactly as yours would.
    */
   mcpApi(): McpReviewApi {
     return {
       getDiff: () => this.currentDiff(),
+      viewer: () => this.authorIdentity(),
       // The request behind the diff, so a reader has the intent along with the lines and never has to go
       // digging for it. The commits come from the refs the fetch already pinned, so this stays local.
       getPrContext: async () => {
