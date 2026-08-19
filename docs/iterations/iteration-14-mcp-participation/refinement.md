@@ -25,7 +25,10 @@ zero-argument tool removes the guesswork.
   that resolves to agent-authored comments only, so an imported comment from a teammate is never touchable.
   On a local review it resolves to everything, because a local review has no third parties in it: every
   comment is the human's or the agent's. The asymmetry is the existing rule's, not a new one, and it is the
-  same rule the human UI enforces.
+  same rule the human UI enforces. _(**Superseded.** The viewer is now the human's identity, so the agent may
+  change whatever the human may change. Submitting posts the agent's comments under the human's identity, so
+  agent-as-viewer left the agent unable to revise its own comments the moment they were submitted. See the
+  second addendum in [ADR-0010](../../decisions/0010-mcp-agentic-integration.md).)_
 - **The check lives in `src/mcp/tools.ts`, in one place.** That file imports no `vscode`, so the rule is
   unit-testable under `tsx`, and it is where the readable refusal message belongs. The controller's
   `mcpApi()` seam forwards to the existing `editComment` / `deleteComment` and adds no second copy of the
@@ -115,4 +118,5 @@ pointer from iteration 13's #16).
   the window is not worth a lock.
 - Allowing the agent to delete the human's comments on a local review follows from `canEditComment` and is
   deliberate. If it turns out to be uncomfortable in practice, the fix is a stricter viewer for the MCP path,
-  not a change to the shared rule.
+  not a change to the shared rule. _(It went the other way: practice called for a wider viewer, and the same
+  rule now applies on a pull request too. See the addendum note above.)_

@@ -63,6 +63,9 @@ class FakeApi implements McpReviewApi {
   getDiff() {
     return this.diff;
   }
+  viewer() {
+    return 'me';
+  }
   async getPrContext() {
     return this.pr;
   }
