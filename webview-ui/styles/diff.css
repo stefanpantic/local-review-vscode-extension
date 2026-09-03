@@ -978,6 +978,100 @@ body {
   background: var(--lr-add-bg);
 }
 
+/* Reactions: emoji chips below a comment, and the picker popover */
+.lr-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+.lr-reaction {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--lr-border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--vscode-foreground);
+  font-size: 12px;
+  line-height: 1.3;
+  cursor: pointer;
+  transition:
+    background 0.1s,
+    border-color 0.1s;
+}
+.lr-reaction-emoji {
+  font-size: 13px;
+}
+.lr-reaction-count {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+.lr-reaction:hover {
+  border-color: var(--vscode-focusBorder, var(--lr-border));
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.08));
+}
+.lr-reaction-active {
+  border-color: var(--vscode-focusBorder);
+  background: color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent);
+}
+.lr-reaction-active .lr-reaction-count {
+  color: var(--vscode-foreground);
+}
+.lr-reaction-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  font-size: 14px;
+  font-weight: 300;
+  cursor: pointer;
+  transition:
+    background 0.1s,
+    border-color 0.1s;
+}
+.lr-reaction-add:hover {
+  border-color: var(--lr-border);
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.08));
+  color: var(--vscode-foreground);
+}
+.lr-reaction-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border: 1px solid var(--lr-border);
+  border-radius: 8px;
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+}
+.lr-reaction-pick {
+  padding: 2px 5px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.lr-reaction-pick:hover {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.1));
+}
+.lr-reaction-pick-active {
+  background: color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent);
+}
+.lr-reaction-pick-close {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
 /* Buttons: primary/secondary pill, small variant, and a subtle ghost for per-comment actions. */
 .lr-btn {
   padding: 3px 12px;

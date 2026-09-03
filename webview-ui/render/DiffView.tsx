@@ -274,6 +274,7 @@ export function DiffView({
     onEdit: (commentId, body, suggestion) => mutate(request('editComment', { threadId, commentId, body, suggestion })),
     onDelete: (commentId) => mutate(request('deleteComment', { threadId, commentId })),
     onResolve: (resolved) => mutate(request('resolveThread', { threadId, resolved })),
+    onToggleReaction: (commentId, emoji) => mutate(request('toggleReaction', { threadId, commentId, emoji })),
   });
 
   function mutate(p: Promise<unknown>): void {

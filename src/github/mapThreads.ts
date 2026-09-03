@@ -1,11 +1,35 @@
 // Map GitHub review threads into the neutral comment model. Pure & synchronous — unit-tested with fixtures.
 // Anchors are derived from the loaded diff exactly like locally created comments, so the existing
 // content-match engine decides anchored/moved/outdated for imported threads too.
-import type { Anchor, Comment, CommentThread } from '../model/Comment';
-import { UNKNOWN_AUTHOR } from '../model/Comment';
+import type { Anchor, Comment, CommentThread, ReactionEmoji } from '../model/Comment';
+import { UNKNOWN_AUTHOR, REACTION_EMOJIS } from '../model/Comment';
 import type { ReviewDiff, Side } from '../model/ReviewDiff';
 import { createAnchor, rangeText } from '../comments/anchoring';
 import type { GhReviewComment, GhReviewThread } from './types';
+
+const GITHUB_TO_EMOJI: Record<string, ReactionEmoji> = {
+  THUMBS_UP: '👍',
+  THUMBS_DOWN: '👎',
+  EYES: '👀',
+  HEART: '❤️',
+  HOORAY: '🎉',
+};
+
+export const EMOJI_TO_GITHUB: Record<ReactionEmoji, string> = Object.fromEntries(
+  REACTION_EMOJIS.map((e) => [e, Object.entries(GITHUB_TO_EMOJI).find(([, v]) => v === e)![0]]),
+) as Record<ReactionEmoji, string>;
+
+function groupReactions(
+  raw: Array<{ content: string; login: string }>,
+): Partial<Record<ReactionEmoji, string[]>> | undefined {
+  const out: Partial<Record<ReactionEmoji, string[]>> = {};
+  for (const r of raw) {
+    const emoji = GITHUB_TO_EMOJI[r.content];
+    if (!emoji) continue;
+    (out[emoji] ??= []).push(r.login);
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
 
 /** Turn GitHub review threads into comment threads anchored against `diff`. Threads without a position are dropped. */
 export function mapThreads(threads: GhReviewThread[], diff: ReviewDiff): CommentThread[] {
@@ -86,6 +110,11 @@ function mapComment(
   if (c.url) comment.remoteUrl = c.url;
   if (c.isPending) comment.remotePending = true;
   comment.remoteBody = comment.body; // baseline: a later change to `body` is a pending edit
+  const reactions = groupReactions(c.reactions);
+  if (reactions) {
+    comment.reactions = reactions;
+    comment.remoteReactions = structuredClone(reactions);
+  }
   if (parsed) {
     const original = rangeText(diff, path, side, firstLine, lastLine);
     comment.suggestion = { original, replacement: parsed.replacement };

@@ -30,6 +30,7 @@ function comment(over: Partial<GhReviewComment> = {}): GhReviewComment {
     url: 'https://gh/c/1001',
     diffHunk: '@@ -1,3 +1,3 @@\n A\n B\n C',
     isPending: false,
+    reactions: [],
     ...over,
   };
 }

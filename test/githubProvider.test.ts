@@ -70,6 +70,8 @@ class FakeClient implements GithubWriteClient {
   async resolveThread(input: { threadId: string; resolved: boolean }): Promise<void> {
     this.resolves.push(input);
   }
+  async addReaction(): Promise<void> {}
+  async removeReaction(): Promise<void> {}
   async listPullRequests(): Promise<PullRequestSummary[]> {
     return [{ number: 1, title: 'PR', author: 'a', state: 'open', url: 'u', updatedAt: 't', isDraft: false }];
   }
@@ -142,6 +144,7 @@ test('getThreads fetches raw threads and returns them mapped + anchored against 
         url: 'cu',
         diffHunk: '@@ -1,3 +1,3 @@\n A\n B\n C',
         isPending: false,
+        reactions: [],
       },
     ],
   };
@@ -176,6 +179,7 @@ test('submitReview translates the neutral batch into GitHub calls', async () => 
     edits: [{ commentId: '200', body: 'edited' }],
     deletes: ['300'],
     resolves: [{ threadId: 'T1', resolved: true }],
+    reactions: [],
   };
   await p.submitReview(repo, 7, input);
   assert.deepEqual(client.edits, [{ commentId: 200, body: 'edited' }]);
@@ -209,6 +213,7 @@ test('submitReview skips the review batch for a bare comment with nothing to say
     edits: [],
     deletes: [],
     resolves: [],
+    reactions: [],
   });
   assert.equal(client.reviews.length, 0); // no new threads + comment event + empty body -> no review
   assert.equal(client.replies.length, 1); // the imported-thread reply still posts on its own
@@ -226,6 +231,7 @@ test('submitReview posts an approve even with no inline comments', async () => {
     edits: [],
     deletes: [],
     resolves: [],
+    reactions: [],
   });
   assert.equal(client.reviews.length, 1);
   assert.equal(client.reviews[0].event, 'APPROVE');
@@ -243,6 +249,7 @@ test('submitReview posts a new draft thread root and its follow-up reply in the 
     edits: [],
     deletes: [],
     resolves: [],
+    reactions: [],
   });
   assert.equal(client.reviews.length, 1);
   assert.equal(client.reviews[0].comments[0].body, 'first');

@@ -67,6 +67,7 @@ function api(r: Review): McpReviewApi & { mutations: string[] } {
       mutations.push('delete');
       return { threadId: thread.id, threadDeleted: false };
     },
+    toggleReaction: async () => thread,
   };
 }
 
@@ -83,6 +84,7 @@ test('the MCP tool set is exactly these tools', () => {
     'get_review',
     'list_reviews',
     'post_comment',
+    'react',
     'reply',
     'resolve',
   ]);
@@ -100,6 +102,7 @@ test('the host surface handed to MCP is exactly these methods', () => {
     resolve: true,
     editComment: true,
     deleteComment: true,
+    toggleReaction: true,
   };
   assert.deepEqual(Object.keys(keys).sort(), [
     'addComment',
@@ -111,6 +114,7 @@ test('the host surface handed to MCP is exactly these methods', () => {
     'listReviews',
     'reply',
     'resolve',
+    'toggleReaction',
   ]);
 });
 

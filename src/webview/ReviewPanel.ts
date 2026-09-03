@@ -58,6 +58,7 @@ export class ReviewPanel {
         editComment: (p) => this.controller.editComment(p.threadId, p.commentId, p.body, p.suggestion),
         deleteComment: (p) => this.controller.deleteComment(p.threadId, p.commentId),
         resolveThread: (p) => this.controller.resolveThread(p.threadId, p.resolved),
+        toggleReaction: (p) => this.controller.toggleReaction(p.threadId, p.commentId, p.emoji),
         submitReview: async () => {
           await vscode.commands.executeCommand('agenticReview.github.submitReview');
           return { ok: true as const };

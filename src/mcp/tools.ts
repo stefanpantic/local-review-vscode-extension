@@ -2,8 +2,8 @@
 // Handlers return readable text (or throw Error on failure); the server wraps both into MCP content.
 import { z } from 'zod';
 import type { PrCommit, ReviewDiff, Side } from '../model/ReviewDiff';
-import type { Comment, CommentThread, Review } from '../model/Comment';
-import { AGENT_AUTHOR, canEditComment } from '../model/Comment';
+import type { Comment, CommentThread, ReactionEmoji, Review } from '../model/Comment';
+import { AGENT_AUTHOR, canEditComment, REACTION_EMOJIS } from '../model/Comment';
 
 // Re-exported for existing importers; the definition now lives in the shared model.
 export { AGENT_AUTHOR };
@@ -57,6 +57,12 @@ export interface McpReviewApi {
     suggestion?: string | null;
   }): Promise<CommentThread>;
   deleteComment(a: { threadId: string; commentId: string }): Promise<{ threadId: string; threadDeleted: boolean }>;
+  toggleReaction(a: {
+    threadId: string;
+    commentId: string;
+    emoji: ReactionEmoji;
+    author: string;
+  }): Promise<CommentThread>;
 }
 
 // --- readable formatting (text, not JSON — compact and easy for the agent + human to read) ---
@@ -81,7 +87,13 @@ function formatThread(t: CommentThread): string {
   // Each comment leads with its own id, which is what edit_comment / delete_comment address.
   const body = t.comments.map((c) => {
     const suggestion = c.suggestion ? `\n    suggestion:\n${indent(c.suggestion.replacement, 6)}` : '';
-    return `  [${c.id}] ${c.author}: ${c.body}${suggestion}`;
+    const rx = c.reactions
+      ? '\n    ' +
+        REACTION_EMOJIS.filter((e) => c.reactions![e]?.length)
+          .map((e) => `${e} ${c.reactions![e]!.length}`)
+          .join(' ')
+      : '';
+    return `  [${c.id}] ${c.author}: ${c.body}${suggestion}${rx}`;
   });
   return [head, ...body].join('\n');
 }
@@ -348,6 +360,30 @@ export const TOOLS: ToolDef[] = [
       return threadDeleted
         ? `Deleted comment ${commentId}; thread ${threadId} is gone with it.`
         : `Deleted comment ${commentId} from thread ${threadId}.`;
+    },
+  },
+  {
+    name: 'react',
+    title: 'React to a comment',
+    description:
+      'Toggle a reaction on a comment (add if not present, remove if already reacted). Any comment in the review can be reacted to.',
+    inputShape: {
+      threadId: z.string(),
+      commentId: z.string(),
+      emoji: z.enum(['👍', '👎', '👀', '❤️', '🎉']),
+    },
+    handler: async (api, args) => {
+      const threadId = args.threadId as string;
+      const commentId = args.commentId as string;
+      const emoji = args.emoji as ReactionEmoji;
+      const review = api.getReview();
+      const thread = review?.threads.find((t) => t.id === threadId);
+      if (!thread?.comments.find((c) => c.id === commentId))
+        throw new Error(
+          `Comment ${commentId} not found in thread ${threadId}. Call get_active_review for current ids.`,
+        );
+      await api.toggleReaction({ threadId, commentId, emoji, author: AGENT_AUTHOR });
+      return `Toggled ${emoji} on comment ${commentId} in thread ${threadId}.`;
     },
   },
 ];

@@ -16,6 +16,7 @@ export interface GhReviewComment {
   // Sits in a review its author has not submitted yet, so only they can see it. GitHub returns these
   // alongside submitted comments to their own author, and they are indistinguishable without this flag.
   isPending: boolean;
+  reactions: Array<{ content: string; login: string }>;
 }
 
 /** A GitHub pull request review thread: its anchor, resolution state, and ordered comments. */
