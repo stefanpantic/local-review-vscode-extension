@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.8.0...agentic-review-v0.8.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* use smiley outline icon for add-reaction button ([#80](https://github.com/stefanpantic/local-review-vscode-extension/issues/80)) ([fbc5701](https://github.com/stefanpantic/local-review-vscode-extension/commit/fbc57013451ec8d3e351688e1b90fb0defec9b00))
+
 ## [0.8.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.7.0...agentic-review-v0.8.0) (2026-09-04)
 
 
