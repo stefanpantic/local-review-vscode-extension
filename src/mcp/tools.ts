@@ -32,6 +32,8 @@ export interface PrContext {
 export interface McpReviewApi {
   /** The current normalized diff, or undefined when no repo/changes are loaded. */
   getDiff(): ReviewDiff | undefined;
+  /** The human's identity (GitHub login, else git user.name): who "your" comments belong to. */
+  viewer(): string;
   /** The pull request the current diff belongs to, or undefined when it is a local diff. */
   getPrContext(): Promise<PrContext | undefined>;
   /** All reviews for the current repo, current one flagged. */
@@ -186,10 +188,13 @@ function requireDiff(api: McpReviewApi): ReviewDiff {
 
 /**
  * Resolve a comment in the active review and confirm the agent may change it, the single gate every tool that
- * alters existing content goes through. The rule is `canEditComment` with the agent as the viewer, which is
- * what the human UI applies to itself: on a pull request only agent-authored comments qualify, so an imported
- * comment from someone else is never touchable, and on a local review everything does, because the only
- * authors there are the human and the agent.
+ * alters existing content goes through. The rule is `canEditComment` measured against the human's identity,
+ * exactly the call the human UI makes: the agent may change whatever the human may change. On a pull request
+ * that is the human's comments and its own, so an imported comment from a third party is never touchable; on
+ * a local review it is everything, because the only authors there are the human and the agent.
+ *
+ * The agent and the human are one actor upstream, because everything the agent writes is posted under the
+ * human's identity, so a rule that told the two apart on a pull request would only ever be arbitrary.
  *
  * The refusal names the author, so a caller learns why rather than retrying the same call.
  */
@@ -202,9 +207,10 @@ function requireEditable(api: McpReviewApi, threadId: string, commentId: string)
       `Comment ${commentId} was not found in thread ${threadId} of the active review. Call get_active_review for current thread and comment ids.`,
     );
   }
-  if (!canEditComment(comment, AGENT_AUTHOR, review?.kind === 'remote')) {
+  const viewer = api.viewer();
+  if (!canEditComment(comment, viewer, review?.kind === 'remote')) {
     throw new Error(
-      `Comment ${commentId} was written by ${comment.author}, so it is not yours to change. On a pull request you can only edit or delete comments authored by ${AGENT_AUTHOR}.`,
+      `Comment ${commentId} was written by ${comment.author}, so it is not yours to change. On a pull request you can only edit or delete comments authored by ${AGENT_AUTHOR} or by ${viewer}.`,
     );
   }
   return comment;
@@ -326,7 +332,7 @@ export const TOOLS: ToolDef[] = [
     name: 'edit_comment',
     title: 'Edit a comment',
     description:
-      'Rewrite one of your own comments (get_active_review lists comment ids). On a pull request only comments you authored can be edited, never anyone else\'s. `suggestion` replaces the proposed code, `null` removes the suggestion, and omitting it leaves the current one alone; a suggestion only applies to a thread on the "new" side.',
+      'Rewrite a comment in the review (get_active_review lists comment ids). On a pull request you can edit your own comments and the reviewer\'s, never a third party\'s. `suggestion` replaces the proposed code, `null` removes the suggestion, and omitting it leaves the current one alone; a suggestion only applies to a thread on the "new" side.',
     inputShape: {
       threadId: z.string(),
       commentId: z.string(),
@@ -350,7 +356,7 @@ export const TOOLS: ToolDef[] = [
     name: 'delete_comment',
     title: 'Delete a comment',
     description:
-      "Remove one of your own comments (get_active_review lists comment ids). On a pull request only comments you authored can be deleted, never anyone else's. Deleting a thread's first comment removes the whole thread. A comment already posted on a pull request is deleted there when the review is submitted.",
+      "Remove a comment from the review (get_active_review lists comment ids). On a pull request you can delete your own comments and the reviewer's, never a third party's. Deleting a thread's first comment removes the whole thread. A comment already posted on a pull request is deleted there when the review is submitted.",
     inputShape: { threadId: z.string(), commentId: z.string() },
     handler: async (api, args) => {
       const threadId = args.threadId as string;

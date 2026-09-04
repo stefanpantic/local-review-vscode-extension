@@ -45,6 +45,19 @@ function toLocalOnly(c: Comment): Comment {
 }
 
 /**
+ * Keep the agent's authorship on a comment it wrote. Submitting posts the agent's comments under your
+ * identity, so the fetched copy comes back authored by you: upstream is right about who posted it, and
+ * locally the agent still wrote it, which is what keeps it the agent's to revise and what the agent filter
+ * and the agent badge read. Only that mark is carried over. Your own comments take the fetched author,
+ * because that login is what edit permission measures against and it need not equal the git user.name they
+ * were written under.
+ */
+function keepAgentAuthor(fetched: Comment, local: Comment | undefined): Comment {
+  if (local?.author !== AGENT_AUTHOR || fetched.author === AGENT_AUTHOR) return fetched;
+  return { ...fetched, author: AGENT_AUTHOR };
+}
+
+/**
  * Identity of a comment by its content and position, used to spot a local draft that is already posted.
  * The suggestion is part of it because the same prose with a different proposed replacement is a different
  * comment (the fenced block is stripped back out on import, so the prose alone is not enough).
@@ -94,15 +107,16 @@ function adoptPostedDrafts(
     const match = candidates.get(contentKey(t.anchor.filePath, t.anchor.side, root))?.shift();
     if (!match) return t;
     adopted++;
-    // Take the posted root wholesale (it carries the remote ids and the imported baselines) and keep the
-    // local follow-ups after it, where the normal rebuild picks them up as pending replies.
+    // Take the posted root (it carries the remote ids and the imported baselines), keeping the agent's
+    // authorship that the post itself could not carry, and keep the local follow-ups after it, where the
+    // normal rebuild picks them up as pending replies.
     return {
       ...t,
       remoteThreadId: match.remoteThreadId,
       remoteRootId: match.remoteRootId,
       remoteResolved: match.resolved,
       resolved: match.resolved,
-      comments: [match.comments[0], ...t.comments.slice(1)],
+      comments: [keepAgentAuthor(match.comments[0], root), ...t.comments.slice(1)],
     };
   });
   return { threads, adopted };
@@ -119,6 +133,8 @@ function adoptPostedDrafts(
  *   keeps your text until you resolve it either way;
  * - local-draft threads are kept, except one that turns out to be posted already, which is linked to its
  *   remote thread rather than re-sent;
+ * - a comment the agent wrote keeps its authorship when its posted copy comes back under your identity, so
+ *   submitting it does not quietly turn it into one of yours;
  * - a comment of yours that is gone upstream is NOT removed: it is kept as **local-only** (its remote link
  *   dropped so it reposts, flagged so you can repost on Submit or delete to discard). Someone else's
  *   vanished comment is removed. Both only when `removeMissing` is set, so a poll never removes anything;
@@ -186,15 +202,16 @@ export function reconcile(
       continue;
     }
     const comments: Comment[] = [];
-    // Fetched comments we have never seen locally. Either genuinely new upstream activity, or a reply of
-    // yours that posted before a submit failed — the loop below tells the two apart.
-    const unseen: Comment[] = [];
+    // Fetched comments we have never seen locally, each with where it sits in `comments`. Either genuinely
+    // new upstream activity, or a reply of yours that posted before a submit failed — the loop below tells
+    // the two apart, and needs the position to put an adopted reply's authorship back on the fetched copy.
+    const unseen: { comment: Comment; at: number }[] = [];
     for (const fc of ft.comments) {
       if (fc.remoteId && staged.has(fc.remoteId)) continue; // staged for deletion: hidden until Submit posts it
       const lc = fc.remoteId ? localByComment.get(fc.remoteId) : undefined;
       if (!lc) {
         if (fc.remoteId) {
-          unseen.push(fc);
+          unseen.push({ comment: fc, at: comments.length });
           if (!mine(fc.author)) incoming++; // the "new comments" signal is about other people's activity
         }
         comments.push(fc);
@@ -203,17 +220,17 @@ export function reconcile(
       const edited = lc.remoteBody !== undefined && lc.body !== lc.remoteBody;
       const rxMerge = mergeReactions(lc, fc);
       if (!edited && !rxMerge.reactions) {
-        comments.push(fc); // no pending edit or reactions: take upstream wholesale
+        comments.push(keepAgentAuthor(fc, lc));
         continue;
       }
       if (!edited) {
-        comments.push({ ...fc, ...rxMerge });
+        comments.push({ ...keepAgentAuthor(fc, lc), ...rxMerge });
         continue;
       }
       // Your edit wins locally. If upstream moved off the same baseline too, this is a genuine collision.
       const upstreamChanged = lc.remoteBody !== undefined && fc.body !== lc.remoteBody;
       const conflict = lc.conflict === true || upstreamChanged;
-      comments.push({ ...fc, body: lc.body, ...(conflict ? { conflict: true } : {}), ...rxMerge });
+      comments.push({ ...keepAgentAuthor(fc, lc), body: lc.body, ...(conflict ? { conflict: true } : {}), ...rxMerge });
     }
     // Pending replies, minus any that turn out to have posted already (a submit that failed after sending
     // them). Same adoption rule as a draft root: match your own content, and consume each fetched comment
@@ -221,14 +238,17 @@ export function reconcile(
     for (const r of repliesByThread.get(ft.remoteThreadId) ?? []) {
       const i = unseen.findIndex(
         (u) =>
-          mine(u.author) &&
-          u.body === r.body &&
-          (u.suggestion?.replacement ?? '') === (r.suggestion?.replacement ?? ''),
+          mine(u.comment.author) &&
+          u.comment.body === r.body &&
+          (u.comment.suggestion?.replacement ?? '') === (r.suggestion?.replacement ?? ''),
       );
       if (i >= 0) {
-        unseen.splice(i, 1);
+        // Already on the remote: the fetched copy stands and the pending one is retired, so the fetched copy
+        // is where the agent's authorship has to land.
+        const [u] = unseen.splice(i, 1);
+        comments[u.at] = keepAgentAuthor(comments[u.at], r);
         adopted++;
-        continue; // already on the remote: the fetched copy stands, the pending one is retired
+        continue;
       }
       comments.push(r);
     }

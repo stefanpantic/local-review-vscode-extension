@@ -39,6 +39,30 @@ and GitHub allows it for anyone with access.
 Nothing about egress changes. The server stays loopback, token-guarded, opt-in, with no GitHub capability of
 its own.
 
+## Addendum: the rule measures against your identity, not the agent's
+
+The rule above told the agent and the human apart on a pull request, so the agent could touch only what it
+wrote. Practice showed that boundary cannot hold, because it is not a boundary that exists upstream. An
+agent's comment is submitted under the human's identity, since the human's token posts it, so the fetch that
+follows hands it back authored by the human. The agent then could not revise a comment it had written a
+minute earlier, and the human could not get a second round of the agent's edits submitted at all.
+
+Two things follow.
+
+**Authorship survives the round trip.** Reconcile keeps `AGENT_AUTHOR` on a comment whose local copy carried
+it, so submitting no longer turns the agent's comment into one of the human's. This also keeps the agent
+badge and the `author:@agent` filter honest on a review that has been submitted, which the old behavior
+silently broke. It is provenance only: the remote record stays what it is.
+
+**The rule measures against the human's identity.** `canEditComment(comment, viewer, remote)` with `viewer`
+from `authorIdentity()`, exactly the call the human UI makes, so the agent may change whatever the human may
+change and a third party's imported comment stays untouchable. Upstream the two are one actor, so a rule
+that separated them was arbitrary in the one direction that matters and unenforceable in the other: any
+comment the agent posted and submitted reads as the human's on GitHub, and nothing there records otherwise.
+The cost is that the agent can now rewrite or withdraw a comment the human typed. On a local review it
+already could, the human sees every change in the panel as it lands, and nothing reaches GitHub without the
+human's explicit Submit.
+
 ## Consequences
 
 - No second source of truth and no IPC layer — the agent path and the UI path converge on one controller, so agent comments drift, persist, and render identically to human ones.
