@@ -15,7 +15,7 @@ export function buildHtml(webview: vscode.Webview, extensionUri: vscode.Uri): st
     `img-src ${webview.cspSource} https: data:`,
     `style-src ${webview.cspSource}`,
     `script-src 'nonce-${n}'`,
-    `font-src ${webview.cspSource}`,
+    `font-src ${webview.cspSource} data:`,
   ].join('; ');
 
   return `<!DOCTYPE html>

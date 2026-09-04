@@ -42,8 +42,8 @@ export interface McpReviewApi {
   getReview(id?: string): Review | undefined;
   addComment(a: {
     filePath: string;
-    side: Side;
-    startLine: number;
+    side?: Side;
+    startLine?: number;
     endLine?: number;
     body: string;
     suggestion?: string;
@@ -70,10 +70,12 @@ export interface McpReviewApi {
 // --- readable formatting (text, not JSON — compact and easy for the agent + human to read) ---
 
 function threadLoc(t: CommentThread): string {
-  const start = t.resolvedLine ?? t.anchor.lineNumber;
-  const end = t.resolvedEndLine ?? t.anchor.endLineNumber ?? start;
+  const { anchor } = t;
+  if (anchor.kind === 'file') return `${anchor.filePath} (file)`;
+  const start = t.resolvedLine ?? anchor.lineNumber;
+  const end = t.resolvedEndLine ?? anchor.endLineNumber ?? start;
   const range = end > start ? `${start}-${end}` : `${start}`;
-  return `${t.anchor.filePath}:${range} (${t.anchor.side})`;
+  return `${anchor.filePath}:${range} (${anchor.side})`;
 }
 
 function indent(text: string, spaces: number): string {
@@ -273,11 +275,11 @@ export const TOOLS: ToolDef[] = [
     name: 'post_comment',
     title: 'Post comment',
     description:
-      'Add a review comment on a line or range. side="new" for added/context lines, "old" for removed lines. The line must exist in the current diff (see get_diff). Optionally include a `suggestion` (replacement code for the range).',
+      'Add a review comment on a line, range, or file. For a line comment: side="new" for added/context lines, "old" for removed lines; the line must exist in the current diff (see get_diff). For a file-level comment (attached to the file, not a line): omit startLine and side. Optionally include a `suggestion` (replacement code for the range; not available on file-level comments).',
     inputShape: {
       file: z.string(),
-      side: z.enum(['old', 'new']),
-      startLine: z.number().int().positive(),
+      side: z.enum(['old', 'new']).optional(),
+      startLine: z.number().int().positive().optional(),
       endLine: z.number().int().positive().optional(),
       body: z.string(),
       suggestion: z.string().optional(),
@@ -285,23 +287,35 @@ export const TOOLS: ToolDef[] = [
     handler: async (api, args) => {
       const diff = requireDiff(api);
       const file = args.file as string;
-      const side = args.side as Side;
-      const startLine = args.startLine as number;
-      if (!lineInDiff(diff, file, side, startLine)) {
-        throw new Error(
-          `Line ${startLine} (${side} side) of ${file} is not in the current diff. Call get_diff to see commentable lines (changed lines and their surrounding context).`,
-        );
+      const startLine = args.startLine as number | undefined;
+      if (startLine != null) {
+        const side = (args.side as Side | undefined) ?? 'new';
+        if (!lineInDiff(diff, file, side, startLine)) {
+          throw new Error(
+            `Line ${startLine} (${side} side) of ${file} is not in the current diff. Call get_diff to see commentable lines (changed lines and their surrounding context).`,
+          );
+        }
+        const thread = await api.addComment({
+          filePath: file,
+          side,
+          startLine,
+          endLine: args.endLine as number | undefined,
+          body: args.body as string,
+          suggestion: args.suggestion as string | undefined,
+          author: AGENT_AUTHOR,
+        });
+        return `Posted thread ${thread.id} at ${threadLoc(thread)} · ${thread.status ?? 'anchored'}.`;
+      }
+      // File-level comment: validate the file exists in the diff.
+      if (!diff.files.some((f) => f.path === file || f.oldPath === file)) {
+        throw new Error(`File ${file} is not in the current diff.`);
       }
       const thread = await api.addComment({
         filePath: file,
-        side,
-        startLine,
-        endLine: args.endLine as number | undefined,
         body: args.body as string,
-        suggestion: args.suggestion as string | undefined,
         author: AGENT_AUTHOR,
       });
-      return `Posted thread ${thread.id} at ${threadLoc(thread)} · ${thread.status ?? 'anchored'}.`;
+      return `Posted file-level thread ${thread.id} on ${threadLoc(thread)} · ${thread.status ?? 'anchored'}.`;
     },
   },
   {

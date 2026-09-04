@@ -10,7 +10,15 @@ function comment(over: Partial<Comment> = {}): Comment {
 function thread(over: Partial<CommentThread> = {}): CommentThread {
   return {
     id: 't',
-    anchor: { filePath: 'a.ts', side: 'new', lineNumber: 1, line: 'x', source: 'pr', originalDiffHunk: '' },
+    anchor: {
+      kind: 'line',
+      filePath: 'a.ts',
+      side: 'new',
+      lineNumber: 1,
+      line: 'x',
+      source: 'pr',
+      originalDiffHunk: '',
+    },
     comments: [comment()],
     resolved: false,
     ...over,
@@ -58,7 +66,15 @@ test('the batch pins to the reviewed head sha', () => {
 test('a local-draft root becomes a new top-level comment positioned from its anchor', () => {
   const draft = thread({
     id: 'draft',
-    anchor: { filePath: 'src/x.ts', side: 'new', lineNumber: 12, line: 'x', source: 'pr', originalDiffHunk: '' },
+    anchor: {
+      kind: 'line',
+      filePath: 'src/x.ts',
+      side: 'new',
+      lineNumber: 12,
+      line: 'x',
+      source: 'pr',
+      originalDiffHunk: '',
+    },
     comments: [comment({ id: 'n1', body: 'looks off' })],
   });
   const { input, counts } = buildSubmitPlan(remoteReview([draft]), 'comment');
@@ -71,6 +87,7 @@ test('a local-draft root becomes a new top-level comment positioned from its anc
 test('a multi-line comment carries the range start and last line', () => {
   const draft = thread({
     anchor: {
+      kind: 'line',
       filePath: 'a.ts',
       side: 'old',
       lineNumber: 5,
@@ -207,4 +224,17 @@ test('a local review can never hold an unsubmitted remote review', () => {
     threads: [thread({ comments: [comment({ remotePending: true })] })],
   };
   assert.equal(unsubmittedRemoteReview(local, 'me'), false);
+});
+
+test('a file-level draft thread produces subject_type file with no line/side', () => {
+  const t = thread({
+    anchor: { kind: 'file', filePath: 'src/x.ts', source: 'pr' },
+  });
+  const { input } = buildSubmitPlan(remoteReview([t]), 'comment');
+  assert.equal(input.newThreads.length, 1);
+  const root = input.newThreads[0].root;
+  assert.equal(root.path, 'src/x.ts');
+  assert.equal(root.subject_type, 'file');
+  assert.equal(root.line, undefined);
+  assert.equal(root.side, undefined);
 });

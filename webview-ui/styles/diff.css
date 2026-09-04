@@ -72,6 +72,18 @@ body {
   word-break: break-all;
 }
 
+.lr-file-comment-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lr-file-threads {
+  border-bottom: 1px solid var(--lr-card-border);
+  padding: 4px 0;
+}
+
 .lr-badge {
   flex: none;
   text-transform: uppercase;

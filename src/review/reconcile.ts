@@ -93,7 +93,7 @@ function adoptPostedDrafts(
   for (const ft of fresh) {
     const root = ft.comments[0];
     if (!ft.remoteThreadId || !root?.remoteId || claimed.has(ft.remoteThreadId) || !isMine(root.author)) continue;
-    const key = contentKey(ft.anchor.filePath, ft.anchor.side, root);
+    const key = contentKey(ft.anchor.filePath, ft.anchor.kind === 'line' ? ft.anchor.side : '', root);
     const list = candidates.get(key) ?? [];
     list.push(ft);
     candidates.set(key, list);
@@ -104,7 +104,9 @@ function adoptPostedDrafts(
   const threads = local.map((t) => {
     const root = t.comments[0];
     if (t.remoteThreadId || !root || root.remoteId || !isMine(root.author)) return t;
-    const match = candidates.get(contentKey(t.anchor.filePath, t.anchor.side, root))?.shift();
+    const match = candidates
+      .get(contentKey(t.anchor.filePath, t.anchor.kind === 'line' ? t.anchor.side : '', root))
+      ?.shift();
     if (!match) return t;
     adopted++;
     // Take the posted root (it carries the remote ids and the imported baselines), keeping the agent's

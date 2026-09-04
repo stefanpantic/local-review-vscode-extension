@@ -1,7 +1,7 @@
 // Map GitHub review threads into the neutral comment model. Pure & synchronous — unit-tested with fixtures.
 // Anchors are derived from the loaded diff exactly like locally created comments, so the existing
 // content-match engine decides anchored/moved/outdated for imported threads too.
-import type { Anchor, Comment, CommentThread, ReactionEmoji } from '../model/Comment';
+import type { Anchor, Comment, CommentThread, FileAnchor, LineAnchor, ReactionEmoji } from '../model/Comment';
 import { UNKNOWN_AUTHOR, REACTION_EMOJIS } from '../model/Comment';
 import type { ReviewDiff, Side } from '../model/ReviewDiff';
 import { createAnchor, rangeText } from '../comments/anchoring';
@@ -31,7 +31,7 @@ function groupReactions(
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-/** Turn GitHub review threads into comment threads anchored against `diff`. Threads without a position are dropped. */
+/** Turn GitHub review threads into comment threads anchored against `diff`. */
 export function mapThreads(threads: GhReviewThread[], diff: ReviewDiff): CommentThread[] {
   const out: CommentThread[] = [];
   for (const t of threads) {
@@ -39,16 +39,26 @@ export function mapThreads(threads: GhReviewThread[], diff: ReviewDiff): Comment
     if (!root) continue;
     const side: Side = t.diffSide === 'LEFT' ? 'old' : 'new';
     const lastLine = t.line ?? t.originalLine;
-    if (lastLine == null) continue; // no line to anchor on
-    const firstLine = t.startLine ?? t.originalStartLine ?? lastLine;
-    const anchor = importAnchor(diff, t.path, root.diffHunk, t.line != null, side, firstLine, lastLine);
+    if (lastLine == null && t.subjectType !== 'FILE') continue; // no line to anchor on and not file-level
+    let anchor: Anchor;
+    let comments: Comment[];
+    if (lastLine == null) {
+      // File-level thread: anchor to the file, not a line.
+      const fileAnchor: FileAnchor = { kind: 'file', filePath: t.path, source: diff.source };
+      anchor = fileAnchor;
+      comments = t.comments.map((c) => mapFileComment(c));
+    } else {
+      const firstLine = t.startLine ?? t.originalStartLine ?? lastLine;
+      anchor = importAnchor(diff, t.path, root.diffHunk, t.line != null, side, firstLine, lastLine);
+      comments = t.comments.map((c) => mapComment(c, diff, t.path, side, firstLine, lastLine));
+    }
     const thread: CommentThread = {
       id: t.id,
       anchor,
-      comments: t.comments.map((c) => mapComment(c, diff, t.path, side, firstLine, lastLine)),
+      comments,
       resolved: t.isResolved,
       remoteThreadId: t.id,
-      remoteResolved: t.isResolved, // baseline: a later change to `resolved` is a pending toggle
+      remoteResolved: t.isResolved,
     };
     if (root.databaseId != null) thread.remoteRootId = String(root.databaseId);
     out.push(thread);
@@ -71,13 +81,14 @@ function importAnchor(
   side: Side,
   firstLine: number,
   lastLine: number,
-): Anchor {
+): LineAnchor {
   const anchor = createAnchor(diff, {
+    kind: 'line',
     filePath: path,
     side,
     startLine: firstLine,
     endLine: lastLine !== firstLine ? lastLine : undefined,
-  });
+  }) as LineAnchor;
   if (!current || anchor.line === '') {
     const text = hunkLineText(diffHunk, side, firstLine);
     if (text != null) {
@@ -88,6 +99,26 @@ function importAnchor(
     }
   }
   return anchor;
+}
+
+function mapFileComment(c: GhReviewComment): Comment {
+  const comment: Comment = {
+    id: c.id,
+    body: c.body,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+    author: c.author ?? UNKNOWN_AUTHOR,
+  };
+  if (c.databaseId != null) comment.remoteId = String(c.databaseId);
+  if (c.url) comment.remoteUrl = c.url;
+  if (c.isPending) comment.remotePending = true;
+  comment.remoteBody = comment.body;
+  const reactions = groupReactions(c.reactions);
+  if (reactions) {
+    comment.reactions = reactions;
+    comment.remoteReactions = structuredClone(reactions);
+  }
+  return comment;
 }
 
 function mapComment(

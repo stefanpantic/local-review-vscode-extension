@@ -6,6 +6,7 @@ import type { PullRequestDetail, PullRequestSummary } from '../src/review/provid
 import type { SubmitReviewInput } from '../src/review/submit';
 import type { GhReviewThread } from '../src/github/types';
 import type { DiffRow, FileDiff, Hunk, ReviewDiff } from '../src/model/ReviewDiff';
+import type { LineAnchor } from '../src/model/Comment';
 
 const ctx = (o: number, n: number, text: string): DiffRow => ({ type: 'context', oldLineNo: o, newLineNo: n, text });
 function diff(rows: DiffRow[]): ReviewDiff {
@@ -51,7 +52,7 @@ class FakeClient implements GithubWriteClient {
   ): Promise<{ id: number }> {
     this.reviews.push(input);
     for (const c of input.comments) {
-      this.posted.push({ id: this.nextId++, path: c.path, line: c.line, side: c.side, body: c.body });
+      this.posted.push({ id: this.nextId++, path: c.path, line: c.line ?? null, side: c.side, body: c.body });
     }
     return { id: 1 };
   }
@@ -152,8 +153,9 @@ test('getThreads fetches raw threads and returns them mapped + anchored against 
   const mapped = await p.getThreads(repo, 1, diff([ctx(1, 1, 'A'), ctx(2, 2, 'B'), ctx(3, 3, 'C')]));
   assert.equal(mapped.length, 1);
   assert.equal(mapped[0].remoteThreadId, 'T1');
-  assert.equal(mapped[0].anchor.lineNumber, 2);
-  assert.equal(mapped[0].anchor.line, 'B'); // anchored against the loaded diff
+  const la = mapped[0].anchor as LineAnchor;
+  assert.equal(la.lineNumber, 2);
+  assert.equal(la.line, 'B'); // anchored against the loaded diff
   assert.equal(mapped[0].comments[0].author, 'reviewer');
   assert.equal(mapped[0].comments[0].remoteId, '5');
 });

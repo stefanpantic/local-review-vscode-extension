@@ -25,6 +25,7 @@ function threadBy(author: string, over: Partial<Comment> = {}): CommentThread {
   return {
     id: 'thread1',
     anchor: {
+      kind: 'line',
       filePath: 'a.ts',
       side: 'new',
       lineNumber: 1,

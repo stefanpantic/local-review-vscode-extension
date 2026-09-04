@@ -16,14 +16,17 @@ export interface CommentGroup {
   threads: CommentThread[];
 }
 
-/** Where a thread sits: its resolved line when it has one, else the line it was anchored to. */
+/** Where a thread sits: its resolved line when it has one, else the line it was anchored to. File-level threads return 0. */
 export function startLine(t: CommentThread): number {
-  return t.resolvedLine ?? t.anchor.lineNumber;
+  if (t.resolvedLine != null) return t.resolvedLine;
+  return t.anchor.kind === 'line' ? t.anchor.lineNumber : 0;
 }
 
 /** End of a range comment, falling back to its start for a single-line thread. */
 export function endLine(t: CommentThread): number {
-  return t.resolvedEndLine ?? t.anchor.endLineNumber ?? startLine(t);
+  if (t.resolvedEndLine != null) return t.resolvedEndLine;
+  if (t.anchor.kind === 'line') return t.anchor.endLineNumber ?? startLine(t);
+  return 0;
 }
 
 /** Who opened the thread. Grouping keys off the root alone, so a thread lands in exactly one group. */

@@ -3,7 +3,13 @@ import assert from 'node:assert/strict';
 import { mapThreads, parseSuggestion } from '../src/github/mapThreads';
 import { reanchorOne } from '../src/comments/anchoring';
 import type { DiffRow, FileDiff, Hunk, ReviewDiff } from '../src/model/ReviewDiff';
+import type { Anchor, LineAnchor } from '../src/model/Comment';
 import type { GhReviewComment, GhReviewThread } from '../src/github/types';
+
+function asLine(a: Anchor): LineAnchor {
+  assert.equal(a.kind, 'line');
+  return a as LineAnchor;
+}
 
 const ctx = (o: number, n: number, text: string): DiffRow => ({ type: 'context', oldLineNo: o, newLineNo: n, text });
 const del = (o: number, text: string): DiffRow => ({ type: 'del', oldLineNo: o, newLineNo: null, text });
@@ -58,11 +64,12 @@ test('maps a single-line RIGHT-side comment to a new-side anchor with remote ids
   assert.equal(t.remoteThreadId, 'THREAD_1');
   assert.equal(t.remoteRootId, '1001');
   assert.equal(t.resolved, false);
-  assert.equal(t.anchor.filePath, 'a.ts');
-  assert.equal(t.anchor.side, 'new');
-  assert.equal(t.anchor.lineNumber, 2);
-  assert.equal(t.anchor.line, 'B'); // text taken from the loaded diff, like a local comment
-  assert.equal(t.anchor.endLineNumber, undefined);
+  const a = asLine(t.anchor);
+  assert.equal(a.filePath, 'a.ts');
+  assert.equal(a.side, 'new');
+  assert.equal(a.lineNumber, 2);
+  assert.equal(a.line, 'B'); // text taken from the loaded diff, like a local comment
+  assert.equal(a.endLineNumber, undefined);
   assert.equal(t.comments.length, 1);
   assert.equal(t.comments[0].id, 'NODE_1');
   assert.equal(t.comments[0].author, 'octocat');
@@ -74,17 +81,19 @@ test('maps a single-line RIGHT-side comment to a new-side anchor with remote ids
 test('LEFT diff side maps to the old side and anchors on a removed line', () => {
   const d = diff([file('a.ts', [hunk([del(5, 'gone'), add(5, 'new')])])]);
   const [t] = mapThreads([ghThread({ diffSide: 'LEFT', line: 5, originalLine: 5 })], d);
-  assert.equal(t.anchor.side, 'old');
-  assert.equal(t.anchor.lineNumber, 5);
-  assert.equal(t.anchor.line, 'gone');
+  const a = asLine(t.anchor);
+  assert.equal(a.side, 'old');
+  assert.equal(a.lineNumber, 5);
+  assert.equal(a.line, 'gone');
   assert.equal(reanchorOne(t, d).status, 'anchored');
 });
 
 test('a multi-line comment keeps its range (start..end)', () => {
   const [t] = mapThreads([ghThread({ startLine: 2, line: 4, originalStartLine: 2, originalLine: 4 })], ABC());
-  assert.equal(t.anchor.lineNumber, 2);
-  assert.equal(t.anchor.endLineNumber, 4);
-  assert.equal(t.anchor.line, 'B');
+  const a = asLine(t.anchor);
+  assert.equal(a.lineNumber, 2);
+  assert.equal(a.endLineNumber, 4);
+  assert.equal(a.line, 'B');
 });
 
 test('resolved threads carry the resolved flag', () => {
@@ -119,8 +128,9 @@ test('an outdated thread (line=null) keys on its captured hunk content and re-an
     comment({ diffHunk: '@@ -1,1 +1,2 @@\n A\n+GONE' }),
   ]);
   const [t] = mapThreads([outdated], ABC());
-  assert.equal(t.anchor.line, 'GONE'); // not the unrelated line now at position 2
-  assert.equal(t.anchor.originalDiffHunk, '@@ -1,1 +1,2 @@\n A\n+GONE');
+  const a = asLine(t.anchor);
+  assert.equal(a.line, 'GONE'); // not the unrelated line now at position 2
+  assert.equal(a.originalDiffHunk, '@@ -1,1 +1,2 @@\n A\n+GONE');
   assert.equal(reanchorOne(t, ABC()).status, 'outdated');
 });
 
@@ -134,10 +144,19 @@ test('a comment in an unsubmitted review is flagged; a submitted one carries no 
   assert.equal(t.comments[1].remoteId, '11');
 });
 
-test('threads with no anchorable position or no comments are dropped', () => {
+test('threads with no anchorable position and no subjectType, or no comments, are dropped', () => {
   const noPos = ghThread({ line: null, originalLine: null });
   const empty = ghThread({ id: 'EMPTY' }, []);
   assert.equal(mapThreads([noPos, empty], ABC()).length, 0);
+});
+
+test('a file-level thread (subjectType FILE) is imported as a FileAnchor', () => {
+  const fileThread = ghThread({ line: null, originalLine: null, subjectType: 'FILE', path: 'a.ts' });
+  const [t] = mapThreads([fileThread], ABC());
+  assert.equal(t.anchor.kind, 'file');
+  assert.equal(t.anchor.filePath, 'a.ts');
+  assert.equal(t.comments.length, 1);
+  assert.equal(t.resolved, false);
 });
 
 test('parseSuggestion extracts the first block and returns null when absent', () => {

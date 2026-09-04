@@ -15,7 +15,8 @@ const ghSide = (side: Side): 'LEFT' | 'RIGHT' => (side === 'old' ? 'LEFT' : 'RIG
 
 /** A new-thread root in GitHub's create-review comment shape. */
 function ghComment(root: NewInlineComment): GhNewComment {
-  const side = ghSide(root.side);
+  if (root.subject_type === 'file') return { path: root.path, body: root.body, subject_type: 'file' };
+  const side = ghSide(root.side!);
   return {
     path: root.path,
     body: root.body,
@@ -27,7 +28,10 @@ function ghComment(root: NewInlineComment): GhNewComment {
 
 /** Find the id of a just-posted root among a review's created comments (exact position + body match). */
 function matchPostedId(posted: GhPostedComment[], root: NewInlineComment): number | undefined {
-  const side = ghSide(root.side);
+  if (root.subject_type === 'file') {
+    return posted.find((c) => c.path === root.path && c.line == null && c.body === root.body)?.id;
+  }
+  const side = ghSide(root.side!);
   return posted.find((c) => c.path === root.path && c.side === side && c.line === root.line && c.body === root.body)
     ?.id;
 }

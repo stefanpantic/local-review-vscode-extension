@@ -47,25 +47,29 @@ export function exportReviewMarkdown(meta: ExportMeta, threads: CommentThread[],
 }
 
 function startLine(t: CommentThread): number {
-  return t.resolvedLine ?? t.anchor.lineNumber;
+  if (t.resolvedLine != null) return t.resolvedLine;
+  return t.anchor.kind === 'line' ? t.anchor.lineNumber : 0;
 }
 
 /** A `path:line` (or `path:start-end`) heading with side + status — the greppable locator. */
 function threadHeading(t: CommentThread): string {
-  const start = startLine(t);
-  const end = t.resolvedEndLine ?? t.anchor.endLineNumber ?? start;
-  const lines = end > start ? `${start}-${end}` : `${start}`;
-  const side = t.anchor.side === 'old' ? ' (old side)' : '';
+  const { anchor } = t;
   const tags: string[] = [];
   if (t.status === 'moved') tags.push('moved');
   if (t.status === 'outdated') tags.push('outdated');
   if (t.resolved) tags.push('resolved');
-  return `## \`${t.anchor.filePath}:${lines}\`${side}${tags.length ? ` · ${tags.join(' · ')}` : ''}`;
+  const tagStr = tags.length ? ` · ${tags.join(' · ')}` : '';
+  if (anchor.kind === 'file') return `## \`${anchor.filePath}\` (file)${tagStr}`;
+  const start = startLine(t);
+  const end = t.resolvedEndLine ?? anchor.endLineNumber ?? start;
+  const lines = end > start ? `${start}-${end}` : `${start}`;
+  const side = anchor.side === 'old' ? ' (old side)' : '';
+  return `## \`${anchor.filePath}:${lines}\`${side}${tagStr}`;
 }
 
 function threadBlock(t: CommentThread): string[] {
   const out: string[] = [threadHeading(t), '', `<!-- thread ${t.id} -->`, ''];
-  if (t.anchor.originalDiffHunk) out.push('```diff', t.anchor.originalDiffHunk, '```', '');
+  if (t.anchor.kind === 'line' && t.anchor.originalDiffHunk) out.push('```diff', t.anchor.originalDiffHunk, '```', '');
   t.comments.forEach((c, i) => {
     if (c.body) out.push(i === 0 ? c.body : `**Reply:** ${c.body}`, '');
     if (c.suggestion) out.push('**Suggested change:**', '```suggestion', c.suggestion.replacement, '```', '');

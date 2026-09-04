@@ -27,7 +27,7 @@ const web = {
   format: 'iife',
   target: 'es2020',
   jsx: 'automatic',
-  loader: { '.css': 'css' },
+  loader: { '.css': 'css', '.ttf': 'dataurl' },
 };
 
 if (watch) {

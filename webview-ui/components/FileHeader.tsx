@@ -6,12 +6,14 @@ export function FileHeader({
   viewed,
   onToggleCollapse,
   onToggleViewed,
+  onAddFileComment,
 }: {
   file: FileDiff;
   collapsed: boolean;
   viewed: boolean;
   onToggleCollapse: () => void;
   onToggleViewed: () => void;
+  onAddFileComment?: () => void;
 }) {
   const title = file.oldPath && file.oldPath !== file.path ? `${file.oldPath} → ${file.path}` : file.path;
   const showStat = file.additions > 0 || file.deletions > 0;
@@ -35,6 +37,11 @@ export function FileHeader({
       )}
       {file.note && <span className="lr-note">{file.note}</span>}
       {!file.isCommentable && <span className="lr-noncommentable">not reviewable</span>}
+      {onAddFileComment && (
+        <button className="lr-ghost-btn lr-file-comment-btn" onClick={onAddFileComment} title="Comment on file">
+          <i className="codicon codicon-comment" />
+        </button>
+      )}
       <label className="lr-viewed" title="Mark viewed (collapses the file)">
         <input type="checkbox" checked={viewed} onChange={onToggleViewed} /> Viewed
       </label>

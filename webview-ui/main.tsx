@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import { useEffect, useState } from 'react';
+import '@vscode/codicons/dist/codicon.css';
 import './styles/diff.css';
 import { request, on } from './rpcClient';
 import type { ReviewStatePayload } from '../src/protocol/messages';

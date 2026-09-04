@@ -22,14 +22,15 @@ export interface GhViewerTeam {
   org: string; // organization login
 }
 
-/** One new inline comment in a create-review batch, in GitHub's shape (side is LEFT/RIGHT; lines pinned). */
+/** One new comment in a create-review batch, in GitHub's shape. File-level comments omit line/side. */
 export interface GhNewComment {
   path: string;
   body: string;
-  line: number; // last line of the range (or the only line)
-  side: 'LEFT' | 'RIGHT';
-  start_line?: number; // first line for a multi-line comment
+  line?: number;
+  side?: 'LEFT' | 'RIGHT';
+  start_line?: number;
   start_side?: 'LEFT' | 'RIGHT';
+  subject_type?: 'file';
 }
 
 /** A review comment as posted, enough to match it back to the local thread that created it. */
@@ -70,7 +71,7 @@ query ($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
       reviewThreads(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
         nodes {
-          id isResolved isOutdated path diffSide line startLine originalLine originalStartLine
+          id isResolved isOutdated path diffSide line startLine originalLine originalStartLine subjectType
           comments(first: 100) {
             nodes { id databaseId author { login } body createdAt updatedAt url diffHunk state reactions(first: 10) { pageInfo { hasNextPage endCursor } nodes { content user { login } } } }
           }
@@ -95,6 +96,7 @@ interface ThreadsResponse {
           startLine: number | null;
           originalLine: number | null;
           originalStartLine: number | null;
+          subjectType: 'LINE' | 'FILE' | null;
           comments: {
             nodes: Array<{
               id: string;
@@ -263,6 +265,7 @@ class OctokitClient implements GithubWriteClient {
           startLine: n.startLine,
           originalLine: n.originalLine,
           originalStartLine: n.originalStartLine,
+          subjectType: n.subjectType ?? undefined,
           comments,
         });
       }

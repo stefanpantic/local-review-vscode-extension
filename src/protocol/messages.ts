@@ -77,7 +77,7 @@ export interface Requests {
   // Comment mutations (active review). The host authors the durable Anchor from its own diff.
   // `suggestion` is a proposed replacement (string); the host captures the original from its diff.
   addComment: {
-    payload: { filePath: string; side: Side; startLine: number; endLine?: number; body: string; suggestion?: string };
+    payload: { filePath: string; side?: Side; startLine?: number; endLine?: number; body: string; suggestion?: string };
     response: CommentThread;
   };
   replyComment: { payload: { threadId: string; body: string; suggestion?: string }; response: CommentThread };

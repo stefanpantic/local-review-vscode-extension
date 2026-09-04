@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { exportReviewMarkdown, type ExportMeta } from '../src/export/exportMarkdown';
-import type { AnchorStatus, CommentThread, Comment } from '../src/model/Comment';
+import type { AnchorStatus, CommentThread, Comment, LineAnchor } from '../src/model/Comment';
 import type { Side } from '../src/model/ReviewDiff';
 
 const META: ExportMeta = {
@@ -27,6 +27,7 @@ function thread(over: Partial<CommentThread> & { comments?: Comment[] } = {}): C
   return {
     id: 't1',
     anchor: {
+      kind: 'line',
       filePath: 'src/a.ts',
       side: 'new',
       lineNumber: 42,
@@ -70,7 +71,9 @@ test('replies render with a Reply prefix', () => {
 });
 
 test('range comment shows a line range; old side is labelled', () => {
-  const t = thread({ anchor: { ...thread().anchor, side: 'old' as Side, lineNumber: 10, endLineNumber: 13 } });
+  const t = thread({
+    anchor: { ...(thread().anchor as LineAnchor), side: 'old' as Side, lineNumber: 10, endLineNumber: 13 },
+  });
   const md = exportReviewMarkdown(META, [t], { scope: 'all' });
   assert.match(md, /## `src\/a\.ts:10-13` \(old side\)/);
 });
@@ -116,4 +119,13 @@ test('as-reviewed uses anchor.lineNumber; re-anchored uses resolvedLine + status
 test('empty selection returns an empty string', () => {
   assert.equal(exportReviewMarkdown(META, [], { scope: 'all' }), '');
   assert.equal(exportReviewMarkdown(META, [thread({ resolved: true })], { scope: 'unresolved' }), '');
+});
+
+test('file-level thread renders with (file) heading and no diff hunk', () => {
+  const t = thread({
+    anchor: { kind: 'file', filePath: 'src/a.ts', source: 'worktree-vs-head' },
+  });
+  const md = exportReviewMarkdown(META, [t], { scope: 'all' });
+  assert.match(md, /## `src\/a\.ts` \(file\)/);
+  assert.doesNotMatch(md, /```diff/);
 });
