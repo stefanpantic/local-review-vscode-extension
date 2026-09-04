@@ -104,6 +104,19 @@ class GithubReviewProvider implements ReviewProvider {
       await onApplied?.({ kind: 'resolve', threadId: rs.threadId, resolved: rs.resolved });
     }
 
+    const reactionsByComment = new Map<string, typeof input.reactions>();
+    for (const r of input.reactions) {
+      if (!reactionsByComment.has(r.commentNodeId)) reactionsByComment.set(r.commentNodeId, []);
+      reactionsByComment.get(r.commentNodeId)!.push(r);
+    }
+    for (const [commentNodeId, ops] of reactionsByComment) {
+      for (const r of ops) {
+        if (r.add) await client.addReaction(r.commentNodeId, r.content);
+        else await client.removeReaction(r.commentNodeId, r.content);
+      }
+      await onApplied?.({ kind: 'reaction', commentId: commentNodeId });
+    }
+
     const event =
       input.event === 'approve' ? 'APPROVE' : input.event === 'request-changes' ? 'REQUEST_CHANGES' : 'COMMENT';
     // A bare COMMENT with no new roots and no body is not a valid review; skip the batch when there is

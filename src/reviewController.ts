@@ -18,8 +18,8 @@ import { diffContentId } from './git/diffId';
 import { orderByTree } from './fileTree';
 import type { DiffResult, DiffSource, FileDiff, PrRef, RepoInfo, ReviewDiff, ViewMode } from './model/ReviewDiff';
 import { prBranchKey, prViewedNamespace } from './model/ReviewDiff';
-import type { Comment, CommentThread, RemoteRef, Review } from './model/Comment';
-import { durableThread, UNKNOWN_AUTHOR } from './model/Comment';
+import type { Comment, CommentThread, ReactionEmoji, RemoteRef, Review } from './model/Comment';
+import { durableThread, toggleReaction as toggleReactionOnComment, UNKNOWN_AUTHOR } from './model/Comment';
 import type { RemoteRepoRef, ReviewProvider } from './review/provider';
 import { parseRemoteUrl, type GithubProviderId } from './github/remote';
 import { getViewerLogin } from './github/auth';
@@ -1056,6 +1056,23 @@ export class ReviewController {
     return reanchorOne(thread, diff);
   }
 
+  async toggleReaction(
+    threadId: string,
+    commentId: string,
+    emoji: ReactionEmoji,
+    author?: string,
+  ): Promise<CommentThread> {
+    const { repoRoot, branch, diff } = this.ctx();
+    const review = this.reviewStore.current(repoRoot, branch);
+    const thread = review?.threads.find((t) => t.id === threadId);
+    const comment = thread?.comments.find((c) => c.id === commentId);
+    if (!review || !thread || !comment) throw new Error('Comment not found.');
+    toggleReactionOnComment(comment, emoji, author ?? this.authorIdentity());
+    await this.reviewStore.updateThreads(repoRoot, review.id, review.threads);
+    this.afterThreadChange();
+    return reanchorOne(thread, diff);
+  }
+
   /** Full old/new file text for whole-file syntax highlighting, for the current repo + source. */
   async getFileTexts(
     files: { path: string; oldPath?: string }[],
@@ -1137,6 +1154,7 @@ export class ReviewController {
       resolve: (a) => this.resolveThread(a.threadId, a.resolved),
       editComment: (a) => this.editComment(a.threadId, a.commentId, a.body, a.suggestion),
       deleteComment: (a) => this.deleteComment(a.threadId, a.commentId),
+      toggleReaction: (a) => this.toggleReaction(a.threadId, a.commentId, a.emoji, a.author),
     };
   }
 }

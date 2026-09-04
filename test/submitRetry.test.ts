@@ -78,6 +78,8 @@ class FlakyClient implements GithubWriteClient {
     if (this.failOn === 'resolve') throw new Error('network died');
     this.resolves.push(input);
   }
+  async addReaction(): Promise<void> {}
+  async removeReaction(): Promise<void> {}
   async listPullRequests(): Promise<PullRequestSummary[]> {
     return [];
   }
@@ -311,6 +313,7 @@ test('a summary alone is enough to submit with nothing else staged (#7)', async 
       edits: [],
       deletes: [],
       resolves: [],
+      reactions: [],
     },
     () => undefined,
   );

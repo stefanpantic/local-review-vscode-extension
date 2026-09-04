@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Markdown } from '../components/Markdown';
-import type { CommentThread } from '../../src/model/Comment';
-import { AGENT_AUTHOR, canEditComment } from '../../src/model/Comment';
+import type { CommentThread, ReactionEmoji } from '../../src/model/Comment';
+import { AGENT_AUTHOR, canEditComment, REACTION_EMOJIS } from '../../src/model/Comment';
 import { TokenText } from '../render/UnifiedRows';
 import type { Tok } from '../render/highlight';
 import { CommentForm, hasDraft } from './CommentForm';
@@ -11,6 +11,7 @@ export interface ThreadOps {
   onEdit: (commentId: string, body: string, suggestion: string | null | undefined) => void;
   onDelete: (commentId: string) => void;
   onResolve: (resolved: boolean) => void;
+  onToggleReaction: (commentId: string, emoji: ReactionEmoji) => void;
 }
 
 /** Tokenize code in the anchored file's language (falls back to plain lines when unavailable). */
@@ -102,6 +103,64 @@ function Suggestion({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function ReactionBar({
+  reactions,
+  viewer,
+  onToggle,
+}: {
+  reactions: Partial<Record<ReactionEmoji, string[]>> | undefined;
+  viewer: string | undefined;
+  onToggle: (emoji: ReactionEmoji) => void;
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const chips = REACTION_EMOJIS.filter((e) => reactions?.[e]?.length);
+  return (
+    <div className="lr-reactions">
+      {chips.map((emoji) => {
+        const users = reactions![emoji]!;
+        const active = viewer != null && users.includes(viewer);
+        return (
+          <button
+            key={emoji}
+            className={`lr-reaction${active ? ' lr-reaction-active' : ''}`}
+            title={users.join(', ')}
+            onClick={() => onToggle(emoji)}
+          >
+            <span className="lr-reaction-emoji">{emoji}</span>
+            <span className="lr-reaction-count">{users.length}</span>
+          </button>
+        );
+      })}
+      {pickerOpen ? (
+        <div className="lr-reaction-picker">
+          {REACTION_EMOJIS.map((emoji) => {
+            const active = viewer != null && (reactions?.[emoji]?.includes(viewer) ?? false);
+            return (
+              <button
+                key={emoji}
+                className={`lr-reaction-pick${active ? ' lr-reaction-pick-active' : ''}`}
+                onClick={() => {
+                  onToggle(emoji);
+                  setPickerOpen(false);
+                }}
+              >
+                {emoji}
+              </button>
+            );
+          })}
+          <button className="lr-reaction-pick lr-reaction-pick-close" onClick={() => setPickerOpen(false)}>
+            ✕
+          </button>
+        </div>
+      ) : (
+        <button className="lr-reaction-add" title="Add reaction" onClick={() => setPickerOpen(true)}>
+          +
+        </button>
+      )}
     </div>
   );
 }
@@ -227,6 +286,11 @@ export function CommentThreadView({
                     tokenize={tokenize}
                   />
                 )}
+                <ReactionBar
+                  reactions={c.reactions}
+                  viewer={viewer}
+                  onToggle={(emoji) => ops.onToggleReaction(c.id, emoji)}
+                />
               </div>
               <div className="lr-comment-tools">
                 {canEdit ? (

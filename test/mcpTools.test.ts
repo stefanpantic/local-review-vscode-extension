@@ -102,6 +102,9 @@ class FakeApi implements McpReviewApi {
     this.deleted.push(a);
     return { threadId: a.threadId, threadDeleted: this.deleteRemovesThread };
   }
+  async toggleReaction(a: Parameters<McpReviewApi['toggleReaction']>[0]) {
+    return makeThread('a.ts', 'new', 2, '', a.author);
+  }
 }
 
 /** A current review holding one thread, so the edit/delete guard has something to resolve ids against. */

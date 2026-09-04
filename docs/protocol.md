@@ -210,6 +210,10 @@ interface Comment {
   // flagged rather than silently overwriting theirs. PERSISTED: each reconcile advances the baseline, so the
   // collision cannot be re-derived on a later pass. Cleared once the edit is no longer pending.
   conflict?: boolean;
+  // Emoji reactions per comment. Each key is a ReactionEmoji ('👍'|'👎'|'👀'|'❤️'|'🎉'),
+  // mapping to the usernames who reacted. On a PR these round-trip with GitHub.
+  reactions?: Partial<Record<ReactionEmoji, string[]>>;
+  remoteReactions?: Partial<Record<ReactionEmoji, string[]>>; // baseline from import (same pattern as remoteBody)
 }
 
 interface CommentThread {
@@ -345,6 +349,7 @@ The webview keeps `let seq = 0` and a `Map<number, {resolve, reject}>`. A reques
 | `deleteComment`        | `{ threadId, commentId }`                                    | `{ threadId, threadDeleted: boolean }`                                                                                    | it.4                    |
 | `replyComment`         | `{ threadId, body, suggestion? }`                            | `CommentThread`                                                                                                           | it.4 / suggestion it.4b |
 | `resolveThread`        | `{ threadId, resolved }`                                     | `CommentThread`                                                                                                           | it.4                    |
+| `toggleReaction`       | `{ threadId, commentId, emoji }`                             | `CommentThread` — toggle the viewer's reaction on a comment                                                               | it.16                   |
 | `saveReview`           | `{ repoRoot, name }`                                         | `Review`                                                                                                                  | it.5                    |
 | `clearActiveReview`    | `{ repoRoot }`                                               | `{ ok: true }`                                                                                                            | it.5                    |
 | `listSavedReviews`     | `{ repoRoot }`                                               | `Review[]`                                                                                                                | it.5                    |

@@ -2,7 +2,8 @@
 // counts a confirmation shows. Pure and synchronous, so it is unit-tested without a client. The GitHub
 // provider translates this neutral shape into its own API calls; another provider could do the same.
 import type { CommentThread, Comment, Review } from '../model/Comment';
-import { AGENT_AUTHOR } from '../model/Comment';
+import { AGENT_AUTHOR, hasReactionDiff, REACTION_EMOJIS } from '../model/Comment';
+import { EMOJI_TO_GITHUB } from '../github/mapThreads';
 import type { Side } from '../model/ReviewDiff';
 
 /** The review action to submit with the batch. */
@@ -37,6 +38,7 @@ export interface SubmitReviewInput {
   edits: { commentId: string; body: string }[]; // edited posted comments
   deletes: string[]; // remote ids of posted comments to delete
   resolves: { threadId: string; resolved: boolean }[]; // resolve/unresolve toggles
+  reactions: { commentNodeId: string; content: string; add: boolean }[]; // reaction add/remove
 }
 
 /**
@@ -48,7 +50,8 @@ export interface SubmitReviewInput {
 export type AppliedStep =
   | { kind: 'edit'; commentId: string } // the local body is now the remote body: re-baseline it
   | { kind: 'delete'; commentId: string }
-  | { kind: 'resolve'; threadId: string; resolved: boolean };
+  | { kind: 'resolve'; threadId: string; resolved: boolean }
+  | { kind: 'reaction'; commentId: string }; // reactions are now the remote baseline: re-baseline them
 
 /** Called by the provider after each step lands. Awaited, so the caller can persist before the next call. */
 export type OnApplied = (step: AppliedStep) => Promise<void> | void;
@@ -59,6 +62,7 @@ export interface SubmitCounts {
   edits: number;
   deletes: number;
   resolves: number;
+  reactions: number;
   agentComments: number; // how many posted comments/replies are AI-agent authored (shown, still included)
   total: number;
 }
@@ -72,6 +76,7 @@ const EMPTY_INPUT: SubmitReviewInput = {
   edits: [],
   deletes: [],
   resolves: [],
+  reactions: [],
 };
 const EMPTY_COUNTS: SubmitCounts = {
   newComments: 0,
@@ -79,6 +84,7 @@ const EMPTY_COUNTS: SubmitCounts = {
   edits: 0,
   deletes: 0,
   resolves: 0,
+  reactions: 0,
   agentComments: 0,
   total: 0,
 };
@@ -169,6 +175,27 @@ export function buildSubmitPlan(
     }
   }
 
+  const reactionOps: { commentNodeId: string; content: string; add: boolean }[] = [];
+  for (const t of review.threads) {
+    for (const c of t.comments) {
+      if (!c.remoteId || !hasReactionDiff(c)) continue;
+      const local = c.reactions ?? {};
+      const remote = c.remoteReactions ?? {};
+      for (const emoji of REACTION_EMOJIS) {
+        const localUsers = new Set(local[emoji] ?? []);
+        const remoteUsers = new Set(remote[emoji] ?? []);
+        for (const u of localUsers) {
+          if (!remoteUsers.has(u))
+            reactionOps.push({ commentNodeId: c.id, content: EMOJI_TO_GITHUB[emoji], add: true });
+        }
+        for (const u of remoteUsers) {
+          if (!localUsers.has(u))
+            reactionOps.push({ commentNodeId: c.id, content: EMOJI_TO_GITHUB[emoji], add: false });
+        }
+      }
+    }
+  }
+
   const deletes = [...(review.pendingDeletes ?? [])];
   const draftReplies = newThreads.reduce((n, t) => n + t.replies.length, 0);
   const input: SubmitReviewInput = {
@@ -180,6 +207,7 @@ export function buildSubmitPlan(
     edits,
     deletes,
     resolves,
+    reactions: reactionOps,
   };
   const counts: SubmitCounts = {
     newComments: newThreads.length,
@@ -187,8 +215,16 @@ export function buildSubmitPlan(
     edits: edits.length,
     deletes: deletes.length,
     resolves: resolves.length,
+    reactions: reactionOps.length,
     agentComments,
-    total: newThreads.length + replies.length + draftReplies + edits.length + deletes.length + resolves.length,
+    total:
+      newThreads.length +
+      replies.length +
+      draftReplies +
+      edits.length +
+      deletes.length +
+      resolves.length +
+      reactionOps.length,
   };
   return { input, counts };
 }

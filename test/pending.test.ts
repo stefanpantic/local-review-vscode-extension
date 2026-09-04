@@ -42,6 +42,7 @@ test('an imported, untouched review has no pending changes', () => {
     resolvedToggles: 0,
     edits: 0,
     deletes: 0,
+    reactions: 0,
     total: 0,
   });
 });
@@ -67,6 +68,7 @@ test('counts new comments, resolve toggles, edits, and deletes', () => {
     resolvedToggles: 1,
     edits: 1,
     deletes: 2,
+    reactions: 0,
     total: 5,
   });
 });

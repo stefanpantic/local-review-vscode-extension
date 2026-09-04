@@ -4,6 +4,9 @@ import type { DiffSource, Side } from './ReviewDiff';
 
 export type AnchorStatus = 'anchored' | 'moved' | 'outdated';
 
+export type ReactionEmoji = '👍' | '👎' | '👀' | '❤️' | '🎉';
+export const REACTION_EMOJIS: ReactionEmoji[] = ['👍', '👎', '👀', '❤️', '🎉'];
+
 export interface Anchor {
   filePath: string; // new path at creation time
   oldPath?: string; // present for renamed files
@@ -37,6 +40,8 @@ export interface Comment {
   // and flagged rather than silently overwriting theirs; you resolve it by keeping or discarding your edit.
   // Persisted, because each reconcile advances the baseline and the collision cannot be re-derived later.
   conflict?: boolean;
+  reactions?: Partial<Record<ReactionEmoji, string[]>>;
+  remoteReactions?: Partial<Record<ReactionEmoji, string[]>>;
 }
 
 /** Fallback author when the writer is unknown (git user.name unset, or a legacy comment). */
@@ -134,6 +139,36 @@ export function durableThread(t: CommentThread): CommentThread {
     ...(t.remoteRootId !== undefined ? { remoteRootId: t.remoteRootId } : {}),
     ...(t.remoteResolved !== undefined ? { remoteResolved: t.remoteResolved } : {}),
   };
+}
+
+/** Toggle a user's reaction on a comment. Mutates in place; cleans up empty entries. */
+export function toggleReaction(comment: Comment, emoji: ReactionEmoji, user: string): void {
+  const map = (comment.reactions ??= {});
+  const users = (map[emoji] ??= []);
+  const idx = users.indexOf(user);
+  if (idx >= 0) users.splice(idx, 1);
+  else users.push(user);
+  if (users.length === 0) delete map[emoji];
+  if (Object.keys(map).length === 0) delete comment.reactions;
+}
+
+/** Whether a comment has pending reaction changes relative to its remote baseline. */
+export function hasReactionDiff(c: Comment): boolean {
+  const local = c.reactions;
+  const remote = c.remoteReactions;
+  if (!local && !remote) return false;
+  if (!local || !remote) return true;
+  for (const emoji of REACTION_EMOJIS) {
+    const l = local[emoji];
+    const r = remote[emoji];
+    if (!l && !r) continue;
+    if (!l || !r) return true;
+    if (l.length !== r.length) return true;
+    const ls = [...l].sort();
+    const rs = [...r].sort();
+    if (ls.some((v, i) => v !== rs[i])) return true;
+  }
+  return false;
 }
 
 /** Structural guard for a persisted comment (guarded reads of stale/corrupt state). */

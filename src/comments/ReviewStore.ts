@@ -140,8 +140,14 @@ export class ReviewStore {
           }
         }
       }
-    } else {
+    } else if (step.kind === 'resolve') {
       for (const t of review.threads) if (t.remoteThreadId === step.threadId) t.remoteResolved = step.resolved;
+    } else if (step.kind === 'reaction') {
+      for (const t of review.threads) {
+        for (const c of t.comments) {
+          if (c.id === step.commentId) c.remoteReactions = c.reactions ? structuredClone(c.reactions) : undefined;
+        }
+      }
     }
     review.updatedAt = new Date().toISOString();
     await this.store.update(REVIEWS_KEY, map);

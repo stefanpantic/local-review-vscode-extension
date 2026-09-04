@@ -2,7 +2,7 @@
 // Lean bridge: `id`-correlated request/response for calls needing a reply; id-less events for pushes.
 
 import type { DiffSource, RepoInfo, DiffResult, ViewMode, Side } from '../model/ReviewDiff';
-import type { CommentThread } from '../model/Comment';
+import type { CommentThread, ReactionEmoji } from '../model/Comment';
 import type { PendingSummary } from '../review/pending';
 
 export interface Message {
@@ -90,6 +90,7 @@ export interface Requests {
     response: { threadId: string; threadDeleted: boolean };
   };
   resolveThread: { payload: { threadId: string; resolved: boolean }; response: CommentThread };
+  toggleReaction: { payload: { threadId: string; commentId: string; emoji: ReactionEmoji }; response: CommentThread };
   // Post the PR's staged change set to GitHub. The host owns the event picker + confirmation, so the
   // webview just triggers it; the host pushes the refreshed state when it completes.
   submitReview: { payload: Record<string, never>; response: { ok: true } };

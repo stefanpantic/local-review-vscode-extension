@@ -59,6 +59,8 @@ export interface GithubWriteClient extends GithubReadClient {
   editComment(repo: RemoteRepoRef, input: { commentId: number; body: string }): Promise<void>;
   deleteComment(repo: RemoteRepoRef, input: { commentId: number }): Promise<void>;
   resolveThread(input: { threadId: string; resolved: boolean }): Promise<void>;
+  addReaction(subjectId: string, content: string): Promise<void>;
+  removeReaction(subjectId: string, content: string): Promise<void>;
 }
 
 const THREADS_QUERY = `
@@ -70,7 +72,7 @@ query ($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
         nodes {
           id isResolved isOutdated path diffSide line startLine originalLine originalStartLine
           comments(first: 100) {
-            nodes { id databaseId author { login } body createdAt updatedAt url diffHunk state }
+            nodes { id databaseId author { login } body createdAt updatedAt url diffHunk state reactions(first: 100) { nodes { content user { login } } } }
           }
         }
       }
@@ -104,6 +106,7 @@ interface ThreadsResponse {
               url: string;
               diffHunk: string;
               state: 'PENDING' | 'SUBMITTED';
+              reactions: { nodes: Array<{ content: string; user: { login: string } | null }> };
             }>;
           };
         }>;
@@ -115,6 +118,9 @@ interface ThreadsResponse {
 // Resolve state has no REST equivalent, so it goes through GraphQL by thread node id.
 const RESOLVE_MUTATION = `mutation ($threadId: ID!) { resolveReviewThread(input: { threadId: $threadId }) { thread { id } } }`;
 const UNRESOLVE_MUTATION = `mutation ($threadId: ID!) { unresolveReviewThread(input: { threadId: $threadId }) { thread { id } } }`;
+
+const ADD_REACTION_MUTATION = `mutation ($subjectId: ID!, $content: ReactionContent!) { addReaction(input: { subjectId: $subjectId, content: $content }) { reaction { id } } }`;
+const REMOVE_REACTION_MUTATION = `mutation ($subjectId: ID!, $content: ReactionContent!) { removeReaction(input: { subjectId: $subjectId, content: $content }) { reaction { id } } }`;
 
 type GraphqlFn = <T>(query: string, params: Record<string, unknown>) => Promise<T>;
 
@@ -222,6 +228,7 @@ class OctokitClient implements GithubWriteClient {
             url: c.url,
             diffHunk: c.diffHunk,
             isPending: c.state === 'PENDING',
+            reactions: c.reactions.nodes.flatMap((r) => (r.user ? [{ content: r.content, login: r.user.login }] : [])),
           })),
         });
       }
@@ -294,6 +301,14 @@ class OctokitClient implements GithubWriteClient {
 
   async resolveThread(input: { threadId: string; resolved: boolean }): Promise<void> {
     await this.gql(input.resolved ? RESOLVE_MUTATION : UNRESOLVE_MUTATION, { threadId: input.threadId });
+  }
+
+  async addReaction(subjectId: string, content: string): Promise<void> {
+    await this.gql(ADD_REACTION_MUTATION, { subjectId, content });
+  }
+
+  async removeReaction(subjectId: string, content: string): Promise<void> {
+    await this.gql(REMOVE_REACTION_MUTATION, { subjectId, content });
   }
 }
 

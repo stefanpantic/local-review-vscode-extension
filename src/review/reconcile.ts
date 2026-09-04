@@ -3,7 +3,7 @@
 // Pure and synchronous, so it is unit-tested. Used by a re-open, the background poll, and the pre-submit
 // re-fetch — every path that pulls fresh remote threads while local work exists.
 import type { Comment, CommentThread } from '../model/Comment';
-import { AGENT_AUTHOR } from '../model/Comment';
+import { AGENT_AUTHOR, hasReactionDiff } from '../model/Comment';
 
 /** Staged/posted work whose upstream target vanished; reported so the caller can tell the user what moved. */
 export interface OrphanReport {
@@ -62,6 +62,14 @@ function keepAgentAuthor(fetched: Comment, local: Comment | undefined): Comment 
  * The suggestion is part of it because the same prose with a different proposed replacement is a different
  * comment (the fenced block is stripped back out on import, so the prose alone is not enough).
  */
+function mergeReactions(local: Comment, fetched: Comment): Partial<Pick<Comment, 'reactions' | 'remoteReactions'>> {
+  if (!hasReactionDiff(local)) return {};
+  return {
+    reactions: local.reactions ? structuredClone(local.reactions) : undefined,
+    remoteReactions: fetched.reactions ? structuredClone(fetched.reactions) : fetched.remoteReactions,
+  };
+}
+
 function contentKey(filePath: string, side: string, c: Comment): string {
   return [filePath, side, c.body, c.suggestion?.replacement ?? ''].join('\u0000');
 }
@@ -210,15 +218,19 @@ export function reconcile(
         continue;
       }
       const edited = lc.remoteBody !== undefined && lc.body !== lc.remoteBody;
-      if (!edited) {
-        // No pending edit: take upstream wholesale, which also clears any stale conflict.
+      const rxMerge = mergeReactions(lc, fc);
+      if (!edited && !rxMerge.reactions) {
         comments.push(keepAgentAuthor(fc, lc));
+        continue;
+      }
+      if (!edited) {
+        comments.push({ ...keepAgentAuthor(fc, lc), ...rxMerge });
         continue;
       }
       // Your edit wins locally. If upstream moved off the same baseline too, this is a genuine collision.
       const upstreamChanged = lc.remoteBody !== undefined && fc.body !== lc.remoteBody;
       const conflict = lc.conflict === true || upstreamChanged;
-      comments.push({ ...keepAgentAuthor(fc, lc), body: lc.body, ...(conflict ? { conflict: true } : {}) });
+      comments.push({ ...keepAgentAuthor(fc, lc), body: lc.body, ...(conflict ? { conflict: true } : {}), ...rxMerge });
     }
     // Pending replies, minus any that turn out to have posted already (a submit that failed after sending
     // them). Same adoption rule as a draft root: match your own content, and consume each fetched comment
