@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { reanchor, reanchorOne, createAnchor, reconstructHunk, rangeText } from '../src/comments/anchoring';
-import type { CommentThread, Anchor } from '../src/model/Comment';
+import type { CommentThread, Anchor, LineAnchor } from '../src/model/Comment';
 import type { DiffRow, DiffSource, FileDiff, Hunk, ReviewDiff, Side } from '../src/model/ReviewDiff';
 
 const ctx = (o: number, n: number, text: string): DiffRow => ({ type: 'context', oldLineNo: o, newLineNo: n, text });
@@ -21,6 +21,7 @@ function thread(anchor: Partial<Anchor>): CommentThread {
   return {
     id: 't1',
     anchor: {
+      kind: 'line',
       filePath: 'a.ts',
       side: 'new',
       lineNumber: 2,
@@ -28,7 +29,7 @@ function thread(anchor: Partial<Anchor>): CommentThread {
       source: 'worktree-vs-head',
       originalDiffHunk: '',
       ...anchor,
-    },
+    } as Anchor,
     comments: [{ id: 'c1', body: 'hi', createdAt: '', updatedAt: '', author: 'tester' }],
     resolved: false,
   };
@@ -89,7 +90,7 @@ test('range: start-anchored, endLineNumber preserved', () => {
   assert.equal(t.status, 'anchored');
   assert.equal(t.resolvedLine, 2);
   assert.equal(t.resolvedEndLine, 4);
-  assert.equal(t.anchor.endLineNumber, 4);
+  assert.equal((t.anchor as LineAnchor).endLineNumber, 4);
 });
 
 test('block range follows its start line, keeping its span', () => {
@@ -125,21 +126,56 @@ test('reanchor decorates every thread', () => {
 test('createAnchor captures line text, hunk, source, and rename old path', () => {
   const h = hunk([ctx(1, 1, 'A'), add(2, 'NEW')]);
   const d = diff([file('b.ts', [h], { status: 'renamed', oldPath: 'a.ts' })], 'staged');
-  const a = createAnchor(d, { filePath: 'b.ts', side: 'new', startLine: 2 });
-  assert.equal(a.line, 'NEW');
-  assert.equal(a.source, 'staged');
-  assert.equal(a.oldPath, 'a.ts');
-  assert.equal(a.originalDiffHunk, reconstructHunk(h));
-  assert.equal(a.endLineNumber, undefined);
+  const a = createAnchor(d, { kind: 'line', filePath: 'b.ts', side: 'new', startLine: 2 });
+  const la = a as LineAnchor;
+  assert.equal(la.line, 'NEW');
+  assert.equal(la.source, 'staged');
+  assert.equal(la.oldPath, 'a.ts');
+  assert.equal(la.originalDiffHunk, reconstructHunk(h));
+  assert.equal(la.endLineNumber, undefined);
 });
 
 test('createAnchor keeps a real range end but drops a degenerate one', () => {
   const d = diff([file('a.ts', [hunk([ctx(1, 1, 'A'), ctx(2, 2, 'B'), ctx(3, 3, 'C')])])]);
-  assert.equal(createAnchor(d, { filePath: 'a.ts', side: 'new', startLine: 1, endLine: 3 }).endLineNumber, 3);
-  assert.equal(createAnchor(d, { filePath: 'a.ts', side: 'new', startLine: 1, endLine: 1 }).endLineNumber, undefined);
+  assert.equal(
+    (createAnchor(d, { kind: 'line', filePath: 'a.ts', side: 'new', startLine: 1, endLine: 3 }) as LineAnchor)
+      .endLineNumber,
+    3,
+  );
+  assert.equal(
+    (createAnchor(d, { kind: 'line', filePath: 'a.ts', side: 'new', startLine: 1, endLine: 1 }) as LineAnchor)
+      .endLineNumber,
+    undefined,
+  );
 });
 
 test('reconstructHunk round-trips header + signed rows', () => {
   const h = hunk([ctx(1, 1, 'a'), del(2, 'b'), add(2, 'c')], '@@ -1,2 +1,2 @@ fn');
   assert.equal(reconstructHunk(h), '@@ -1,2 +1,2 @@ fn\n a\n-b\n+c');
+});
+
+// --- file-level anchors ---
+
+test('reanchorOne: file anchor is anchored when file is in diff', () => {
+  const d = diff([file('a.ts', [hunk([ctx(1, 1, 'A')])])]);
+  const t = thread({ kind: 'file', filePath: 'a.ts', source: 'worktree-vs-head' } as Anchor);
+  const result = reanchorOne(t, d);
+  assert.equal(result.status, 'anchored');
+  assert.equal(result.resolvedLine, null);
+  assert.equal(result.resolvedEndLine, null);
+});
+
+test('reanchorOne: file anchor is outdated when file is absent', () => {
+  const d = diff([file('b.ts', [hunk([ctx(1, 1, 'A')])])]);
+  const t = thread({ kind: 'file', filePath: 'a.ts', source: 'worktree-vs-head' } as Anchor);
+  const result = reanchorOne(t, d);
+  assert.equal(result.status, 'outdated');
+});
+
+test('createAnchor with FileLocator produces a FileAnchor', () => {
+  const d = diff([file('a.ts', [hunk([ctx(1, 1, 'A')])])]);
+  const a = createAnchor(d, { kind: 'file', filePath: 'a.ts' });
+  assert.equal(a.kind, 'file');
+  assert.equal(a.filePath, 'a.ts');
+  assert.equal(a.source, 'worktree-vs-head');
 });

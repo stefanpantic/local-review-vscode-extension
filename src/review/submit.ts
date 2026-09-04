@@ -9,13 +9,14 @@ import type { Side } from '../model/ReviewDiff';
 /** The review action to submit with the batch. */
 export type SubmitEvent = 'comment' | 'approve' | 'request-changes';
 
-/** A brand-new top-level inline comment (the root of a local-draft thread), positioned from its anchor. */
+/** A brand-new top-level comment (the root of a local-draft thread), positioned from its anchor. */
 export interface NewInlineComment {
   path: string;
-  side: Side; // 'old' = base/left, 'new' = head/right
-  line: number; // the (end) line the comment anchors to
-  startLine?: number; // first line of a multi-line comment; absent for single-line
+  side?: Side; // absent for file-level comments
+  line?: number; // absent for file-level comments
+  startLine?: number; // first line of a multi-line comment; absent for single-line and file-level
   body: string;
+  subject_type?: 'file'; // present for file-level comments
 }
 
 /**
@@ -98,8 +99,10 @@ function bodyForSubmit(c: Comment): string {
 
 /** GitHub anchors a multi-line comment on its last line, with the first as the range start. */
 function positionOf(t: CommentThread): { line: number; startLine?: number } {
-  const start = t.anchor.lineNumber;
-  const end = t.anchor.endLineNumber ?? start;
+  const { anchor } = t;
+  if (anchor.kind === 'file') throw new Error('positionOf called on a file-level thread');
+  const start = anchor.lineNumber;
+  const end = anchor.endLineNumber ?? start;
   return end !== start ? { line: end, startLine: start } : { line: start };
 }
 
@@ -165,10 +168,11 @@ export function buildSubmitPlan(
       const root = t.comments[0];
       if (root && !root.remoteId) {
         const followups = t.comments.slice(1).filter((c) => !c.remoteId);
-        newThreads.push({
-          root: { path: t.anchor.filePath, side: t.anchor.side, ...positionOf(t), body: bodyForSubmit(root) },
-          replies: followups.map(bodyForSubmit),
-        });
+        const rootComment: NewInlineComment =
+          t.anchor.kind === 'file'
+            ? { path: t.anchor.filePath, body: bodyForSubmit(root), subject_type: 'file' }
+            : { path: t.anchor.filePath, side: t.anchor.side, ...positionOf(t), body: bodyForSubmit(root) };
+        newThreads.push({ root: rootComment, replies: followups.map(bodyForSubmit) });
         countAgent(root);
         followups.forEach(countAgent);
       }

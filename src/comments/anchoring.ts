@@ -1,6 +1,6 @@
 // Content-match comment anchoring. Pure & synchronous — unit-tested with fixtures.
 // Re-anchoring is scoped to lines present in the CURRENT diff: exact text match → anchored/moved; else outdated.
-import type { CommentThread, Anchor } from '../model/Comment';
+import type { CommentThread, Anchor, LineAnchor, FileAnchor } from '../model/Comment';
 import type { DiffRow, FileDiff, Hunk, ReviewDiff, Side } from '../model/ReviewDiff';
 
 /** Decorate every thread with its runtime `status` + `resolvedLine` against the current diff. */
@@ -9,13 +9,14 @@ export function reanchor(threads: CommentThread[], diff: ReviewDiff): CommentThr
 }
 
 export function reanchorOne(thread: CommentThread, diff: ReviewDiff): CommentThread {
-  const file = findFile(diff, thread.anchor);
+  const { anchor } = thread;
+  const file = findFile(diff, anchor);
   if (!file) return { ...thread, status: 'outdated', resolvedLine: null, resolvedEndLine: null };
-  const match = bestMatch(candidateRows(file, thread.anchor.side), thread.anchor.line, thread.anchor.lineNumber);
+  if (anchor.kind === 'file') return { ...thread, status: 'anchored', resolvedLine: null, resolvedEndLine: null };
+  const match = bestMatch(candidateRows(file, anchor.side), anchor.line, anchor.lineNumber);
   if (!match) return { ...thread, status: 'outdated', resolvedLine: null, resolvedEndLine: null };
-  const status = match.lineNo === thread.anchor.lineNumber ? 'anchored' : 'moved';
-  // A range block follows its start line, keeping its original span.
-  const span = thread.anchor.endLineNumber != null ? thread.anchor.endLineNumber - thread.anchor.lineNumber : 0;
+  const status = match.lineNo === anchor.lineNumber ? 'anchored' : 'moved';
+  const span = anchor.endLineNumber != null ? anchor.endLineNumber - anchor.lineNumber : 0;
   return { ...thread, status, resolvedLine: match.lineNo, resolvedEndLine: match.lineNo + span };
 }
 
@@ -33,17 +34,30 @@ export function rangeText(diff: ReviewDiff, filePath: string, side: Side, start:
   return out.join('\n');
 }
 
-/** Where a comment is being created: a minimal locator the webview sends; the host builds the Anchor. */
-export interface AnchorLocator {
+export interface LineLocator {
+  kind: 'line';
   filePath: string;
   side: Side;
   startLine: number;
   endLine?: number;
 }
 
+export interface FileLocator {
+  kind: 'file';
+  filePath: string;
+}
+
+/** Where a comment is being created: a minimal locator the webview sends; the host builds the Anchor. */
+export type AnchorLocator = LineLocator | FileLocator;
+
 /** Author the durable Anchor from the authoritative diff (exact line text + original hunk captured now). */
 export function createAnchor(diff: ReviewDiff, loc: AnchorLocator): Anchor {
   const file = diff.files.find((f) => f.path === loc.filePath);
+  if (loc.kind === 'file') {
+    const anchor: FileAnchor = { kind: 'file', filePath: loc.filePath, source: diff.source };
+    if (file?.oldPath) anchor.oldPath = file.oldPath;
+    return anchor;
+  }
   let line = '';
   let originalDiffHunk = '';
   if (file) {
@@ -56,16 +70,18 @@ export function createAnchor(diff: ReviewDiff, loc: AnchorLocator): Anchor {
       }
     }
   }
-  return {
+  const anchor: LineAnchor = {
+    kind: 'line',
     filePath: loc.filePath,
-    oldPath: file?.oldPath,
     side: loc.side,
     lineNumber: loc.startLine,
-    endLineNumber: loc.endLine != null && loc.endLine !== loc.startLine ? loc.endLine : undefined,
     line,
     source: diff.source,
     originalDiffHunk,
   };
+  if (file?.oldPath) anchor.oldPath = file.oldPath;
+  if (loc.endLine != null && loc.endLine !== loc.startLine) anchor.endLineNumber = loc.endLine;
+  return anchor;
 }
 
 /** Rebuild a hunk's raw text (header + signed rows) — for outdated rendering and export context. */

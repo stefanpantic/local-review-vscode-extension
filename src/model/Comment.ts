@@ -7,16 +7,26 @@ export type AnchorStatus = 'anchored' | 'moved' | 'outdated';
 export type ReactionEmoji = '👍' | '👎' | '👀' | '❤️' | '🎉';
 export const REACTION_EMOJIS: ReactionEmoji[] = ['👍', '👎', '👀', '❤️', '🎉'];
 
-export interface Anchor {
+interface AnchorBase {
   filePath: string; // new path at creation time
   oldPath?: string; // present for renamed files
+  source: DiffSource; // advisory provenance only — NOT a storage/partition key
+}
+
+export interface LineAnchor extends AnchorBase {
+  kind: 'line';
   side: Side; // old = base/left, new = head/right
   lineNumber: number; // line on `side` at creation time (the range START for range comments)
   endLineNumber?: number; // inclusive range end; the thread still anchors via the start line
   line: string; // EXACT text of the anchored (start) line at creation — the match key
-  source: DiffSource; // advisory provenance only — NOT a storage/partition key
   originalDiffHunk: string; // hunk text at creation; renders outdated threads + doubles as export context
 }
+
+export interface FileAnchor extends AnchorBase {
+  kind: 'file';
+}
+
+export type Anchor = LineAnchor | FileAnchor;
 
 export interface Comment {
   id: string;
@@ -178,20 +188,36 @@ export function isComment(c: unknown): c is Comment {
   return typeof o.id === 'string' && typeof o.body === 'string';
 }
 
-/** Structural guard for a persisted comment thread. */
+export function isLineAnchor(a: Anchor): a is LineAnchor {
+  return a.kind === 'line';
+}
+
+export function isFileAnchor(a: Anchor): a is FileAnchor {
+  return a.kind === 'file';
+}
+
+/** Structural guard for a persisted comment thread. Stamps `kind` on legacy anchors that lack it. */
 export function isCommentThread(t: unknown): t is CommentThread {
   if (!t || typeof t !== 'object') return false;
   const o = t as Record<string, unknown>;
   const a = o.anchor as Record<string, unknown> | undefined;
-  return (
-    typeof o.id === 'string' &&
-    typeof o.resolved === 'boolean' &&
-    Array.isArray(o.comments) &&
-    o.comments.every(isComment) &&
-    !!a &&
-    typeof a.filePath === 'string' &&
-    (a.side === 'old' || a.side === 'new') &&
-    typeof a.lineNumber === 'number' &&
-    typeof a.line === 'string'
-  );
+  if (
+    !a ||
+    typeof o.id !== 'string' ||
+    typeof o.resolved !== 'boolean' ||
+    !Array.isArray(o.comments) ||
+    !o.comments.every(isComment) ||
+    typeof a.filePath !== 'string'
+  )
+    return false;
+  if (a.kind === 'file') return true;
+  if (a.kind === 'line') {
+    return (a.side === 'old' || a.side === 'new') && typeof a.lineNumber === 'number' && typeof a.line === 'string';
+  }
+  // Legacy anchor (no kind): validate as line, then stamp kind for self-healing.
+  if ((a.side === 'old' || a.side === 'new') && typeof a.lineNumber === 'number' && typeof a.line === 'string') {
+    a.kind = 'line';
+    return true;
+  }
+  return false;
 }

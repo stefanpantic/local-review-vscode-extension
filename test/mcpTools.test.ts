@@ -34,10 +34,24 @@ const DIFF: ReviewDiff = {
   ],
 };
 
-function makeThread(filePath: string, side: Side, startLine: number, body: string, author: string): CommentThread {
+function makeThread(
+  filePath: string,
+  side: Side | undefined,
+  startLine: number,
+  body: string,
+  author: string,
+): CommentThread {
   return {
     id: 'thread1',
-    anchor: { filePath, side, lineNumber: startLine, line: 'x', source: 'worktree-vs-head', originalDiffHunk: '@@ h' },
+    anchor: {
+      kind: 'line',
+      filePath,
+      side: side ?? 'new',
+      lineNumber: startLine,
+      line: 'x',
+      source: 'worktree-vs-head',
+      originalDiffHunk: '@@ h',
+    },
     comments: [{ id: 'c1', body, createdAt: '', updatedAt: '', author }],
     resolved: false,
     status: 'anchored',
@@ -84,7 +98,7 @@ class FakeApi implements McpReviewApi {
   }
   async addComment(a: Parameters<McpReviewApi['addComment']>[0]) {
     this.posted.push(a);
-    return makeThread(a.filePath, a.side, a.startLine, a.body, a.author);
+    return makeThread(a.filePath, a.side ?? 'new', a.startLine ?? 1, a.body, a.author);
   }
   async reply(a: Parameters<McpReviewApi['reply']>[0]) {
     this.replied.push(a);

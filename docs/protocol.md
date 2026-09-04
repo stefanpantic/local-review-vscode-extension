@@ -173,7 +173,9 @@ _(Any windowing helpers — e.g. spacer/placeholder rows — are an internal det
 See [ADR-0003](./decisions/0003-anchoring-model.md). **A diff hash is never part of a comment key.** Anchoring is **content-match scoped to the current diff**.
 
 ```ts
-interface Anchor {
+// [it.17] Anchor is a discriminated union: LineAnchor for line-level, FileAnchor for file-level comments.
+interface LineAnchor {
+  kind: 'line';
   filePath: string;
   oldPath?: string; // for renamed files
   side: Side;
@@ -183,6 +185,13 @@ interface Anchor {
   source: DiffSource; // advisory provenance only (NOT a storage/partition key)
   originalDiffHunk: string; // raw hunk text at creation; lets outdated threads still render + doubles as export context
 }
+interface FileAnchor {
+  kind: 'file';
+  filePath: string;
+  oldPath?: string;
+  source: DiffSource;
+}
+type Anchor = LineAnchor | FileAnchor;
 
 type AnchorStatus = 'anchored' | 'moved' | 'outdated';
 
@@ -236,11 +245,12 @@ interface CommentThread {
 **Anchoring algorithm (on every diff load / reload — content-match, no full-file reads, no tuning knob):**
 
 1. **Find the file** in the current diff by `anchor.filePath`, else by `anchor.oldPath` (rename). Not present → `outdated`.
-2. **Match the line** among that file's diffed rows on `anchor.side`, comparing each row's text to `anchor.line`:
+2. **[it.17] File-level anchor** (`kind: 'file'`): file found → `anchored` (resolvedLine null); file absent → `outdated`. Never moves.
+3. **Line-level anchor** (`kind: 'line'`): **Match the line** among that file's diffed rows on `anchor.side`, comparing each row's text to `anchor.line`:
    - a row at `anchor.lineNumber` with matching text → `anchored`;
    - else the matching row **closest** to `anchor.lineNumber` → `moved`, `resolvedLine` = its line number;
    - (ties broken by proximity to the old line number.)
-3. **No matching row in the current diff** on that side → `outdated`, `resolvedLine = null`; render collapsed against `originalDiffHunk`. **Never delete.**
+4. **No matching row in the current diff** on that side → `outdated`, `resolvedLine = null`; render collapsed against `originalDiffHunk`. **Never delete.**
 
 Anchoring is intentionally **scoped to lines present in the current diff**: a line that has scrolled out of every hunk becomes `outdated` by design (acceptable — the tool is a review-then-export loop, not a full-file annotator). The _same_ algorithm re-anchors a **saved review** when it is loaded (it.5).
 
@@ -338,28 +348,28 @@ The webview keeps `let seq = 0` and a `Map<number, {resolve, reject}>`. A reques
 
 ### 7.1 Requests (webview → host)
 
-| `type`                 | payload                                                      | response payload                                                                                                          | Intro                   |
-| ---------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `getState`             | `{}`                                                         | `ReviewStatePayload` (repos + diff + viewed + config for the current selection)                                           | it.1/it.2               |
-| `setViewed`            | `{ filePath, viewed }`                                       | `{ ok: true }`                                                                                                            | it.2                    |
-| `setViewPref`          | `{ viewMode?, whitespace? }`                                 | `{ ok: true }`                                                                                                            | it.3                    |
-| `getFileTexts`         | `{ files: {path, oldPath?}[] }`                              | `{ texts }` — full old/new text per file (host resolves repo/source/base) for whole-file highlighting                     | it.3                    |
-| `addComment`           | `{ filePath, side, startLine, endLine?, body, suggestion? }` | `CommentThread` — host authors the `Anchor` from its own diff (D2)                                                        | it.4 / suggestion it.4b |
-| `editComment`          | `{ threadId, commentId, body, suggestion? }`                 | `CommentThread` — `suggestion` string sets, `null` clears, omit leaves                                                    | it.4 / suggestion it.4b |
-| `deleteComment`        | `{ threadId, commentId }`                                    | `{ threadId, threadDeleted: boolean }`                                                                                    | it.4                    |
-| `replyComment`         | `{ threadId, body, suggestion? }`                            | `CommentThread`                                                                                                           | it.4 / suggestion it.4b |
-| `resolveThread`        | `{ threadId, resolved }`                                     | `CommentThread`                                                                                                           | it.4                    |
-| `toggleReaction`       | `{ threadId, commentId, emoji }`                             | `CommentThread` — toggle the viewer's reaction on a comment                                                               | it.16                   |
-| `saveReview`           | `{ repoRoot, name }`                                         | `Review`                                                                                                                  | it.5                    |
-| `clearActiveReview`    | `{ repoRoot }`                                               | `{ ok: true }`                                                                                                            | it.5                    |
-| `listSavedReviews`     | `{ repoRoot }`                                               | `Review[]`                                                                                                                | it.5                    |
-| `loadSavedReview`      | `{ savedReviewId }`                                          | `{ repoRoot, threads: CommentThread[] }` — **replaces** the active review for `repoRoot` (warn if it has unsaved threads) | it.5                    |
-| `deleteSavedReview`    | `{ savedReviewId }`                                          | `{ ok: true }`                                                                                                            | it.5                    |
-| `generateExport`       | `{ repoRoot, source, scope, target }`                        | `{ markdown, wrotePath? }`                                                                                                | it.6                    |
-| `submitReview`         | `{}`                                                         | `{ ok: true }` — host owns the event picker + confirmation; pushes refreshed state when done                              | it.12                   |
-| `refreshPullRequest`   | `{}`                                                         | `{ ok: true }` — load the PR's new head + re-import in place (the "new commits" banner action)                            | it.12                   |
-| `syncPullRequest`      | `{}`                                                         | `{ ok: true }` — pull the latest comments and re-check the head (the PR bar's Sync); an explicit sync                     | it.13                   |
-| `discardPendingReview` | `{}`                                                         | `{ ok: true }` — throw away everything staged and take current upstream; the host confirms first                          | it.13                   |
+| `type`                 | payload                                                        | response payload                                                                                                          | Intro                   |
+| ---------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `getState`             | `{}`                                                           | `ReviewStatePayload` (repos + diff + viewed + config for the current selection)                                           | it.1/it.2               |
+| `setViewed`            | `{ filePath, viewed }`                                         | `{ ok: true }`                                                                                                            | it.2                    |
+| `setViewPref`          | `{ viewMode?, whitespace? }`                                   | `{ ok: true }`                                                                                                            | it.3                    |
+| `getFileTexts`         | `{ files: {path, oldPath?}[] }`                                | `{ texts }` — full old/new text per file (host resolves repo/source/base) for whole-file highlighting                     | it.3                    |
+| `addComment`           | `{ filePath, side?, startLine?, endLine?, body, suggestion? }` | `CommentThread` — host authors the `Anchor` from its own diff (D2); side+startLine absent = file-level [it.17]            | it.4 / it.4b / it.17    |
+| `editComment`          | `{ threadId, commentId, body, suggestion? }`                   | `CommentThread` — `suggestion` string sets, `null` clears, omit leaves                                                    | it.4 / suggestion it.4b |
+| `deleteComment`        | `{ threadId, commentId }`                                      | `{ threadId, threadDeleted: boolean }`                                                                                    | it.4                    |
+| `replyComment`         | `{ threadId, body, suggestion? }`                              | `CommentThread`                                                                                                           | it.4 / suggestion it.4b |
+| `resolveThread`        | `{ threadId, resolved }`                                       | `CommentThread`                                                                                                           | it.4                    |
+| `toggleReaction`       | `{ threadId, commentId, emoji }`                               | `CommentThread` — toggle the viewer's reaction on a comment                                                               | it.16                   |
+| `saveReview`           | `{ repoRoot, name }`                                           | `Review`                                                                                                                  | it.5                    |
+| `clearActiveReview`    | `{ repoRoot }`                                                 | `{ ok: true }`                                                                                                            | it.5                    |
+| `listSavedReviews`     | `{ repoRoot }`                                                 | `Review[]`                                                                                                                | it.5                    |
+| `loadSavedReview`      | `{ savedReviewId }`                                            | `{ repoRoot, threads: CommentThread[] }` — **replaces** the active review for `repoRoot` (warn if it has unsaved threads) | it.5                    |
+| `deleteSavedReview`    | `{ savedReviewId }`                                            | `{ ok: true }`                                                                                                            | it.5                    |
+| `generateExport`       | `{ repoRoot, source, scope, target }`                          | `{ markdown, wrotePath? }`                                                                                                | it.6                    |
+| `submitReview`         | `{}`                                                           | `{ ok: true }` — host owns the event picker + confirmation; pushes refreshed state when done                              | it.12                   |
+| `refreshPullRequest`   | `{}`                                                           | `{ ok: true }` — load the PR's new head + re-import in place (the "new commits" banner action)                            | it.12                   |
+| `syncPullRequest`      | `{}`                                                           | `{ ok: true }` — pull the latest comments and re-check the head (the PR bar's Sync); an explicit sync                     | it.13                   |
+| `discardPendingReview` | `{}`                                                           | `{ ok: true }` — throw away everything staged and take current upstream; the host confirms first                          | it.13                   |
 
 `scope: 'all' | 'unresolved' | 'file'` and `target: 'clipboard' | 'file'` (it.6). There is no `reanchorThread` — all re-anchoring is the host's automatic load-time computation (§4), surfaced via `threadsUpdated`. There is no `getThreads` — the (re-anchored) active review rides in `ReviewStatePayload.threads` and updates via `threadsUpdated`, mirroring how `viewed` works (D1). `addComment` sends only a line locator; the host authors the durable `Anchor` (exact line text, `originalDiffHunk`, source) from its own diff — the webview never constructs anchor internals (D2). A comment may carry a **suggestion** `[it.4b]`: the payload's `suggestion` is the proposed replacement text; the host captures the range's current code as `original` and stores `{ original, replacement }`. Suggestions are capture-and-export only (rendered as a before→after diff; serialized by export) — never written to disk.
 

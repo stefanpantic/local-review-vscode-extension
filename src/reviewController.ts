@@ -16,7 +16,7 @@ import {
 } from './git/git';
 import { diffContentId } from './git/diffId';
 import { orderByTree } from './fileTree';
-import type { DiffResult, DiffSource, FileDiff, PrRef, RepoInfo, ReviewDiff, ViewMode } from './model/ReviewDiff';
+import type { DiffResult, DiffSource, FileDiff, PrRef, RepoInfo, ReviewDiff, Side, ViewMode } from './model/ReviewDiff';
 import { prBranchKey, prViewedNamespace } from './model/ReviewDiff';
 import type { Comment, CommentThread, ReactionEmoji, RemoteRef, Review } from './model/Comment';
 import { durableThread, toggleReaction as toggleReactionOnComment, UNKNOWN_AUTHOR } from './model/Comment';
@@ -955,26 +955,38 @@ export class ReviewController {
 
   /** Build a suggestion for a thread's current (re-anchored) range, capturing the original from the diff. */
   private suggestionFor(thread: CommentThread, diff: ReviewDiff, replacement: string): Comment['suggestion'] {
-    const start = reanchorOne(thread, diff).resolvedLine ?? thread.anchor.lineNumber;
-    const span = thread.anchor.endLineNumber != null ? thread.anchor.endLineNumber - thread.anchor.lineNumber : 0;
-    return { original: rangeText(diff, thread.anchor.filePath, thread.anchor.side, start, start + span), replacement };
+    const { anchor } = thread;
+    if (anchor.kind === 'file') return undefined;
+    const start = reanchorOne(thread, diff).resolvedLine ?? anchor.lineNumber;
+    const span = anchor.endLineNumber != null ? anchor.endLineNumber - anchor.lineNumber : 0;
+    return { original: rangeText(diff, anchor.filePath, anchor.side, start, start + span), replacement };
   }
 
-  async addComment(
-    loc: AnchorLocator & { body: string; suggestion?: string; author?: string },
-  ): Promise<CommentThread> {
+  async addComment(p: {
+    filePath: string;
+    side?: Side;
+    startLine?: number;
+    endLine?: number;
+    body: string;
+    suggestion?: string;
+    author?: string;
+  }): Promise<CommentThread> {
     const { repoRoot, branch, diff, headSha } = this.ctx();
+    const loc: AnchorLocator =
+      p.startLine != null && p.side != null
+        ? { kind: 'line', filePath: p.filePath, side: p.side, startLine: p.startLine, endLine: p.endLine }
+        : { kind: 'file', filePath: p.filePath };
     const now = new Date().toISOString();
     const comment: Comment = {
       id: randomUUID(),
-      body: loc.body,
+      body: p.body,
       createdAt: now,
       updatedAt: now,
-      author: loc.author ?? this.authorIdentity(),
+      author: p.author ?? this.authorIdentity(),
     };
-    if (loc.suggestion != null) {
+    if (p.suggestion != null && loc.kind === 'line') {
       const original = rangeText(diff, loc.filePath, loc.side, loc.startLine, loc.endLine ?? loc.startLine);
-      comment.suggestion = { original, replacement: loc.suggestion };
+      comment.suggestion = { original, replacement: p.suggestion };
     }
     const thread: CommentThread = {
       id: randomUUID(),

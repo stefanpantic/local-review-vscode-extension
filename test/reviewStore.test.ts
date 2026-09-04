@@ -18,6 +18,7 @@ function thread(id: string): CommentThread {
   return {
     id,
     anchor: {
+      kind: 'line',
       filePath: 'a.ts',
       side: 'new',
       lineNumber: 1,

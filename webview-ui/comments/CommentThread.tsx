@@ -19,6 +19,7 @@ export type Tokenize = (text: string) => Tok[][];
 
 /** The line(s) a thread corresponds to — a range for block comments, a single line otherwise. */
 function lineLabel(t: CommentThread): string {
+  if (t.anchor.kind === 'file') return 'File';
   const start = t.resolvedLine ?? t.anchor.lineNumber;
   const end = t.resolvedEndLine ?? t.anchor.endLineNumber ?? start;
   return end > start ? `Lines ${start}-${end}` : `Line ${start}`;
@@ -190,7 +191,7 @@ export function CommentThreadView({
   const [expanded, setExpanded] = useState(!thread.resolved);
   useEffect(() => setExpanded(!thread.resolved), [thread.resolved]);
 
-  const canSuggest = thread.anchor.side === 'new';
+  const canSuggest = thread.anchor.kind === 'line' && thread.anchor.side === 'new';
   // Where this thread's comments stand on the remote. Thread-level facts, so they belong in the header badges
   // rather than beside an author name: they stay visible when the thread is collapsed, and they keep the
   // comment rows to their content.

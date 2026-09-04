@@ -30,5 +30,6 @@ export interface GhReviewThread {
   startLine: number | null; // first line of a multi-line thread (current); null for single-line
   originalLine: number | null; // line at the commit the thread was made against (survives outdating)
   originalStartLine: number | null; // first line of a multi-line thread at the original commit
+  subjectType?: 'LINE' | 'FILE'; // LINE for line-level, FILE for file-level comments
   comments: GhReviewComment[]; // comments[0] is the thread root
 }

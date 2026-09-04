@@ -9,7 +9,15 @@ function comment(over: Partial<Comment> = {}): Comment {
 function thread(over: Partial<CommentThread> = {}): CommentThread {
   return {
     id: 't',
-    anchor: { filePath: 'a.ts', side: 'new', lineNumber: 1, line: 'x', source: 'pr', originalDiffHunk: '' },
+    anchor: {
+      kind: 'line',
+      filePath: 'a.ts',
+      side: 'new',
+      lineNumber: 1,
+      line: 'x',
+      source: 'pr',
+      originalDiffHunk: '',
+    },
     comments: [comment()],
     resolved: false,
     ...over,

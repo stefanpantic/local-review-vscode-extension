@@ -26,6 +26,7 @@ const thread = (
 ): CommentThread => ({
   id,
   anchor: {
+    kind: 'line',
     filePath: over.path ?? 'src/a.ts',
     side: 'new',
     lineNumber: over.line ?? 10,
@@ -141,4 +142,16 @@ test('arranging does not mutate the input', () => {
 test('an empty review arranges to no groups', () => {
   assert.deepEqual(arrangeComments([], { groupBy: 'file', sortBy: 'position' }), []);
   assert.deepEqual(arrangeComments([], { groupBy: 'none', sortBy: 'newest' }), []);
+});
+
+test('file-level threads sort before line-level threads within the same file', () => {
+  const fileLevelThread: CommentThread = {
+    id: 'file',
+    anchor: { kind: 'file', filePath: 'src/a.ts', source: 'worktree-vs-head' },
+    comments: [comment({ id: 'fc1' })],
+    resolved: false,
+  };
+  const lineThread = thread('line', { path: 'src/a.ts', line: 5 });
+  const [group] = arrangeComments([lineThread, fileLevelThread], { groupBy: 'file', sortBy: 'position' });
+  assert.deepEqual(ids(group.threads), ['file', 'line']);
 });

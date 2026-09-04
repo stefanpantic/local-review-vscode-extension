@@ -55,7 +55,7 @@ class FlakyClient implements GithubWriteClient {
     if (this.failOn === 'createReview') throw new Error('network died');
     this.reviews.push(input);
     for (const c of input.comments) {
-      this.posted.push({ id: this.nextId++, path: c.path, line: c.line, side: c.side, body: c.body });
+      this.posted.push({ id: this.nextId++, path: c.path, line: c.line ?? null, side: c.side, body: c.body });
     }
     return { id: 1 };
   }
@@ -117,6 +117,7 @@ const remoteRef: RemoteRef = {
 };
 
 const anchor = {
+  kind: 'line' as const,
   filePath: 'a.ts',
   side: 'new' as const,
   lineNumber: 2,

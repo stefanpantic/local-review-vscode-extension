@@ -20,6 +20,7 @@ const comment = (over: Partial<Comment> & { id: string }): Comment => ({
 
 const thread = (over: Partial<CommentThread> & { id: string }): CommentThread => ({
   anchor: {
+    kind: 'line',
     filePath: 'src/a.ts',
     side: 'new',
     lineNumber: 10,

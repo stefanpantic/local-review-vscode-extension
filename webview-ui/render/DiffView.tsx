@@ -29,6 +29,7 @@ import { EmptyState } from '../components/EmptyState';
 
 type OverrideMap = Record<string, 'expanded' | 'collapsed'>;
 type Composer = { filePath: string; side: Side; startLine: number; endLine?: number };
+type FileComposer = { filePath: string };
 type Drag = { filePath: string; side: Side; from: number; to: number };
 
 // Outdated hunks render as plain (unhighlighted) diff rows — the stored hunk has no live file to tokenize.
@@ -55,6 +56,7 @@ function lineOn(row: DiffRow, side: Side): number | null {
 
 /** Find the diff row a thread currently renders against (by file — incl. rename — + side + resolved line). */
 function findRowFor(diff: ReviewDiff, anchor: Anchor, line: number): DiffRow | undefined {
+  if (anchor.kind !== 'line') return undefined;
   const file =
     diff.files.find((f) => f.path === anchor.filePath) ??
     diff.files.find((f) => f.oldPath === anchor.filePath) ??
@@ -77,6 +79,7 @@ export function DiffView({
   const [hl, setHl] = useState<HighlighterCore | null>(null);
   const [fileTexts, setFileTexts] = useState<Record<string, { old: string; new: string }>>({});
   const [composer, setComposer] = useState<Composer | null>(null);
+  const [fileComposer, setFileComposer] = useState<FileComposer | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [outdatedOpen, setOutdatedOpen] = useState(true);
@@ -237,14 +240,25 @@ export function DiffView({
     return map;
   }, [busy, diff]);
 
-  // Anchored/moved threads render inline against their row; outdated ones render at the end.
+  // Anchored/moved threads render inline against their row; file-level threads render below the
+  // file header; outdated ones render at the end.
   // A multi-line (block) comment also highlights every row in its resolved range.
-  const { threadsByRow, outdated, commentedRows } = useMemo(() => {
+  const { threadsByRow, fileLevelByPath, outdated, commentedRows } = useMemo(() => {
     const byRow = new Map<DiffRow, CommentThread[]>();
+    const byFile = new Map<string, CommentThread[]>();
     const commented = new Set<DiffRow>();
     const stale: CommentThread[] = [];
     if (diff && !busy) {
       for (const t of threadList ?? []) {
+        if (t.anchor.kind === 'file') {
+          if (t.status === 'outdated') {
+            stale.push(t);
+          } else {
+            const key = t.anchor.filePath;
+            (byFile.get(key) ?? byFile.set(key, []).get(key)!).push(t);
+          }
+          continue;
+        }
         if (t.resolvedLine == null) {
           stale.push(t);
           continue;
@@ -266,7 +280,7 @@ export function DiffView({
         }
       }
     }
-    return { threadsByRow: byRow, outdated: stale, commentedRows: commented };
+    return { threadsByRow: byRow, fileLevelByPath: byFile, outdated: stale, commentedRows: commented };
   }, [threadList, diff, busy]);
 
   const ops = (threadId: string): ThreadOps => ({
@@ -285,7 +299,7 @@ export function DiffView({
   const rangeCurrentText = (filePath: string, side: Side, start: number, end: number): string =>
     diff && side === 'new' ? rangeText(diff, filePath, side, start, end) : '';
   const suggestBaseFor = (t: CommentThread): string =>
-    t.resolvedLine != null
+    t.resolvedLine != null && t.anchor.kind === 'line'
       ? rangeCurrentText(t.anchor.filePath, t.anchor.side, t.resolvedLine, t.resolvedEndLine ?? t.resolvedLine)
       : '';
 
@@ -311,6 +325,13 @@ export function DiffView({
         suggestion: suggestion ?? undefined,
       }),
     );
+  };
+
+  const submitFileComment = (body: string): void => {
+    if (!fileComposer) return;
+    const fc = fileComposer;
+    setFileComposer(null);
+    mutate(request('addComment', { filePath: fc.filePath, body }));
   };
 
   const renderBelow = (filePath: string, row: DiffRow): ReactNode => {
@@ -532,7 +553,37 @@ export function DiffView({
                 viewed={Boolean(state.viewed[file.path])}
                 onToggleCollapse={() => toggleCollapse(file)}
                 onToggleViewed={() => toggleViewed(file)}
+                onAddFileComment={file.isCommentable ? () => setFileComposer({ filePath: file.path }) : undefined}
               />
+              {(fileLevelByPath.has(file.path) || fileComposer?.filePath === file.path) && (
+                <div className="lr-file-threads">
+                  {fileLevelByPath.get(file.path)?.map((t) => (
+                    <div className="lr-below" key={t.id}>
+                      <CommentThreadView
+                        key={t.id}
+                        thread={t}
+                        ops={ops(t.id)}
+                        suggestBase=""
+                        tokenize={tokenizeCode(t.anchor.filePath)}
+                        pendingOnRemote={state?.source === 'pr' && !t.remoteThreadId}
+                        viewer={state?.viewer}
+                        prMode={state?.source === 'pr'}
+                      />
+                    </div>
+                  ))}
+                  {fileComposer?.filePath === file.path && (
+                    <div className="lr-below">
+                      <CommentForm
+                        submitLabel="Comment"
+                        canSuggest={false}
+                        suggestBase=""
+                        onSubmit={(body) => submitFileComment(body)}
+                        onCancel={() => setFileComposer(null)}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
               {collapsed && isLarge(file) && !state.viewed[file.path] && file.hunks.length > 0 && (
                 <div className="lr-large">
                   Large file with {file.additions + file.deletions} changes.{' '}
@@ -591,7 +642,7 @@ export function DiffView({
           </div>
           {outdatedOpen &&
             outdated.map((t) => {
-              const hunk = parseHunk(t.anchor.originalDiffHunk);
+              const hunk = t.anchor.kind === 'line' ? parseHunk(t.anchor.originalDiffHunk) : undefined;
               return (
                 <div className="lr-outdated-item" key={t.id}>
                   <div className="lr-outdated-path">{t.anchor.filePath}</div>
@@ -602,6 +653,7 @@ export function DiffView({
                       </div>
                     </div>
                   ) : (
+                    t.anchor.kind === 'line' &&
                     t.anchor.originalDiffHunk && <pre className="lr-outdated-hunk">{t.anchor.originalDiffHunk}</pre>
                   )}
                   <div className="lr-below">

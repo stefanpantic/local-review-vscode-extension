@@ -51,6 +51,7 @@ function statusTag(t: CommentThread): string {
 }
 
 function lineLabel(t: CommentThread): string {
+  if (t.anchor.kind === 'file') return 'File';
   const start = startLine(t);
   const end = endLine(t);
   return end > start ? `Lines ${start}-${end}` : `Line ${start}`;
