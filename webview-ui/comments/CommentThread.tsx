@@ -136,7 +136,12 @@ function ReactionBar({
           </button>
         );
       })}
-      {pickerOpen ? (
+      <button className="lr-reaction-add" title="Add reaction" onClick={() => setPickerOpen(!pickerOpen)}>
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Zm3.82 1.636a.75.75 0 0 1 1.038.175l.007.009c.103.118.22.222.35.31.264.178.683.37 1.285.37.602 0 1.02-.192 1.285-.371.13-.088.247-.192.35-.31l.007-.008a.75.75 0 0 1 1.222.87l-.022.03c-.2.265-.429.49-.722.694-.549.383-1.253.595-2.12.595-.867 0-1.571-.212-2.12-.595a3.184 3.184 0 0 1-.722-.694l-.022-.03a.75.75 0 0 1 .184-1.045ZM12 7a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM6 7a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z" />
+        </svg>
+      </button>
+      {pickerOpen && (
         <div className="lr-reaction-picker">
           {REACTION_EMOJIS.map((emoji) => {
             const active = viewer != null && (reactions?.[emoji]?.includes(viewer) ?? false);
@@ -153,14 +158,7 @@ function ReactionBar({
               </button>
             );
           })}
-          <button className="lr-reaction-pick lr-reaction-pick-close" onClick={() => setPickerOpen(false)}>
-            ✕
-          </button>
         </div>
-      ) : (
-        <button className="lr-reaction-add" title="Add reaction" onClick={() => setPickerOpen(true)}>
-          +
-        </button>
       )}
     </div>
   );
