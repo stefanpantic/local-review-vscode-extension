@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.7.0...agentic-review-v0.8.0) (2026-09-04)
+
+
+### Features
+
+* add file-level comments ([#76](https://github.com/stefanpantic/local-review-vscode-extension/issues/76)) ([f0a9e86](https://github.com/stefanpantic/local-review-vscode-extension/commit/f0a9e863336391f32860c65fc70a3f66fcf922e8))
+
+
+### Bug Fixes
+
+* paginate reactions to stay under GitHub's node limit ([#77](https://github.com/stefanpantic/local-review-vscode-extension/issues/77)) ([3b7bf59](https://github.com/stefanpantic/local-review-vscode-extension/commit/3b7bf59f48f09d01822565febb7b69f177524eb2))
+
 ## [0.7.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.6.0...agentic-review-v0.7.0) (2026-09-04)
 
 
