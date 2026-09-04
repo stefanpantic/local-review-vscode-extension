@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.6.0...agentic-review-v0.7.0) (2026-09-04)
+
+
+### Features
+
+* add emoji reactions to comments ([#75](https://github.com/stefanpantic/local-review-vscode-extension/issues/75)) ([bc276b5](https://github.com/stefanpantic/local-review-vscode-extension/commit/bc276b5bbc3d38f2f6b76bff4133bea2ce6474a4))
+
+
+### Bug Fixes
+
+* let an agent revise its own comments after they are submitted ([#69](https://github.com/stefanpantic/local-review-vscode-extension/issues/69)) ([e6f5f48](https://github.com/stefanpantic/local-review-vscode-extension/commit/e6f5f4820d81404f527743f0a555cc1b2677bce7))
+
 ## [0.6.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.5.0...agentic-review-v0.6.0) (2026-08-11)
 
 
