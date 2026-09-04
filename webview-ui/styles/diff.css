@@ -1037,14 +1037,13 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
   border: 1px solid transparent;
   border-radius: 12px;
   background: transparent;
   color: var(--vscode-descriptionForeground);
-  font-size: 14px;
-  font-weight: 300;
   cursor: pointer;
   transition:
     background 0.1s,
@@ -1059,17 +1058,19 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  padding: 2px 4px;
+  height: 24px;
+  padding: 0 3px;
   border: 1px solid var(--lr-border);
   border-radius: 8px;
   background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
 }
 .lr-reaction-pick {
-  padding: 2px 5px;
+  padding: 0 4px;
   border: none;
-  border-radius: 6px;
+  border-radius: 4px;
   background: transparent;
-  font-size: 16px;
+  font-size: 14px;
+  line-height: 22px;
   cursor: pointer;
   transition: background 0.1s;
 }
@@ -1078,10 +1079,6 @@ body {
 }
 .lr-reaction-pick-active {
   background: color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent);
-}
-.lr-reaction-pick-close {
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground);
 }
 
 /* Buttons: primary/secondary pill, small variant, and a subtle ghost for per-comment actions. */
