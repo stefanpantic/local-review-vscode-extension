@@ -72,7 +72,7 @@ query ($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
         nodes {
           id isResolved isOutdated path diffSide line startLine originalLine originalStartLine
           comments(first: 100) {
-            nodes { id databaseId author { login } body createdAt updatedAt url diffHunk state reactions(first: 100) { nodes { content user { login } } } }
+            nodes { id databaseId author { login } body createdAt updatedAt url diffHunk state reactions(first: 10) { pageInfo { hasNextPage endCursor } nodes { content user { login } } } }
           }
         }
       }
@@ -106,7 +106,10 @@ interface ThreadsResponse {
               url: string;
               diffHunk: string;
               state: 'PENDING' | 'SUBMITTED';
-              reactions: { nodes: Array<{ content: string; user: { login: string } | null }> };
+              reactions: {
+                pageInfo: { hasNextPage: boolean; endCursor: string | null };
+                nodes: Array<{ content: string; user: { login: string } | null }>;
+              };
             }>;
           };
         }>;
@@ -118,6 +121,27 @@ interface ThreadsResponse {
 // Resolve state has no REST equivalent, so it goes through GraphQL by thread node id.
 const RESOLVE_MUTATION = `mutation ($threadId: ID!) { resolveReviewThread(input: { threadId: $threadId }) { thread { id } } }`;
 const UNRESOLVE_MUTATION = `mutation ($threadId: ID!) { unresolveReviewThread(input: { threadId: $threadId }) { thread { id } } }`;
+
+const REACTIONS_QUERY = `
+query ($id: ID!, $cursor: String) {
+  node(id: $id) {
+    ... on PullRequestReviewComment {
+      reactions(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { content user { login } }
+      }
+    }
+  }
+}`;
+
+interface ReactionsResponse {
+  node: {
+    reactions: {
+      pageInfo: { hasNextPage: boolean; endCursor: string | null };
+      nodes: Array<{ content: string; user: { login: string } | null }>;
+    };
+  };
+}
 
 const ADD_REACTION_MUTATION = `mutation ($subjectId: ID!, $content: ReactionContent!) { addReaction(input: { subjectId: $subjectId, content: $content }) { reaction { id } } }`;
 const REMOVE_REACTION_MUTATION = `mutation ($subjectId: ID!, $content: ReactionContent!) { removeReaction(input: { subjectId: $subjectId, content: $content }) { reaction { id } } }`;
@@ -198,6 +222,7 @@ class OctokitClient implements GithubWriteClient {
 
   async getReviewThreads(repo: RemoteRepoRef, number: number): Promise<GhReviewThread[]> {
     const out: GhReviewThread[] = [];
+    const needMoreReactions: { comment: GhReviewThread['comments'][number]; cursor: string }[] = [];
     let cursor: string | null = null;
     do {
       const data: ThreadsResponse = await this.gql<ThreadsResponse>(THREADS_QUERY, {
@@ -208,6 +233,26 @@ class OctokitClient implements GithubWriteClient {
       });
       const threads = data.repository.pullRequest.reviewThreads;
       for (const n of threads.nodes) {
+        const comments = n.comments.nodes.map((c) => {
+          const reactions = c.reactions.nodes.flatMap((r) =>
+            r.user ? [{ content: r.content, login: r.user.login }] : [],
+          );
+          const mapped = {
+            id: c.id,
+            databaseId: c.databaseId,
+            author: c.author?.login ?? null,
+            body: c.body,
+            createdAt: c.createdAt,
+            updatedAt: c.updatedAt,
+            url: c.url,
+            diffHunk: c.diffHunk,
+            isPending: c.state === 'PENDING',
+            reactions,
+          };
+          if (c.reactions.pageInfo.hasNextPage && c.reactions.pageInfo.endCursor)
+            needMoreReactions.push({ comment: mapped, cursor: c.reactions.pageInfo.endCursor });
+          return mapped;
+        });
         out.push({
           id: n.id,
           isResolved: n.isResolved,
@@ -218,22 +263,27 @@ class OctokitClient implements GithubWriteClient {
           startLine: n.startLine,
           originalLine: n.originalLine,
           originalStartLine: n.originalStartLine,
-          comments: n.comments.nodes.map((c) => ({
-            id: c.id,
-            databaseId: c.databaseId,
-            author: c.author?.login ?? null,
-            body: c.body,
-            createdAt: c.createdAt,
-            updatedAt: c.updatedAt,
-            url: c.url,
-            diffHunk: c.diffHunk,
-            isPending: c.state === 'PENDING',
-            reactions: c.reactions.nodes.flatMap((r) => (r.user ? [{ content: r.content, login: r.user.login }] : [])),
-          })),
+          comments,
         });
       }
       cursor = threads.pageInfo.hasNextPage ? threads.pageInfo.endCursor : null;
     } while (cursor);
+
+    for (const entry of needMoreReactions) {
+      let rxCursor: string | null = entry.cursor;
+      do {
+        const data: ReactionsResponse = await this.gql<ReactionsResponse>(REACTIONS_QUERY, {
+          id: entry.comment.id,
+          cursor: rxCursor,
+        });
+        const rx: ReactionsResponse['node']['reactions'] = data.node.reactions;
+        for (const r of rx.nodes) {
+          if (r.user) entry.comment.reactions.push({ content: r.content, login: r.user.login });
+        }
+        rxCursor = rx.pageInfo.hasNextPage ? rx.pageInfo.endCursor : null;
+      } while (rxCursor);
+    }
+
     return out;
   }
 
