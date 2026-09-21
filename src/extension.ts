@@ -18,6 +18,7 @@ import { AGENT_AUTHOR } from './model/Comment';
 import { parsePrReference, type GithubProviderId } from './github/remote';
 import { githubTokenSource } from './github/auth';
 import { githubErrorText } from './github/errors';
+import { nextPollDelay } from './poll';
 import type { SubmitEvent, SubmitCounts } from './review/submit';
 import type { OrphanReport } from './review/reconcile';
 import { PullRequestsView } from './webview/pullRequestsView';
@@ -304,35 +305,49 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Background poll while a PR is open: pick up upstream comment changes live and flag an advanced head.
   // Runs only in PR mode, skips if a tick is still in flight, and is disabled when the interval is 0.
+  // Uses setTimeout (not setInterval) so the delay can grow on consecutive failures and reset on success.
   let polling = false;
-  let pollTimer: ReturnType<typeof setInterval> | undefined;
+  let pollTimer: ReturnType<typeof setTimeout> | undefined;
+  let consecutivePollFailures = 0;
   const pollTick = async (): Promise<void> => {
-    if (polling || controller.source !== 'pr') return;
+    if (polling || controller.source !== 'pr') {
+      schedulePoll();
+      return;
+    }
     polling = true;
     try {
       const { orphans, incoming } = await controller.pollPullRequest();
+      consecutivePollFailures = 0;
       if (orphans)
         void vscode.window.showInformationMessage(`ReviewMate: synced upstream changes.${orphanNote(orphans)}`);
-      // A discussion landing while you read is easy to miss, so say so once rather than only badging the panel.
       if (incoming)
         void vscode.window.showInformationMessage(
           `ReviewMate: ${incoming} new comment${incoming === 1 ? '' : 's'} on this pull request.`,
         );
     } catch {
-      /* transient (offline, rate limit); the next tick retries */
+      consecutivePollFailures++;
     } finally {
       polling = false;
+      schedulePoll();
     }
   };
-  const restartPoll = (): void => {
-    if (pollTimer) clearInterval(pollTimer);
+  const schedulePoll = (): void => {
+    if (pollTimer != null) clearTimeout(pollTimer);
     pollTimer = undefined;
-    const secs = vscode.workspace.getConfiguration('agenticReview').get<number>('github.pollInterval', 60);
-    if (secs > 0) pollTimer = setInterval(() => void pollTick(), secs * 1000);
+    const baseSecs = vscode.workspace.getConfiguration('agenticReview').get<number>('github.pollInterval', 60);
+    if (baseSecs <= 0) return;
+    const ms = nextPollDelay(baseSecs, consecutivePollFailures);
+    pollTimer = setTimeout(() => void pollTick(), ms);
+  };
+  const restartPoll = (): void => {
+    consecutivePollFailures = 0;
+    schedulePoll();
   };
   restartPoll();
   context.subscriptions.push(
-    new vscode.Disposable(() => pollTimer && clearInterval(pollTimer)),
+    new vscode.Disposable(() => {
+      if (pollTimer != null) clearTimeout(pollTimer);
+    }),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('agenticReview.github.pollInterval')) restartPoll();
     }),
