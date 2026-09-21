@@ -1,6 +1,6 @@
 # Iteration 17 — File-level comments
 
-> **Status: in progress.**
+> **Status: done.** Shipped in PR #76, released in v0.8.0.
 
 GitHub pull request reviews support file-level comments: threads attached to a file, not to a specific
 line. ReviewMate currently drops these on import (`mapThreads` skips threads where both `line` and
@@ -94,14 +94,14 @@ within their file group.
 
 ## Acceptance criteria
 
-- [ ] `Anchor` is a `LineAnchor | FileAnchor` discriminated union; old persisted data loads correctly.
-- [ ] `reanchorOne` returns `'anchored'` for a file anchor whose file is in the diff, `'outdated'` when absent, and never `'moved'`.
-- [ ] A file-level comment can be created in a local review via the file header button and persists across reloads.
-- [ ] File-level threads from a GitHub PR are imported (previously dropped).
-- [ ] A locally created file-level comment submits to GitHub with `subject_type: "file"`.
-- [ ] File-level threads render between the file header and the first hunk, visible when the file is collapsed.
-- [ ] The sidebar shows "File" for file-level threads, sorted before line-level threads in the same file group.
-- [ ] `post_comment` via MCP works without `startLine`, creating a file-level comment.
-- [ ] Markdown export renders file-level threads with a `(file)` heading and no diff hunk fence.
-- [ ] All existing tests pass; new tests cover file anchors in anchoring, mapThreads, submit, export, and sorting.
-- [ ] Gates pass: format, lint, typecheck, test, build.
+- [x] `Anchor` is a `LineAnchor | FileAnchor` discriminated union; old persisted data loads correctly.
+- [x] `reanchorOne` returns `'anchored'` for a file anchor whose file is in the diff, `'outdated'` when absent, and never `'moved'`.
+- [x] A file-level comment can be created in a local review via the file header button and persists across reloads.
+- [x] File-level threads from a GitHub PR are imported (previously dropped).
+- [x] A locally created file-level comment submits to GitHub with `subject_type: "file"`.
+- [x] File-level threads render between the file header and the first hunk, visible when the file is collapsed.
+- [x] The sidebar shows "File" for file-level threads, sorted before line-level threads in the same file group.
+- [x] `post_comment` via MCP works without `startLine`, creating a file-level comment.
+- [x] Markdown export renders file-level threads with a `(file)` heading and no diff hunk fence.
+- [x] All existing tests pass; new tests cover file anchors in anchoring, mapThreads, submit, export, and sorting.
+- [x] Gates pass: format, lint, typecheck, test, build.

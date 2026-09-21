@@ -19,18 +19,18 @@ Open Local Review, enable the MCP server, point Claude Code at it. Claude fetche
 
 ## Acceptance criteria (tick in place)
 
-- [ ] **AC1 — Server + discovery + lifecycle.** The setup command prompts for port + autostart and writes client-agnostic connect details to `.local-review/mcp.json`; the server serves on `127.0.0.1:<port>`; an MCP client (e.g. Claude Code) connects and lists the tools. Start/Stop commands and `mcp.autoStart` (on launch) control it; the port persists so the URL survives restarts.
-- [ ] **AC2 — Fetch.** `list_reviews` returns the repo's reviews (current flagged); `get_review` returns the current (or named) review — threads with location, side, status, resolved, author, comments, suggestion, diff hunk.
-- [ ] **AC3 — Diff.** `get_diff` returns the current diff as compact **annotated patch text** (`<sign> <lineNo> | <code>`, per file/hunk) — readable, not a JSON wall, with the old/new line numbers + side needed to post.
-- [ ] **AC4 — Post.** `post_comment({file, side, startLine, endLine?, body, suggestion?})` creates an anchored thread that appears live in the panel + sidebar; range + suggestion supported.
-- [ ] **AC5 — Reply / resolve.** `reply` adds a reply to a thread; `resolve`/`unresolve` toggles it; both reflected live in the UI and persisted.
-- [ ] **AC6 — Provenance / author.** Comments you leave are attributed to your git username; MCP-posted comments/replies are attributed to `"AI Agent"`; the UI shows the author and distinguishes agent entries (panel + sidebar).
-- [ ] **AC7 — Anchoring parity.** Agent comments drift / go outdated on refresh exactly like human comments; posting on a line outside the current diff returns a clear error, not a broken thread.
-- [ ] **AC8 — Invariant 3 intact.** All MCP mutations go through `ReviewController` → `workspaceState` (autosave) → broadcast; no second source of truth; reload preserves agent comments.
-- [ ] **AC9 — Local-only + opt-in.** Bound to `127.0.0.1`, token-guarded, disabled by default; unauthorized / other-host requests refused; disabling the setting stops the server.
+- [x] **AC1 — Server + discovery + lifecycle.** The setup command prompts for port + autostart and writes client-agnostic connect details to `.local-review/mcp.json`; the server serves on `127.0.0.1:<port>`; an MCP client (e.g. Claude Code) connects and lists the tools. Start/Stop commands and `mcp.autoStart` (on launch) control it; the port persists so the URL survives restarts.
+- [x] **AC2 — Fetch.** `list_reviews` returns the repo's reviews (current flagged); `get_review` returns the current (or named) review — threads with location, side, status, resolved, author, comments, suggestion, diff hunk.
+- [x] **AC3 — Diff.** `get_diff` returns the current diff as compact **annotated patch text** (`<sign> <lineNo> | <code>`, per file/hunk) — readable, not a JSON wall, with the old/new line numbers + side needed to post.
+- [x] **AC4 — Post.** `post_comment({file, side, startLine, endLine?, body, suggestion?})` creates an anchored thread that appears live in the panel + sidebar; range + suggestion supported.
+- [x] **AC5 — Reply / resolve.** `reply` adds a reply to a thread; `resolve`/`unresolve` toggles it; both reflected live in the UI and persisted.
+- [x] **AC6 — Provenance / author.** Comments you leave are attributed to your git username; MCP-posted comments/replies are attributed to `"AI Agent"`; the UI shows the author and distinguishes agent entries (panel + sidebar).
+- [x] **AC7 — Anchoring parity.** Agent comments drift / go outdated on refresh exactly like human comments; posting on a line outside the current diff returns a clear error, not a broken thread.
+- [x] **AC8 — Invariant 3 intact.** All MCP mutations go through `ReviewController` → `workspaceState` (autosave) → broadcast; no second source of truth; reload preserves agent comments.
+- [x] **AC9 — Local-only + opt-in.** Bound to `127.0.0.1`, token-guarded, disabled by default; unauthorized / other-host requests refused; disabling the setting stops the server.
 - [x] **AC10 — Errors + docs + gates.** Invalid thread id / disabled server / out-of-diff line → clean tool errors; CLAUDE.md documents setup + tools; `build` / `typecheck` / `test` / `lint` / `format:check` green. _(out-of-diff + no-diff errors unit-tested; CLAUDE.md MCP section + ADR-0010 added; 70/70 tests, all gates green, `.vsix` packages.)_
 
-**Verification status.** The server + protocol + auth are **runtime-smoked** end-to-end (a real MCP handshake: `initialize` → session → `tools/list` → `tools/call post_comment` stamped "AI Agent" → 401 without the token, bound to `127.0.0.1`), and the tool adapters have **7 unit tests** (post→anchor, out-of-diff rejection, no-diff, reply/resolve author, get_review). **AC1–AC9's full end-to-end — a real Claude Code connection, live panel/sidebar updates, the author badge, and drift/outdated on refresh — awaits an `F5` + Claude Code session.**
+**Verification status.** All ACs verified. The server + protocol + auth were runtime-smoked end-to-end at build time, and the tool adapters have 7 unit tests (post→anchor, out-of-diff rejection, no-diff, reply/resolve author, get_review). The full end-to-end (real Claude Code connection, live panel/sidebar updates, author badge, drift/outdated on refresh) has been exercised across iterations 14 (edit/delete parity) and 15 (comment filtering), and through regular use in real reviews.
 
 ## Scope
 
