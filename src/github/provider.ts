@@ -149,17 +149,25 @@ class GithubReviewProvider implements ReviewProvider {
 /**
  * Build a GitHub provider bound to a host. `getToken` acquires a token on demand (interactive triggers
  * the sign-in prompt); it returns undefined when the user is signed out, which surfaces as an error the
- * caller turns into a sign-in affordance.
+ * caller turns into a sign-in affordance. The client is cached per token so the throttling plugin can
+ * track rate-limit state across calls; a changed token (re-auth, OAuth refresh) rebuilds the client.
  */
 export function createGithubProvider(opts: {
   providerId: GithubProviderId;
   enterpriseUri?: string;
   getToken: TokenSource;
+  buildClient?: typeof createGithubClient;
 }): ReviewProvider {
+  const build = opts.buildClient ?? createGithubClient;
+  let cachedToken: string | undefined;
+  let cachedClient: GithubWriteClient | undefined;
   const clientFor: ClientFactory = async (interactive: boolean) => {
     const token = await opts.getToken(interactive);
     if (!token) throw new GithubAuthError();
-    return createGithubClient({ token, providerId: opts.providerId, enterpriseUri: opts.enterpriseUri });
+    if (token === cachedToken && cachedClient) return cachedClient;
+    cachedClient = build({ token, providerId: opts.providerId, enterpriseUri: opts.enterpriseUri });
+    cachedToken = token;
+    return cachedClient;
   };
   return new GithubReviewProvider(opts.providerId, clientFor);
 }

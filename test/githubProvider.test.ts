@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { GithubReviewProvider } from '../src/github/provider';
+import { GithubReviewProvider, createGithubProvider } from '../src/github/provider';
 import type { GhNewComment, GhPostedComment, GhViewerTeam, GithubWriteClient } from '../src/github/client';
 import type { PullRequestDetail, PullRequestSummary } from '../src/review/provider';
 import type { SubmitReviewInput } from '../src/review/submit';
@@ -259,4 +259,38 @@ test('submitReview posts a new draft thread root and its follow-up reply in the 
   assert.equal(client.replies.length, 1);
   assert.equal(client.replies[0].body, 'second');
   assert.equal(client.replies[0].inReplyTo, 500); // the id FakeClient assigned to the created root
+});
+
+// --- client caching via createGithubProvider ---
+
+test('createGithubProvider reuses the client when the token is unchanged', async () => {
+  let builds = 0;
+  const provider = createGithubProvider({
+    providerId: 'github',
+    getToken: async () => 'fixed-token',
+    buildClient: () => {
+      builds++;
+      return new FakeClient() as unknown as GithubWriteClient;
+    },
+  });
+  await provider.viewer();
+  await provider.viewer();
+  assert.equal(builds, 1);
+});
+
+test('createGithubProvider rebuilds the client when the token changes', async () => {
+  let builds = 0;
+  let callCount = 0;
+  const provider = createGithubProvider({
+    providerId: 'github',
+    getToken: async () => (callCount++ < 2 ? 'token-a' : 'token-b'),
+    buildClient: () => {
+      builds++;
+      return new FakeClient() as unknown as GithubWriteClient;
+    },
+  });
+  await provider.viewer();
+  await provider.viewer();
+  await provider.viewer(); // token changes here
+  assert.equal(builds, 2);
 });

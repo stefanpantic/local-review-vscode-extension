@@ -2,9 +2,12 @@
 // review comments; GraphQL covers review threads and their resolution state (no REST equivalent). The
 // read surface for iteration 11; write-back joins in iteration 12. Network egress lives only here.
 import { Octokit } from '@octokit/rest';
+import { throttling } from '@octokit/plugin-throttling';
 import type { PullRequestDetail, PullRequestSummary, RemoteRepoRef } from '../review/provider';
 import type { GhReviewThread } from './types';
 import { apiBaseUrls, type GithubProviderId } from './remote';
+
+const ThrottledOctokit = Octokit.plugin(throttling);
 
 /** The read operations the provider needs. Fakeable, so the provider is testable without the network. */
 export interface GithubReadClient {
@@ -178,25 +181,31 @@ class OctokitClient implements GithubWriteClient {
   }
 
   async listPullRequests(repo: RemoteRepoRef): Promise<PullRequestSummary[]> {
-    const prs = await this.kit.paginate(this.kit.rest.pulls.list, {
+    const out: PullRequestSummary[] = [];
+    for await (const { data: page } of this.kit.paginate.iterator(this.kit.rest.pulls.list, {
       owner: repo.owner,
       repo: repo.repo,
       state: 'open',
       sort: 'updated',
       direction: 'desc',
       per_page: 100,
-    });
-    return prs.map((pr) => ({
-      number: pr.number,
-      title: pr.title,
-      author: pr.user?.login ?? 'unknown',
-      state: pr.state,
-      url: pr.html_url,
-      updatedAt: pr.updated_at,
-      isDraft: pr.draft ?? false,
-      reviewers: reviewerLogins(pr.requested_reviewers),
-      reviewerTeams: teamSlugs(pr.requested_teams),
-    }));
+    })) {
+      for (const pr of page) {
+        out.push({
+          number: pr.number,
+          title: pr.title,
+          author: pr.user?.login ?? 'unknown',
+          state: pr.state,
+          url: pr.html_url,
+          updatedAt: pr.updated_at,
+          isDraft: pr.draft ?? false,
+          reviewers: reviewerLogins(pr.requested_reviewers),
+          reviewerTeams: teamSlugs(pr.requested_teams),
+        });
+      }
+      if (out.length >= 200) break;
+    }
+    return out;
   }
 
   async getPullRequest(repo: RemoteRepoRef, number: number): Promise<PullRequestDetail> {
@@ -372,7 +381,18 @@ export function createGithubClient(opts: {
   enterpriseUri?: string;
 }): GithubWriteClient {
   const bases = apiBaseUrls(opts.providerId, opts.enterpriseUri);
-  const kit = new Octokit({ auth: opts.token, baseUrl: bases.rest });
+  const kit = new ThrottledOctokit({
+    auth: opts.token,
+    baseUrl: bases.rest,
+    throttle: {
+      onRateLimit: (_retryAfter, _options, _octokit, retryCount) => {
+        if (retryCount === 0) return true; // retry once after waiting
+      },
+      onSecondaryRateLimit: (_retryAfter, _options, _octokit, retryCount) => {
+        if (retryCount === 0) return true;
+      },
+    },
+  });
   // Octokit derives the GraphQL endpoint as `${baseUrl}/graphql`; on GHE the GraphQL root differs from the
   // REST root (`/api` vs `/api/v3`), so point graphql at the correct base rather than inheriting the REST one.
   const gql = kit.graphql.defaults({ baseUrl: bases.graphql.replace(/\/graphql$/, '') }) as unknown as GraphqlFn;
