@@ -2,6 +2,7 @@
 // threads it is handed.
 import type { CommentThread } from '../model/Comment';
 import { UNKNOWN_AUTHOR } from '../model/Comment';
+import { endLine, startLine } from '../comments/position';
 
 export type CommentGroupBy = 'file' | 'author' | 'none';
 export type CommentSortBy = 'position' | 'newest' | 'oldest';
@@ -14,19 +15,6 @@ export interface CommentGroup {
   key: string;
   label: string;
   threads: CommentThread[];
-}
-
-/** Where a thread sits: its resolved line when it has one, else the line it was anchored to. File-level threads return 0. */
-export function startLine(t: CommentThread): number {
-  if (t.resolvedLine != null) return t.resolvedLine;
-  return t.anchor.kind === 'line' ? t.anchor.lineNumber : 0;
-}
-
-/** End of a range comment, falling back to its start for a single-line thread. */
-export function endLine(t: CommentThread): number {
-  if (t.resolvedEndLine != null) return t.resolvedEndLine;
-  if (t.anchor.kind === 'line') return t.anchor.endLineNumber ?? startLine(t);
-  return 0;
 }
 
 /** Who opened the thread. Grouping keys off the root alone, so a thread lands in exactly one group. */

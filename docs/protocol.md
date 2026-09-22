@@ -247,6 +247,7 @@ interface CommentThread {
   // Runtime-resolved against the currently loaded diff — NOT persisted:
   status?: AnchorStatus;
   resolvedLine?: number | null; // where it currently renders (null when outdated)
+  resolvedPath?: string; // [it.18] the file's current path, set only when it was renamed after the comment was made
 }
 ```
 
@@ -387,7 +388,7 @@ There is no `reanchorThread` — all re-anchoring is the host's automatic load-t
 | `threadsUpdated` | `{ threads: CommentThread[]; pending?: PendingSummary }` | it.4 (lightweight push after a mutation; diff not re-sent). `pending` [it.12] keeps the PR's pending count + Submit button live without re-sending the diff. |
 | `showError`      | `{ message }`                                            | it.1                                                                                                                                                         |
 
-Export (it.6) is host-side too — an `agenticReview.exportReview` command with QuickPicks (scope `all` / `unresolved` / `file`, context mode, target `clipboard` / `file` / editor), rendering via a pure formatter; no messages. Review sessions (it.5) are host-side as well: the sidebar's `agenticReview.newReview` / `switchReview` / `renameReview` / `deleteReview` / `moveReviewToCurrentBranch` commands change the store, and the host pushes the result to the panel with `stateChanged` or `threadsUpdated`. Source / repo / base-branch selection is **host-side** (commands `agenticReview.selectSource` / `agenticReview.selectRepo`, backed by QuickPick) — not webview messages. View prefs changed from the palette (`toggleViewMode` / `toggleWhitespace` / `toggleWrap`) likewise reach the panel through `stateChanged`. "Viewed" is host-owned and persisted; the panel toggles it via `setViewed` and both surfaces converge via `viewedUpdated`. Scroll position stays webview-only.
+Export (it.6) is host-side too — an `agenticReview.exportReview` command with QuickPicks (format `[it.18]`, scope `all` / `unresolved` / `file`, line references, target `clipboard` / `file` / editor), rendering via a pure formatter per format (Markdown, or JSON as in §9); no messages. Review sessions (it.5) are host-side as well: the sidebar's `agenticReview.newReview` / `switchReview` / `renameReview` / `deleteReview` / `moveReviewToCurrentBranch` commands change the store, and the host pushes the result to the panel with `stateChanged` or `threadsUpdated`. Source / repo / base-branch selection is **host-side** (commands `agenticReview.selectSource` / `agenticReview.selectRepo`, backed by QuickPick) — not webview messages. View prefs changed from the palette (`toggleViewMode` / `toggleWhitespace` / `toggleWrap`) likewise reach the panel through `stateChanged`. "Viewed" is host-owned and persisted; the panel toggles it via `setViewed` and both surfaces converge via `viewedUpdated`. Scroll position stays webview-only.
 
 ## 8. Validation & versioning
 
@@ -397,3 +398,67 @@ Two distinct concerns — don't conflate them:
 - **Live messages** come from our own bundled React app speaking this TypeScript-typed contract inside the same VSIX — a trusted boundary. Rely on the shared types plus a single defensive `try/catch` around dispatch; don't hand-write per-message validators.
 
 This contract grows per iteration; bump the intro tags and note breaking changes here when it does.
+
+## 9. Export formats `[it.18]`
+
+**Export Review** writes Markdown or JSON. Both formats select and order threads the same way:
+
+- **Scope.** All threads, unresolved threads only, or the threads of one file. The one-file scope matches the path the thread was made on.
+- **Order.** By file path, then start line, then end line. Paths compare by UTF-16 code unit, so the order doesn't depend on the host locale. A file-level thread counts as line 0 and comes first in its file. Old-side and new-side lines sort together in one sequence.
+- **Path.** A current export uses the file's current path, so a thread in a file renamed after the comment was made sorts and counts under the new path.
+
+The JSON has a `version` field. We bump it when the shape below breaks.
+
+```ts
+interface ReviewExportJson {
+  version: 1;
+  review: {
+    name: string;
+    repo: string;
+    branch: string; // the review's branch key: a branch name, `detached@<sha8>`, or `pr/<provider>/<number>` for a PR review
+    source: string; // label of the diff loaded at export time, e.g. "Uncommitted changes". It can differ from the diff the review was made on.
+    lineReferences: 'current' | 'as-reviewed';
+    generatedAt: string; // ISO
+  };
+  summary: { threads: number; files: number; unresolved: number }; // over the exported threads
+  threads: ExportedThread[];
+}
+
+type ExportedThread = ExportedLineThread | ExportedFileThread;
+
+interface ExportedThreadBase {
+  id: string;
+  file: string; // the file's current path in a current export
+  oldPath: string | null; // the earlier path when the file was renamed, else null
+  status: AnchorStatus | null; // null in an as-reviewed export
+  resolved: boolean;
+  comments: ExportedComment[]; // comments[0] is the root
+}
+
+interface ExportedLineThread extends ExportedThreadBase {
+  kind: 'line';
+  side: Side;
+  startLine: number;
+  endLine: number; // equals startLine for a single-line thread
+  diffHunk: string | null; // the hunk at creation, null when none was captured
+}
+
+interface ExportedFileThread extends ExportedThreadBase {
+  kind: 'file';
+  side: null;
+  startLine: null;
+  endLine: null;
+  diffHunk: null;
+}
+
+interface ExportedComment {
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string; // ISO
+  suggestion: { original: string; replacement: string } | null;
+  reactions: Partial<Record<ReactionEmoji, string[]>>; // display order, empty entries dropped, {} when none
+}
+```
+
+In a current export, `startLine` and `endLine` are the re-anchored lines. An as-reviewed export and an outdated thread use the lines saved on the anchor. When the file was renamed after the comment was made, a current export writes the new path as `file` and the path the comment was made on as `oldPath`. `reactions` is the comment's current state, including unsubmitted changes on a PR. The JSON leaves out PR write-back state (`remote*`, `localOnly`, `conflict`, `pendingDeletes`).

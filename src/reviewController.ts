@@ -18,6 +18,7 @@ import { diffContentId } from './git/diffId';
 import { orderByTree } from './fileTree';
 import type { DiffResult, DiffSource, FileDiff, PrRef, RepoInfo, ReviewDiff, Side, ViewMode } from './model/ReviewDiff';
 import { prBranchKey, prViewedNamespace } from './model/ReviewDiff';
+import type { LineReferences } from './export/common';
 import type { Comment, CommentThread, ReactionEmoji, RemoteRef, Review } from './model/Comment';
 import { durableThread, toggleReaction as toggleReactionOnComment, UNKNOWN_AUTHOR } from './model/Comment';
 import type { RemoteRepoRef, ReviewProvider } from './review/provider';
@@ -364,10 +365,14 @@ export class ReviewController {
     return review.branch === branch && review.id === this.reviewStore.currentId(repoRoot, branch);
   }
 
-  /** The threads to export: re-anchored against the current diff (live) or as stored (as-reviewed). */
-  exportThreads(review: Review, live: boolean): CommentThread[] {
+  /**
+   * The threads to export: re-anchored against the current diff (live) or as stored (as-reviewed). Falls back
+   * to stored threads when no diff is loaded, and reports which one it returned.
+   */
+  exportThreads(review: Review, live: boolean): { threads: CommentThread[]; lineReferences: LineReferences } {
     const diff = this.currentDiff();
-    return live && diff ? reanchor(review.threads, diff) : review.threads;
+    if (live && diff) return { threads: reanchor(review.threads, diff), lineReferences: 'current' };
+    return { threads: review.threads, lineReferences: 'as-reviewed' };
   }
 
   repoName(): string {

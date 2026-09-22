@@ -75,6 +75,21 @@ test('rename: file matched by its old path', () => {
   const t = reanchorOne(thread({ filePath: 'a.ts', lineNumber: 2, line: 'B' }), d);
   assert.equal(t.status, 'anchored');
   assert.equal(t.resolvedLine, 2);
+  assert.equal(t.resolvedPath, 'b.ts');
+});
+
+test('resolvedPath stays unset when the file keeps its path', () => {
+  const d = diff([file('a.ts', [hunk([ctx(1, 1, 'A'), ctx(2, 2, 'B')])])]);
+  const t = reanchorOne(thread({ filePath: 'a.ts', lineNumber: 2, line: 'B' }), d);
+  assert.equal(t.status, 'anchored');
+  assert.equal(t.resolvedPath, undefined);
+});
+
+test('resolvedPath stays unset on an outdated thread in a renamed file', () => {
+  const d = diff([file('b.ts', [hunk([ctx(1, 1, 'A')])], { status: 'renamed', oldPath: 'a.ts' })]);
+  const t = reanchorOne(thread({ filePath: 'a.ts', lineNumber: 2, line: 'gone' }), d);
+  assert.equal(t.status, 'outdated');
+  assert.equal(t.resolvedPath, undefined);
 });
 
 test('old side: a comment on a removed line matches del rows', () => {

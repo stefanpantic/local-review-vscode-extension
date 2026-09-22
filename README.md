@@ -17,7 +17,7 @@ A pull-request review surface inside VS Code, for three things: your own uncommi
 - **Reviews a real GitHub pull request** in the same UI. The PR is fetched in place, with no checkout and no change to your working tree, and every existing review thread is imported. github.com and GitHub Enterprise.
 - **Writes your review back.** Comment, reply, resolve, edit, and suggest, then post the lot as one GitHub review with **Comment**, **Approve**, or **Request changes**.
 - **Lets a coding agent review with you** over a local MCP server. It reads the diff and posts its own comments, replies, and suggestions into the same review, attributed to "AI Agent".
-- **Exports any review** as an agent-ready Markdown work list, for agents you have not wired up over MCP.
+- **Exports any review** as an agent-ready Markdown work list for agents you have not wired up over MCP, or as JSON for scripts and tools.
 - **Keeps comments anchored** as code shifts. They follow their lines, or go "outdated". They are never silently lost.
 - **Saves a review per branch** automatically, including one per pull request.
 
@@ -29,7 +29,7 @@ Install the extension (see [Install](#install)), then open **ReviewMate** from t
 
 **Review a GitHub pull request.** If the repo's `origin` is a GitHub remote, a **Pull Requests** section lists the open PRs. Click one. Review it exactly like a local diff, then press **Submit review** to post everything back. See [Review a GitHub pull request](#review-a-github-pull-request).
 
-**Bring in your coding agent.** Run **Set up MCP** and connect it, and the agent reviews alongside you in the same threads. Or run **Export Review** for a Markdown work list to paste in. See [Agent integration](#agent-integration-mcp).
+**Bring in your coding agent.** Run **Set up MCP** and connect it, and the agent reviews alongside you in the same threads. Or run **Export Review** for a Markdown work list to paste in, or JSON for your own tooling. See [Agent integration](#agent-integration-mcp).
 
 ## Review a GitHub pull request
 
@@ -99,7 +99,9 @@ Tools the agent gets: `get_diff`, `get_active_review`, `get_review`, `list_revie
 
 ### Or export a work list
 
-For an agent you have not connected, **Export Review** produces agent-ready Markdown: grouped by file, scoped to all comments, unresolved only, or a single file, at current or as-reviewed line positions, with ` ```suggestion ` blocks intact. Copy it, write it to a file, or open it in an editor.
+For an agent you have not connected, run **Export Review** and pick **Markdown**. The output is grouped by file, scoped to all comments, unresolved only, or a single file, at current or as-reviewed line positions, with ` ```suggestion ` blocks intact. Copy it, write it to a file, or open it in an editor.
+
+Pick **JSON** for scripts and custom agent harnesses. It takes the same scope and line-position options and adds comment ids, authors, the original code behind each suggestion, and reactions. We bump its `version` field when the shape breaks. The shape is in [docs/protocol.md](docs/protocol.md).
 
 ## Features
 

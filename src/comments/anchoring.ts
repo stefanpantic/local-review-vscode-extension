@@ -3,7 +3,7 @@
 import type { CommentThread, Anchor, LineAnchor, FileAnchor } from '../model/Comment';
 import type { DiffRow, FileDiff, Hunk, ReviewDiff, Side } from '../model/ReviewDiff';
 
-/** Decorate every thread with its runtime `status` + `resolvedLine` against the current diff. */
+/** Decorate every thread with its runtime `status`, `resolvedLine` and `resolvedPath` against the current diff. */
 export function reanchor(threads: CommentThread[], diff: ReviewDiff): CommentThread[] {
   return threads.map((t) => reanchorOne(t, diff));
 }
@@ -12,12 +12,15 @@ export function reanchorOne(thread: CommentThread, diff: ReviewDiff): CommentThr
   const { anchor } = thread;
   const file = findFile(diff, anchor);
   if (!file) return { ...thread, status: 'outdated', resolvedLine: null, resolvedEndLine: null };
-  if (anchor.kind === 'file') return { ...thread, status: 'anchored', resolvedLine: null, resolvedEndLine: null };
+  const renamed = file.path !== anchor.filePath ? { resolvedPath: file.path } : {};
+  if (anchor.kind === 'file') {
+    return { ...thread, ...renamed, status: 'anchored', resolvedLine: null, resolvedEndLine: null };
+  }
   const match = bestMatch(candidateRows(file, anchor.side), anchor.line, anchor.lineNumber);
   if (!match) return { ...thread, status: 'outdated', resolvedLine: null, resolvedEndLine: null };
   const status = match.lineNo === anchor.lineNumber ? 'anchored' : 'moved';
   const span = anchor.endLineNumber != null ? anchor.endLineNumber - anchor.lineNumber : 0;
-  return { ...thread, status, resolvedLine: match.lineNo, resolvedEndLine: match.lineNo + span };
+  return { ...thread, ...renamed, status, resolvedLine: match.lineNo, resolvedEndLine: match.lineNo + span };
 }
 
 /** Joined text of the rows on `side` whose line number falls in [start, endInclusive] — a suggestion's "original". */

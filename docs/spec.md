@@ -22,7 +22,7 @@ _ReviewMate_ provides that structure entirely on the local machine. You open a d
 - **Suggestions**: propose replacement code inside a comment (rendered as a before→after diff), captured for the export — never written to disk.
 - Comments **persist across reloads** and exhibit GitHub-style **line drift** (they follow their lines as code changes; they become _outdated_ rather than being lost when they can't be matched).
 - **Review sessions**: one review per branch autosaves as you comment. Start a new one for another pass, or switch back to an earlier one.
-- **Agent-ready structured export** as well-structured **Markdown**.
+- **Agent-ready structured export** as well-structured **Markdown**, or as versioned **JSON** for scripts and tools.
 
 ## 3. Non-goals (v1)
 
@@ -39,8 +39,8 @@ _ReviewMate_ provides that structure entirely on the local machine. You open a d
 3. Read the diff (toggle unified/side-by-side, hide whitespace, mark files "viewed").
 4. Leave comments on lines, ranges, or whole files; reply/resolve as thinking evolves.
 5. The review autosaves to the current branch. _(Optional)_ Start a **New Review** for another pass, or **switch** to an earlier one to resume.
-6. **Export Review** → a structured Markdown work list, copied to the clipboard, opened in an editor, or saved to a file.
-7. Paste it into a coding agent to action the comments. Iterate: as the agent edits code, comments **drift** with their lines or surface as _outdated_.
+6. **Export Review** → a structured Markdown or JSON work list, copied to the clipboard, opened in an editor, or saved to a file.
+7. Paste the Markdown into a coding agent to act on the comments, or feed the JSON to your own tooling. Iterate: as the agent edits code, comments **drift** with their lines or become _outdated_.
 
 ## 5. Core invariants (load-bearing contracts)
 
@@ -72,7 +72,7 @@ Pinned up front because nearly every iteration depends on them. Full types and m
 
 Full type definitions live in [`protocol.md`](./protocol.md). Conceptually:
 
-- **Review** — one type: a named **session** of comment threads tied to a `(repoRoot, branch)`. Per branch one review is **current** and **autosaves** as you comment (no manual save); you create / switch / rename / delete reviews. Reviews for a branch that no longer exists are **archived** (kept, never auto-deleted) and any review can be **moved** to the current branch. Reviews are an internal _resume-later_ mechanism, **distinct from export** (the external, agent-facing Markdown). See [ADR-0009](./decisions/0009-review-sessions-vs-export.md).
+- **Review** — one type: a named **session** of comment threads tied to a `(repoRoot, branch)`. Per branch one review is **current** and **autosaves** as you comment (no manual save); you create / switch / rename / delete reviews. Reviews for a branch that no longer exists are **archived** (kept, never auto-deleted) and any review can be **moved** to the current branch. Reviews are an internal _resume-later_ mechanism, **distinct from export** (the external Markdown or JSON). See [ADR-0009](./decisions/0009-review-sessions-vs-export.md).
 - **Branch is part of the key; source is not.** Reviews and their threads are keyed by `(repoRoot, branch)` — a review is the work on a branch (the PR model). `source` (unstaged / staged / worktree-vs-HEAD / vs-base) selects only _which diff you're viewing_; threads re-anchor against whatever diff is loaded, so `git add`-ing a hunk or switching the source picker must **never** orphan a comment. `Anchor.source` is advisory provenance only.
 - **UI state — one home per pref.** Ephemeral view state (scroll, collapsed/viewed files, whitespace toggle) lives **only** in the webview (`getState/setState`). Durable prefs (view mode, current source) are written through an **acked `setPref` request** the host persists and re-broadcasts; the host value wins on reload. Global defaults come from `contributes.configuration` (added in it.2).
 
@@ -100,10 +100,11 @@ Work proceeds **one iteration at a time**: refine → implement → verify. The 
 | 15  | **Comment filter, sort, group**   | The sidebar review list gains a filter (`author:` incl. `@me`/`@agent`, `is:resolved`/`is:unresolved`, `is:anchored`/`is:moved`/`is:outdated`), grouping by file / author / flat, and ordering by position / newest / oldest, all persisted and named in the view header. Hiding resolved comments is a filter rather than a separate toggle. Read-side only, sidebar only: two pure modules plus view wiring, no protocol change and no diff-panel behavior change. See [`iterations/iteration-15-comment-filtering/`](./iterations/iteration-15-comment-filtering/refinement.md).                               |
 | 16  | **Emoji reactions**               | Reactions (👍 👎 👀 ❤️ 🎉) on individual comments across local and PR reviews. A `toggleReaction` request (the host stamps the identity), chips with counts and an inline picker in the panel, and an MCP `react` tool. On a PR we import reactions with the users who reacted as a `remoteReactions` baseline, stage changes like edits and resolves, send them on Submit as GraphQL add/remove mutations, and keep staged ones across a sync. You can react to anyone's comment. See [`iterations/iteration-16-emoji-reactions/`](./iterations/iteration-16-emoji-reactions/refinement.md).                     |
 | 17  | **File-level comments**           | File-level comments (threads attached to a file, not a line) across local and PR reviews. A `FileAnchor` type alongside `LineAnchor` forming a discriminated union on `kind`; create via file header button, import from GitHub PRs (previously dropped), submit with `subject_type: "file"`, render between file header and first hunk, MCP `post_comment` without `startLine`, and Markdown export with `(file)` heading. See [`iterations/iteration-17-file-level-comments/`](./iterations/iteration-17-file-level-comments/refinement.md).                                                                    |
+| 18  | **JSON export**                   | **Export Review** offers JSON next to Markdown, for scripts and custom agent harnesses. A format step comes first, then the same scope, line-reference, and target steps. A pure `exportReviewJson` formatter shares scope filtering and ordering with the Markdown formatter. The JSON has a `version` field and adds comment ids, authors, suggestion originals, and reactions. MCP output doesn't change. See [`iterations/iteration-18-json-export/`](./iterations/iteration-18-json-export/refinement.md).                                                                                                   |
 
 Each row links to its folder under [`iterations/`](./iterations/) once refined. Row 10 carries intent and the central open decision only; its detailed refinement is written when the iteration opens (one iteration at a time).
 
-**Status: rows 1 through 9, 4b, and 11 through 17 have shipped. Row 10 (scale-out) is parked indefinitely — its refinement is a draft, and it will only be opened if real-world scale problems surface. No iteration is currently open.** Each shipped iteration's `refinement.md` carries its ticked acceptance criteria as the verification record.
+**Status: rows 1 through 9, 4b, and 11 through 17 have shipped. Row 10 (scale-out) is parked indefinitely — its refinement is a draft, and it will only be opened if real-world scale problems surface. Row 18 (JSON export) is open.** Each shipped iteration's `refinement.md` carries its ticked acceptance criteria as the verification record.
 
 Iteration 13 changes one contract iteration 12 set: the background poll is now **strictly non-destructive** (it only adds and refreshes; upstream deletions land on an explicit sync). See the iteration 13 addendum in [ADR-0011](./decisions/0011-github-pr-review.md).
 
@@ -144,4 +145,4 @@ ADRs cover only the contestable, re-litigable calls. Fixed givens (webview surfa
 - **Outdated** — a comment whose saved line text isn't present in the current diff; shown against its stored hunk, never deleted.
 - **Review (session)** — a named set of threads tied to a `(repoRoot, branch)`; per branch one is **current** and autosaves.
 - **Archived review** — a review whose branch no longer exists (e.g. after a merge); kept and viewable, never auto-deleted; movable to the current branch.
-- **Export** — the external, agent-facing Markdown generated from a review.
+- **Export** — the external Markdown or JSON generated from a review.

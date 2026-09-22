@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { arrangeComments, endLine, rootAuthor, startLine } from '../src/review/commentGroups';
+import { arrangeComments, rootAuthor } from '../src/review/commentGroups';
+import { endLine, startLine } from '../src/comments/position';
 import type { Comment, CommentThread } from '../src/model/Comment';
 import { UNKNOWN_AUTHOR } from '../src/model/Comment';
 
