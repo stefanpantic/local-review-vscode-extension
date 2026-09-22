@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { exportReviewMarkdown, type ExportMeta } from '../src/export/exportMarkdown';
+import { exportReviewMarkdown } from '../src/export/exportMarkdown';
+import type { ExportMeta } from '../src/export/common';
 import type { AnchorStatus, CommentThread, Comment, LineAnchor } from '../src/model/Comment';
 import type { Side } from '../src/model/ReviewDiff';
 
@@ -10,6 +11,7 @@ const META: ExportMeta = {
   source: 'Uncommitted changes',
   repoName: 'myrepo',
   generatedAt: '2026-07-04T12:00:00.000Z',
+  lineReferences: 'as-reviewed',
 };
 
 function comment(body: string, suggestion?: { original: string; replacement: string }): Comment {
@@ -128,4 +130,31 @@ test('file-level thread renders with (file) heading and no diff hunk', () => {
   const md = exportReviewMarkdown(META, [t], { scope: 'all' });
   assert.match(md, /## `src\/a\.ts` \(file\)/);
   assert.doesNotMatch(md, /```diff/);
+});
+
+test('threads starting on the same line sort by end line', () => {
+  const anchor = thread().anchor as LineAnchor;
+  const md = exportReviewMarkdown(
+    META,
+    [
+      thread({ id: 'long', anchor: { ...anchor, endLineNumber: 50 } }),
+      thread({ id: 'short', anchor: { ...anchor, endLineNumber: 44 } }),
+    ],
+    { scope: 'all' },
+  );
+  assert.deepEqual(
+    [...md.matchAll(/<!-- thread (\S+) -->/g)].map((m) => m[1]),
+    ['short', 'long'],
+  );
+});
+
+test('a re-anchored thread in a renamed file is headed with the new path', () => {
+  const t = thread({
+    status: 'moved',
+    resolvedLine: 3,
+    resolvedEndLine: 3,
+    resolvedPath: 'src/renamed.ts',
+  });
+  const md = exportReviewMarkdown(META, [t], { scope: 'all' });
+  assert.match(md, /## `src\/renamed\.ts:3` · moved/);
 });

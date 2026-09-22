@@ -2,53 +2,28 @@
 // (unit-tested). `threads` are the review's threads, passed as-reviewed (stored) or re-anchored (current);
 // the formatter renders `resolvedLine ?? anchor.lineNumber` and notes runtime status when present.
 import type { CommentThread } from '../model/Comment';
-
-export interface ExportMeta {
-  name: string;
-  branch: string;
-  source: string; // human label, e.g. "Uncommitted changes"
-  repoName: string;
-  generatedAt: string; // ISO
-}
-
-export interface ExportOpts {
-  scope: 'all' | 'unresolved' | 'file';
-  file?: string; // required when scope === 'file'
-}
+import { endLine, startLine, threadPath } from '../comments/position';
+import { exportSummary, selectThreads, type ExportMeta, type ExportOpts } from './common';
 
 /** Serialize a review to agent-ready Markdown. Returns '' when no thread matches the scope. */
 export function exportReviewMarkdown(meta: ExportMeta, threads: CommentThread[], opts: ExportOpts): string {
-  const selected = threads.filter((t) => {
-    if (opts.scope === 'unresolved') return !t.resolved;
-    if (opts.scope === 'file') return t.anchor.filePath === opts.file;
-    return true;
-  });
+  const selected = selectThreads(threads, opts);
   if (selected.length === 0) return '';
 
-  // Sort by file then start line so same-file comments stay adjacent (each heading is its own `path:line`).
-  const sorted = [...selected].sort(
-    (a, b) => a.anchor.filePath.localeCompare(b.anchor.filePath) || startLine(a) - startLine(b),
-  );
-  const fileCount = new Set(selected.map((t) => t.anchor.filePath)).size;
-  const unresolved = selected.filter((t) => !t.resolved).length;
+  const { threads: threadCount, files: fileCount, unresolved } = exportSummary(selected);
 
   const out: string[] = [
     `# ReviewMate: ${meta.name}`,
     '',
     `**repo** ${meta.repoName} · **branch** ${meta.branch} · **source** ${meta.source} · **generated** ${meta.generatedAt}`,
     '',
-    `${selected.length} comment thread${selected.length === 1 ? '' : 's'} across ${fileCount} file${fileCount === 1 ? '' : 's'} · ${unresolved} unresolved`,
+    `${threadCount} comment thread${threadCount === 1 ? '' : 's'} across ${fileCount} file${fileCount === 1 ? '' : 's'} · ${unresolved} unresolved`,
     '',
     '---',
     '',
   ];
-  for (const t of sorted) out.push(...threadBlock(t));
+  for (const t of selected) out.push(...threadBlock(t));
   return out.join('\n').trimEnd() + '\n';
-}
-
-function startLine(t: CommentThread): number {
-  if (t.resolvedLine != null) return t.resolvedLine;
-  return t.anchor.kind === 'line' ? t.anchor.lineNumber : 0;
 }
 
 /** A `path:line` (or `path:start-end`) heading with side + status — the greppable locator. */
@@ -59,12 +34,13 @@ function threadHeading(t: CommentThread): string {
   if (t.status === 'outdated') tags.push('outdated');
   if (t.resolved) tags.push('resolved');
   const tagStr = tags.length ? ` · ${tags.join(' · ')}` : '';
-  if (anchor.kind === 'file') return `## \`${anchor.filePath}\` (file)${tagStr}`;
+  const path = threadPath(t);
+  if (anchor.kind === 'file') return `## \`${path}\` (file)${tagStr}`;
   const start = startLine(t);
-  const end = t.resolvedEndLine ?? anchor.endLineNumber ?? start;
+  const end = endLine(t);
   const lines = end > start ? `${start}-${end}` : `${start}`;
   const side = anchor.side === 'old' ? ' (old side)' : '';
-  return `## \`${anchor.filePath}:${lines}\`${side}${tagStr}`;
+  return `## \`${path}:${lines}\`${side}${tagStr}`;
 }
 
 function threadBlock(t: CommentThread): string[] {

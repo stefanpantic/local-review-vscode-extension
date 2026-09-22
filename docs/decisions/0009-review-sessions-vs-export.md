@@ -28,3 +28,14 @@ The active-vs-saved snapshot model above is **superseded** by uniform **review s
 - Migration wraps it.4's legacy `agenticReview.threads` into a review on first load. (Storage keys and commands were named `localReview.*` until the extension rename, PR #18.)
 
 Export (it.6) is unchanged by this: still separate, Markdown-only, runnable on any review.
+
+## Iteration 18 addendum: JSON export (supersedes Markdown-only)
+
+We deferred JSON until a machine consumer existed. Issue #95 describes one: scripts and custom agent harnesses that filter or transform review comments. Parsing the Markdown is fragile because comment bodies are free Markdown and can contain headings and fences. The Markdown also leaves out comment authors, comment ids, suggestion originals, and reactions.
+
+- **Export offers Markdown or JSON.** The user picks the format first. Scope, line references, and target work the same for both.
+- **Both formats share one selection step.** One helper applies the scope filter and sorts by file, then by line, so both formats list the same threads in the same order.
+- **The JSON is versioned.** A top-level `version` field starts at `1`, and we bump it on a breaking change to the shape. The shape is documented in [`protocol.md`](../protocol.md). No JSON Schema file ships.
+- **The JSON is export-only.** It leaves out PR write-back state, and the extension never reads it back in. Reviews still persist only in `workspaceState`.
+
+The consequence "One serialization to keep stable (Markdown), not two" no longer applies. There are two now.

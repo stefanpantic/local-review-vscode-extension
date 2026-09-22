@@ -9,7 +9,9 @@ import { ReviewPanel } from './webview/ReviewPanel';
 import { hasRelevantChange, listBranches } from './git/git';
 import { watchRepoChanges } from './git/watch';
 import { startMcpServer, type McpServerHandle } from './mcp/server';
-import { exportReviewMarkdown, type ExportMeta } from './export/exportMarkdown';
+import { exportReviewMarkdown } from './export/exportMarkdown';
+import { exportReviewJson } from './export/exportJson';
+import type { ExportMeta, ExportOpts } from './export/common';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import type { DiffSource } from './model/ReviewDiff';
@@ -1025,12 +1027,34 @@ function errorText(err: unknown): string {
   return githubErrorText(err) ?? (err instanceof Error ? err.message : String(err));
 }
 
+interface ExportFormat {
+  label: string;
+  description: string;
+  language: string; // editor language for "Open in editor"
+  ext: string; // save-dialog filter and default file extension
+  render: (meta: ExportMeta, threads: CommentThread[], opts: ExportOpts) => string;
+}
+
+const EXPORT_FORMATS: ExportFormat[] = [
+  {
+    label: 'Markdown',
+    description: 'For pasting into a coding agent',
+    language: 'markdown',
+    ext: 'md',
+    render: exportReviewMarkdown,
+  },
+  { label: 'JSON', description: 'For scripts and tools', language: 'json', ext: 'json', render: exportReviewJson },
+];
+
 async function exportReview(controller: ReviewController, arg?: Review): Promise<void> {
   const review = arg ?? controller.reviewToExport();
   if (!review) {
     void vscode.window.showInformationMessage('ReviewMate: no review to export.');
     return;
   }
+
+  const format = await vscode.window.showQuickPick(EXPORT_FORMATS, { placeHolder: 'Export format' });
+  if (!format) return;
 
   const scopePick = await vscode.window.showQuickPick(
     [
@@ -1042,23 +1066,26 @@ async function exportReview(controller: ReviewController, arg?: Review): Promise
   );
   if (!scopePick) return;
 
-  let file: string | undefined;
+  let opts: ExportOpts;
   if (scopePick.scope === 'file') {
     const files = [...new Set(review.threads.map((t) => t.anchor.filePath))].sort();
     if (files.length === 0) {
       void vscode.window.showInformationMessage('ReviewMate: this review has no comments.');
       return;
     }
-    file = await vscode.window.showQuickPick(files, { placeHolder: 'File to export' });
+    const file = await vscode.window.showQuickPick(files, { placeHolder: 'File to export' });
     if (!file) return;
+    opts = { scope: 'file', file };
+  } else {
+    opts = { scope: scopePick.scope };
   }
 
   let live = false;
   if (controller.canExportLive(review)) {
     const modePick = await vscode.window.showQuickPick(
       [
-        { label: 'Current positions', description: 're-anchored to the working tree (recommended)', live: true },
-        { label: 'As reviewed', description: 'line numbers as captured when commented', live: false },
+        { label: 'Current positions', description: 'Re-anchored to the working tree (recommended)', live: true },
+        { label: 'As reviewed', description: 'Line numbers as captured when commented', live: false },
       ],
       { placeHolder: 'Line references' },
     );
@@ -1066,15 +1093,18 @@ async function exportReview(controller: ReviewController, arg?: Review): Promise
     live = modePick.live;
   }
 
+  // The diff can unload while a pick is open, so the controller reports which line references it used.
+  const { threads, lineReferences } = controller.exportThreads(review, live);
   const meta: ExportMeta = {
     name: review.name,
     branch: review.branch,
     source: sourceLabel(controller.source, controller.baseRef),
     repoName: controller.repoName(),
     generatedAt: new Date().toISOString(),
+    lineReferences,
   };
-  const md = exportReviewMarkdown(meta, controller.exportThreads(review, live), { scope: scopePick.scope, file });
-  if (!md) {
+  const text = format.render(meta, threads, opts);
+  if (!text) {
     void vscode.window.showInformationMessage('ReviewMate: no comments match that scope.');
     return;
   }
@@ -1088,7 +1118,7 @@ async function exportReview(controller: ReviewController, arg?: Review): Promise
     { placeHolder: 'Export to' },
   );
   if (!target) return;
-  await deliverExport(target.action, md, review.name);
+  await deliverExport(target.action, text, review.name, format);
 }
 
 function sourceLabel(source: DiffSource, baseRef?: string): string {
@@ -1096,22 +1126,27 @@ function sourceLabel(source: DiffSource, baseRef?: string): string {
   return SOURCES.find((s) => s.source === source)?.label ?? source;
 }
 
-async function deliverExport(action: 'clipboard' | 'editor' | 'file', md: string, name: string): Promise<void> {
+async function deliverExport(
+  action: 'clipboard' | 'editor' | 'file',
+  text: string,
+  name: string,
+  format: ExportFormat,
+): Promise<void> {
   if (action === 'clipboard') {
-    await vscode.env.clipboard.writeText(md);
+    await vscode.env.clipboard.writeText(text);
     void vscode.window.showInformationMessage('ReviewMate: export copied to clipboard.');
   } else if (action === 'editor') {
-    const doc = await vscode.workspace.openTextDocument({ content: md, language: 'markdown' });
+    const doc = await vscode.workspace.openTextDocument({ content: text, language: format.language });
     await vscode.window.showTextDocument(doc);
   } else {
     const safe = name.replace(/[^\w.-]+/g, '-') || 'review';
     const folder = vscode.workspace.workspaceFolders?.[0];
     const uri = await vscode.window.showSaveDialog({
       saveLabel: 'Export review',
-      filters: { Markdown: ['md'] },
-      defaultUri: folder ? vscode.Uri.joinPath(folder.uri, `${safe}.md`) : undefined,
+      filters: { [format.label]: [format.ext] },
+      defaultUri: folder ? vscode.Uri.joinPath(folder.uri, `${safe}.${format.ext}`) : undefined,
     });
-    if (uri) await vscode.workspace.fs.writeFile(uri, Buffer.from(md, 'utf8'));
+    if (uri) await vscode.workspace.fs.writeFile(uri, Buffer.from(text, 'utf8'));
   }
 }
 

@@ -43,7 +43,7 @@ Data flow: the git module produces a normalized `ReviewDiff`. The controller bui
 - `src/git/`. Diff production: `git.ts`, `normalize.ts`, `parse.ts`, `diffSources.ts`, `watch.ts`. PR refs and commits: `prRefs.ts`, `prCommits.ts`.
 - `src/github/`. The GitHub provider: `auth.ts`, `client.ts` (Octokit with rate-limit throttling), `provider.ts`, `mapThreads.ts`, `remote.ts`, `errors.ts`, `types.ts`.
 - `src/review/`. The provider seam and PR write-back logic: `provider.ts`, `submit.ts`, `reconcile.ts`, `pending.ts`, `resolveProvider.ts`, `requestMeta.ts`. The sidebar filters: `commentFilter.ts`, `commentGroups.ts`, `prFilter.ts`.
-- `src/export/exportMarkdown.ts`. The Markdown export formatter.
+- `src/export/`. The export formatters, `exportMarkdown.ts` and `exportJson.ts`, and the scope filter and sort they share in `common.ts`.
 - `src/mcp/`. The local MCP server (`server.ts`) and its tools (`tools.ts`).
 - `src/webview/`. The host side of the panel and sidebar views, and the rpc host.
 - `webview-ui/`. The React UI (render, components, comments, styles).

@@ -1,5 +1,5 @@
 // Comment & review data model (dependency-free; shared by host and webview).
-// `status`/`resolvedLine`/`resolvedEndLine` are runtime-only (never persisted).
+// `status`/`resolvedLine`/`resolvedEndLine`/`resolvedPath` are runtime-only (never persisted).
 import type { DiffSource, Side } from './ReviewDiff';
 
 export type AnchorStatus = 'anchored' | 'moved' | 'outdated';
@@ -85,6 +85,7 @@ export interface CommentThread {
   status?: AnchorStatus;
   resolvedLine?: number | null; // where it currently renders (null when outdated)
   resolvedEndLine?: number | null; // end of the range block (= resolvedLine for single-line; null when outdated)
+  resolvedPath?: string; // the file's current path, set only when it was renamed after the comment was made
 }
 
 /**

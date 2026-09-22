@@ -11,10 +11,9 @@ import {
   parseCommentFilter,
   type CommentFilter,
 } from '../review/commentFilter';
+import { endLine, startLine } from '../comments/position';
 import {
   arrangeComments,
-  endLine,
-  startLine,
   DEFAULT_GROUP_BY,
   DEFAULT_SORT_BY,
   type CommentGroupBy,
