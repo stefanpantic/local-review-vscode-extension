@@ -30,7 +30,7 @@ Comment → it autosaves into the **current review** for your branch. **New revi
 - [x] **AC10 — Persistence + guarded reads.** Reviews survive reload; corrupt/old state degrades to empty, never crashes.
 - [x] **AC11 — Green gates.** `build`, `typecheck`, `test`, `lint` pass; the store (create / current / switch / rename / delete / move / guarded parse) has unit coverage. _(build + typecheck + 48/48 tests + lint; `ReviewStore` suite covers create/ensureCurrent/numbering/autosave/switch/rename/remove/move/migrate/guarded.)_
 
-**Verification status.** Automated checks PASS (AC11 ✓). **AC1–AC10 require a manual `F5` session** (steps in [`notes.md`](./notes.md)); tick them there after the run. Re-anchoring runs on diff (re)load — use **Local Review: Refresh** after switching branches or editing code.
+**Verification status.** Automated checks PASS (AC11 ✓). **AC1–AC10 require a manual `F5` session** (steps in [`notes.md`](./notes.md)); tick them there after the run. Re-anchoring runs on diff (re)load — use **Local Review: Refresh** after switching branches or editing code. **Update:** the manual checks were later confirmed through real use and are ticked above (PR #88).
 
 ## Scope
 

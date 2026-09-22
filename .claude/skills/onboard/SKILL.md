@@ -40,9 +40,10 @@ Data flow: the git module produces a normalized `ReviewDiff`. The controller bui
 - `src/comments/ReviewStore.ts`. Durable reviews in `workspaceState`, keyed by `(repoRoot, branch)`.
 - `src/comments/anchoring.ts`. Content-match anchoring. A comment follows its line or goes outdated.
 - `src/model/Comment.ts`, `src/model/ReviewDiff.ts`. The core types.
-- `src/git/`. Diff production: `git.ts`, `normalize.ts`, `parse.ts`, `diffSources.ts`, `watch.ts`.
-- `src/github/`. The GitHub provider: `auth.ts`, `client.ts`, `provider.ts`, `mapThreads.ts`, `remote.ts`, `types.ts`.
-- `src/review/`. The provider seam and PR write-back logic: `provider.ts`, `submit.ts`, `reconcile.ts`, `pending.ts`, `resolveProvider.ts`.
+- `src/git/`. Diff production: `git.ts`, `normalize.ts`, `parse.ts`, `diffSources.ts`, `watch.ts`. PR refs and commits: `prRefs.ts`, `prCommits.ts`.
+- `src/github/`. The GitHub provider: `auth.ts`, `client.ts` (Octokit with rate-limit throttling), `provider.ts`, `mapThreads.ts`, `remote.ts`, `errors.ts`, `types.ts`.
+- `src/review/`. The provider seam and PR write-back logic: `provider.ts`, `submit.ts`, `reconcile.ts`, `pending.ts`, `resolveProvider.ts`, `requestMeta.ts`. The sidebar filters: `commentFilter.ts`, `commentGroups.ts`, `prFilter.ts`.
+- `src/export/exportMarkdown.ts`. The Markdown export formatter.
 - `src/mcp/`. The local MCP server (`server.ts`) and its tools (`tools.ts`).
 - `src/webview/`. The host side of the panel and sidebar views, and the rpc host.
 - `webview-ui/`. The React UI (render, components, comments, styles).
@@ -69,15 +70,15 @@ One iteration at a time. The rhythm is refine, implement, verify.
 - Setup: `pnpm install`, then `pnpm run build`. Full steps are in `CONTRIBUTING.md`.
 - Dev loop: press F5 for the Extension Development Host. Reload the host window after a rebuild. Run `pnpm run watch` for a tight loop.
 - Gates, all must pass: `pnpm run format:check`, `pnpm run lint`, `pnpm run typecheck`, `pnpm test`, `pnpm run build`, `pnpm run package`.
-- Tests are `node:test` via `tsx`, under `test/`. Pure logic (anchoring, normalize, submit, reconcile, mapThreads, pending) is unit-tested. GitHub writes and the full UI are verified by F5.
+- Tests are `node:test` via `tsx`, under `test/`. Pure logic (anchoring, normalize, submit, reconcile, mapThreads, pending, the comment and PR filters, MCP tools) is unit-tested. GitHub writes and the full UI are verified by F5.
 
 ## MCP
 
-A local MCP server lets a coding agent join a review. Set it up with the "ReviewMate: Set up MCP" command. It binds to `127.0.0.1` and is token-guarded. Tools: `get_diff`, `get_review`, `get_active_review`, `list_reviews`, `post_comment`, `reply`, `resolve`, `edit_comment`, `delete_comment`. Edit and delete follow the same `canEditComment` rule the human UI enforces, so on a PR an agent can only touch its own comments. It never writes your files and has no GitHub or network capability. Agent comments are attributed to "AI Agent" and anchor like a human's.
+A local MCP server lets a coding agent join a review. Set it up with the "ReviewMate: Set up MCP" command. It binds to `127.0.0.1` and is token-guarded. Tools: `get_diff`, `get_review`, `get_active_review`, `list_reviews`, `post_comment`, `reply`, `resolve`, `edit_comment`, `delete_comment`, `react`. Edit and delete follow the same `canEditComment` rule the human UI enforces, measured against the human's identity. On a PR an agent can touch its own comments and the human's, never a third party's. `react` works on any comment. It never writes your files and has no GitHub or network capability. Agent comments are attributed to "AI Agent" and anchor like a human's.
 
 ## Invariants to respect
 
 - The host owns the truth. The webview never persists durable data.
 - Comments anchor by content match scoped to the current diff. A line that leaves the diff goes outdated and is kept, never deleted.
 - The flat row model (`RenderRow` in `docs/protocol.md` section 3) is the contract the renderer is meant to consume, so windowed virtualization can drop in later. It is not realized yet: `DiffView.tsx` still walks files, then hunks, then rows, and puts comment threads inline under their code row. Flattening it is the first sub-step of iteration 10, so do not build on the assumption that it is already in force.
-- Network egress lives only in `src/github/` and runs only on an explicit human action (open a PR, submit a review). The MCP server stays loopback with no GitHub capability.
+- Network egress is GitHub pull request traffic only: listing open PRs when VS Code has a GitHub session, fetching and polling an opened PR, and Submit. Writes happen only on Submit. GitHub API calls live only in `src/github/`. The one other network call is the git fetch of the PR's head and base in `src/git/git.ts`. The MCP server stays loopback with no GitHub capability.

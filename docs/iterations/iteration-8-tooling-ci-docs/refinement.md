@@ -35,7 +35,7 @@ A contributor clones the repo, runs one install, and has formatting, linting, ho
 - [x] **AC10 — Release pipeline.** A push to `main` with releasable commits makes release-please open/update a release PR; merging it tags a version and attaches the `.vsix` to the GitHub release. _(Verified: release-please has shipped versions 0.4.2 through 0.8.0, each with an attached `.vsix`.)_
 - [x] **AC11 — PR-title check.** A PR whose title isn't a Conventional Commit fails the `conventional-title` check; a valid title passes. Squash-merge + "default to PR title" is set so the merged `main` subject is the (conventional) PR title; branch protection requires the check. _(Verified: `pr-title.yml` enforces conventional titles on every PR.)_
 
-**Verification status.** AC1–AC8 PASS locally (gates green; `.vsix` packaged clean; Prettier hook demonstrated). AC9–AC10 have their config in place (`ci.yml`, `release.yml`, release-please config/manifest) but are **awaiting the first push/PR on GitHub** — they can't be truthfully verified before Actions runs, so they stay unticked until then.
+**Verification status.** AC1–AC8 PASS locally (gates green; `.vsix` packaged clean; Prettier hook demonstrated). AC9–AC10 have their config in place (`ci.yml`, `release.yml`, release-please config/manifest) but are **awaiting the first push/PR on GitHub** — they can't be truthfully verified before Actions runs, so they stay unticked until then. **Update:** AC9 to AC11 were verified once CI ran on GitHub and are ticked above.
 
 ## Scope
 

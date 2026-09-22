@@ -78,3 +78,21 @@ explicit human Submit, still confined to `src/github/*`, still no network capabi
   anyone's content. Rather than add a permission check with nothing to check, the shape is pinned by a test
   that fails if an edit or delete path is ever introduced without enforcing the same `canEditComment` rule the
   human UI uses.
+
+## Addendum (iterations 16 and 17, and rate limits)
+
+The egress stance is unchanged. Writes happen only on the one explicit Submit, and the MCP server has no
+network capability.
+
+- **Reactions round-trip (iteration 16).** Import reads each comment's reactions for five emoji as a
+  `remoteReactions` baseline, the same pattern as `remoteBody`. Submit sends the difference as GraphQL
+  `addReaction` / `removeReaction` mutations before it creates the review. GitHub's rocket, laugh and confused
+  reactions are dropped on import.
+- **File-level threads round-trip (iteration 17).** Import no longer drops a thread with no line. It becomes
+  a `FileAnchor` thread, and a new file-level comment posts with `subject_type: "file"`.
+- **Rate limits (PR #89).** The client uses Octokit's throttling plugin. It retries a request once after a
+  primary or secondary rate limit, and spaces writes out so a large Submit doesn't burst. The provider reuses
+  one client while the token is unchanged, so the plugin keeps its rate-limit state across calls. The
+  Pull Requests list stops at 200 open PRs, most recently updated first. The same PR meant the background
+  poll to back off on repeated failures, but the backoff never starts yet because the poll catches its own
+  errors (bug, #91).

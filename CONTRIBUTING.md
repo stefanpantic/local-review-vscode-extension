@@ -28,14 +28,17 @@ pnpm run watch
 
 ## Project layout
 
-| Path            | What it is                                                                  |
-| --------------- | --------------------------------------------------------------------------- |
-| `src/`          | Extension **host** code (git access, state, tree views, the webview panel). |
-| `webview-ui/`   | The **React** diff/review UI that runs inside the webview.                  |
-| `src/protocol/` | The typed message contract shared by host and webview.                      |
-| `test/`         | Unit tests for the pure logic (diffing, anchoring, export, store).          |
-| `docs/`         | Spec, decisions (ADRs), and per-iteration design/verification notes.        |
-| `esbuild.mjs`   | Bundles two entry points: the Node host and the browser webview.            |
+| Path            | What it is                                                                                                           |
+| --------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `src/`          | Extension **host** code (git access, state, tree views, the webview panel).                                          |
+| `src/github/`   | The GitHub API client and provider. Apart from the git fetch of a PR's refs, the only code that goes to the network. |
+| `src/review/`   | Pull request write-back (pending set, submit, reconcile) and the comment and PR filters.                             |
+| `src/mcp/`      | The local MCP server and its tools.                                                                                  |
+| `webview-ui/`   | The **React** diff/review UI that runs inside the webview.                                                           |
+| `src/protocol/` | The typed message contract shared by host and webview.                                                               |
+| `test/`         | Unit tests for the pure logic (diffing, anchoring, export, store, write-back, filters, MCP tools).                   |
+| `docs/`         | Spec, decisions (ADRs), and per-iteration design/verification notes.                                                 |
+| `esbuild.mjs`   | Bundles two entry points: the Node host and the browser webview.                                                     |
 
 ## Quality gates
 
@@ -79,6 +82,7 @@ Versioning is automated with [release-please](https://github.com/googleapis/rele
 
 1. Merges to `main` with `feat`/`fix` (etc.) commits keep a **release PR** up to date — it accumulates the changelog and the next version bump.
 2. Merging that release PR tags the version and creates a GitHub Release, with the packaged `.vsix` attached.
+3. The same workflow publishes that `.vsix` to the VS Code Marketplace, using the `VSCE_PAT` repository secret.
 
 While the project is pre-1.0, a `feat` or a breaking change bumps the **minor** version and a `fix` bumps the **patch**. The major stays at `0` until the extension is declared stable, so a breaking change is a minor bump rather than a `1.0.0`.
 

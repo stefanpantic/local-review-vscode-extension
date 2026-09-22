@@ -25,6 +25,6 @@ The active-vs-saved snapshot model above is **superseded** by uniform **review s
 - **Keyed by `(repoRoot, branch)`.** A review is the work on a branch (the PR model). Per branch, one review is **current** and **autosaves** on every comment mutation — there is no manual "save" (it was only ever about naming). Detached HEAD buckets under `detached@<sha8>`.
 - **Commands:** new / switch (set current) / **rename** (F2, in place) / delete / **move-to-current-branch**. "Save" and "Clear" are gone (autosave replaces Save; "New review" replaces Clear); "Duplicate" is out for now.
 - **Stale = archived, never auto-deleted.** A review whose branch no longer exists (post-merge) is shown under an **Archived** group and can be deleted manually or **moved** onto the current branch (e.g. when branching off someone's PR).
-- Migration wraps it.4's legacy `localReview.threads` into a review on first load.
+- Migration wraps it.4's legacy `agenticReview.threads` into a review on first load. (Storage keys and commands were named `localReview.*` until the extension rename, PR #18.)
 
 Export (it.6) is unchanged by this: still separate, Markdown-only, runnable on any review.
