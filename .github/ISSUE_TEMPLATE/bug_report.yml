@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for filing a bug! Local Review runs entirely on your machine — please don't paste private code you can't share.
+        Thanks for filing a bug. Please don't paste private code you can't share.
   - type: textarea
     id: what-happened
     attributes:
@@ -18,7 +18,7 @@ body:
     attributes:
       label: Steps to reproduce
       placeholder: |
-        1. Open Local Review on a repo with …
+        1. Open ReviewMate on a repo with …
         2. …
         3. See …
     validations:
@@ -27,13 +27,13 @@ body:
     id: versions
     attributes:
       label: Versions
-      description: Local Review version, VS Code version, and OS.
-      placeholder: Local Review 0.0.1 · VS Code 1.90 · macOS 14
+      description: ReviewMate version, VS Code version, and OS.
+      placeholder: ReviewMate 0.8.1 · VS Code 1.90 · macOS 14
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
       label: Logs (optional)
-      description: Output from the "Local Review" output channel (enable `localReview.log`). Redact anything sensitive.
+      description: Output from the "ReviewMate" output channel (enable `agenticReview.log`). Redact anything sensitive.
       render: shell

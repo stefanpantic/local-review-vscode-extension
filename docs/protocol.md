@@ -92,7 +92,7 @@ interface DiffRow {
   text: string; // line content WITHOUT the +/-/space prefix
 }
 
-// getDiff / diffUpdated carry a top-level state plus the diff when state === 'ok'.
+// getState / stateChanged carry a top-level state plus the diff when state === 'ok'.
 type ReviewState = 'ok' | 'no-repo' | 'unborn-head' | 'no-changes' | 'error';
 interface DiffResult {
   state: ReviewState;
@@ -111,6 +111,7 @@ interface ReviewStatePayload {
   viewed: Record<string, boolean>; // filePath -> viewed, for the current repo+source
   viewMode: ViewMode; // [it.3]
   whitespace: boolean; // [it.3] hide whitespace (git diff -w)
+  wrap: boolean; // [#21] wrap long lines instead of scrolling horizontally
   threads: CommentThread[]; // [it.4] active review, re-anchored against the current diff
   pr?: PrDisplay; // [it.11] the PR under review (source === 'pr'): title, state, author, url, description
   pending?: PendingSummary; // [it.12] staged, not-yet-submitted changes on the PR review
@@ -144,6 +145,7 @@ interface PendingSummary {
   resolvedToggles: number; // imported threads whose resolved state was changed
   edits: number; // your posted comments whose body was changed
   deletes: number; // your posted comments removed locally
+  reactions: number; // [it.16] posted comments whose reactions changed
   total: number;
 }
 ```
@@ -165,6 +167,8 @@ type RenderRow =
 ```
 
 _(Any windowing helpers — e.g. spacer/placeholder rows — are an internal detail of the it.7 virtualizer and are intentionally NOT part of this cross-boundary contract until then.)_
+
+**Not realized yet.** No code builds `RenderRow` today. `DiffView.tsx` walks files, then hunks, then rows, and renders each comment thread inline under its code row. Flattening the render into this model is the first sub-step of iteration 10 (parked). Treat this section as the target shape, not the current one.
 
 **Syntax highlighting `[it.3]`** runs webview-side with Shiki (`shiki/core` + the JS regex engine — no WASM, so no CSP relaxation) and Shiki's bundled `one-dark-pro` (dark) / `light-plus` (light) theme, selected from the webview `body` class (no theme JSON crosses the bridge). To give every row real file context (multi-line comments, template strings, enclosing scope) the webview tokenizes each **whole file** and clips the tokens to the diff by line number; it fetches that text via `getFileTexts` (§7.1) and falls back to per-hunk tokenization when a file's text is unavailable.
 
@@ -195,6 +199,10 @@ type Anchor = LineAnchor | FileAnchor;
 
 type AnchorStatus = 'anchored' | 'moved' | 'outdated';
 
+// [it.16] The five supported reactions, in display order (REACTION_EMOJIS). Import drops GitHub's other
+// reactions (rocket, laugh, confused).
+type ReactionEmoji = '👍' | '👎' | '👀' | '❤️' | '🎉';
+
 interface Comment {
   id: string;
   body: string;
@@ -219,8 +227,8 @@ interface Comment {
   // flagged rather than silently overwriting theirs. PERSISTED: each reconcile advances the baseline, so the
   // collision cannot be re-derived on a later pass. Cleared once the edit is no longer pending.
   conflict?: boolean;
-  // Emoji reactions per comment. Each key is a ReactionEmoji ('👍'|'👎'|'👀'|'❤️'|'🎉'),
-  // mapping to the usernames who reacted. On a PR these round-trip with GitHub.
+  // [it.16] Emoji reactions per comment. Each key is a ReactionEmoji, mapping to the identities who reacted
+  // (a GitHub login, `git user.name`, or "AI Agent"). On a PR these round-trip with GitHub.
   reactions?: Partial<Record<ReactionEmoji, string[]>>;
   remoteReactions?: Partial<Record<ReactionEmoji, string[]>>; // baseline from import (same pattern as remoteBody)
 }
@@ -256,7 +264,7 @@ Anchoring is intentionally **scoped to lines present in the current diff**: a li
 
 ## 5. Reviews & storage `[comments it.4; sessions it.5]`
 
-Durable data lives in the host's `workspaceState`, namespaced `localReview.*`, keyed by **`(repoRoot, branch)`** (branch joins the key in it.5; source never does — see [§7 of spec.md](./spec.md#7-data--storage-model-overview)). A `Review` is a **branch-tied session**; per `(repoRoot, branch)` one review is **current** and autosaves as you comment. See [ADR-0004](./decisions/0004-state-ownership.md), [ADR-0009](./decisions/0009-review-sessions-vs-export.md).
+Durable data lives in the host's `workspaceState`, namespaced `agenticReview.*`, keyed by **`(repoRoot, branch)`** (branch joins the key in it.5; source never does — see [§7 of spec.md](./spec.md#7-data--storage-model-overview)). A `Review` is a **branch-tied session**; per `(repoRoot, branch)` one review is **current** and autosaves as you comment. See [ADR-0004](./decisions/0004-state-ownership.md), [ADR-0009](./decisions/0009-review-sessions-vs-export.md).
 
 `[it.11]` A `Review` is a **discriminated union on `kind`**: a `'local'` review is a working-tree/branch diff; a `'remote'` review mirrors a fetched pull request and always carries a `remote` block. A remote review is keyed under the synthetic branch **`pr/<provider>/<number>`** (mirroring `detached@<sha8>`), so it lists distinctly and never becomes a git branch's autosave target. That key is shared, not unique: a request can hold several reviews (successive passes over it), one of them current, and every one of them is remote-kind and imports the request's threads. Opening a request continues its current review; forking a second one is only ever the explicit New Review action. The store sanitizer defaults a legacy record with no `kind` to `'local'` (backward compatibility). "Viewed" flags are namespaced **`pr#<number>`** for a PR, so they never collide across PRs or with local sources.
 
@@ -296,9 +304,9 @@ interface RemoteRef {
   viewer?: string; // [it.13] the signed-in login when the request was opened; cached so `canEdit` survives a sign-out
 }
 // Storage keys (all workspaceState):
-//   localReview.reviews        → Record<repoRoot, Review[]>
-//   localReview.currentReview  → Record<repoRoot, Record<branch, reviewId>>   (the current review per branch)
-//   localReview.threads        → LEGACY it.4 active threads; migrated into a Review on first load, then cleared.
+//   agenticReview.reviews        → Record<repoRoot, Review[]>
+//   agenticReview.currentReview  → Record<repoRoot, Record<branch, reviewId>>   (the current review per branch)
+//   agenticReview.threads        → LEGACY it.4 active threads; migrated into a Review on first load, then cleared.
 
 interface RepoInfo {
   repoRoot: string;
@@ -310,9 +318,9 @@ interface RepoInfo {
 
 ### Write-back & sync `[it.12]`
 
-On a remote review, all local work is a **pending change set** derived by diffing the threads against their imported baseline — creates/replies (no `remoteId`), edits (`body !== remoteBody`), resolve toggles (`resolved !== remoteResolved`), and `pendingDeletes`. Nothing reaches GitHub until a single explicit human **Submit**, which posts it as **one review** pinned to the reviewed `headSha` (so comment lines stay valid; an advanced head renders them outdated, not rejected) with a chosen **event** (`comment` / `approve` / `request-changes`; a closed/merged or self-authored PR restricts it to `comment`). The AI Agent's comments are included, posted under your identity. This single Submit is the only write egress, confined to `src/github/*`; the MCP server gains no network capability.
+On a remote review, all local work is a **pending change set** derived by diffing the threads against their imported baseline — creates/replies (no `remoteId`), edits (`body !== remoteBody`), resolve toggles (`resolved !== remoteResolved`), `pendingDeletes`, and `[it.16]` reaction changes on posted comments (`reactions` vs `remoteReactions`, sent as GraphQL add/remove mutations before Submit creates the review). Nothing reaches GitHub until a single explicit human **Submit**, which posts it as **one review** pinned to the reviewed `headSha` (so comment lines stay valid; an advanced head renders them outdated, not rejected) with a chosen **event** (`comment` / `approve` / `request-changes`; a closed/merged or self-authored PR restricts it to `comment`). The AI Agent's comments are included, posted under your identity. This single Submit is the only write egress, confined to `src/github/*`; the MCP server gains no network capability.
 
-**Reconcile** is the one merge primitive used by every path that pulls fresh remote threads (open, the background poll, refresh, the panel's sync control, and the pre-submit re-fetch): imported threads take upstream content while local pending is re-applied on top (edited body, resolve toggle, appended replies). A staged delete's target is **hidden locally** while its id stays queued, so it cannot reappear before the delete is posted `[it.13]`. A pending reply whose thread is gone becomes a standalone draft (never a 404 `in_reply_to`), and a staged delete whose target is gone is dropped.
+**Reconcile** is the one merge primitive used by every path that pulls fresh remote threads (open, the background poll, refresh, the panel's sync control, and the pre-submit re-fetch): imported threads take upstream content while local pending is re-applied on top (edited body, resolve toggle, appended replies, and `[it.16]` staged reactions, with their baseline reset to upstream). A staged delete's target is **hidden locally** while its id stays queued, so it cannot reappear before the delete is posted `[it.13]`. A pending reply whose thread is gone becomes a standalone draft (never a 404 `in_reply_to`), and a staged delete whose target is gone is dropped.
 
 `[it.13]` Reconcile takes a **`removeMissing`** flag that splits the two kinds of sync apart:
 
@@ -323,11 +331,11 @@ Reconcile also **adopts** local content that turns out to be posted already, mat
 
 Whenever a fetched comment replaces a local one, reconcile **keeps `AGENT_AUTHOR`** if the local copy carried it. The agent's comments are submitted under your identity, so the fetch hands them back authored by you; upstream is right about who posted them, and locally the agent still wrote them, which is what keeps the agent badge and the `author:@agent` filter meaningful after a submit. Only that mark is carried over. Your own comments take the fetched login, which is the identity edit permission measures against and need not equal the `git user.name` they were written under.
 
-**Submit applies as it goes.** Each id-addressable step (edit, delete, resolve) is reported back through an `onApplied` callback the moment it lands, and the host retires it from the pending set right then. Whatever the outcome, a reconcile from a fresh fetch runs afterwards. Between the two, a submit that dies partway leaves only genuinely unsent work staged, so a retry finishes the job without posting anything twice. Submit also carries an optional **review summary** as the review body.
+**Submit applies as it goes.** Each id-addressable step (edit, delete, resolve, and `[it.16]` a comment's reactions) is reported back through an `onApplied` callback the moment it lands, and the host retires it from the pending set right then. Whatever the outcome, a reconcile from a fresh fetch runs afterwards. Between the two, a submit that dies partway leaves only genuinely unsent work staged, so a retry finishes the job without posting anything twice. Submit also carries an optional **review summary** as the review body.
 
 **Request metadata is refreshed by every head check.** The explicit sync and the background poll both re-fetch the request to compare its head, so both also fold its display metadata (`title`, `author`, `state`, `isDraft`, `body`, `url`) back into the stored `RemoteRef`. A description edited upstream therefore shows up without reopening the PR. The revision fields (`baseSha`, `headSha`, `baseRef`, `headRef`) are never touched by that refresh: they pin the diff on screen and the commit Submit attaches comments to, and only a deliberate reload moves them.
 
-A background poll (interval from `agenticReview.github.pollInterval`, PR-mode only) live-updates upstream comment changes and flags an advanced head via `headStale` (a Refresh banner, never auto-applied). All PR network mutations (open, refresh, sync, submit, discard) are **serialized behind one lock** `[it.13]`, and the poll skips while it is held, so two of them can never interleave writes to the same review. Repeated poll failures surface as `sync.paused` rather than a silently stale view.
+A background poll (interval from `agenticReview.github.pollInterval`, PR-mode only) live-updates upstream comment changes and flags an advanced head via `headStale` (a Refresh banner, never auto-applied). All PR network mutations (open, refresh, sync, submit, discard) are **serialized behind one lock** `[it.13]`, and the poll skips while it is held, so two of them can never interleave writes to the same review. Repeated poll failures surface as `sync.paused` rather than a silently stale view. The poll is meant to back off on repeated failures too, but that backoff doesn't start yet (bug, #91).
 
 ## 6. Message bridge `[it.1]`
 
@@ -348,44 +356,38 @@ The webview keeps `let seq = 0` and a `Map<number, {resolve, reject}>`. A reques
 
 ### 7.1 Requests (webview → host)
 
-| `type`                 | payload                                                        | response payload                                                                                                          | Intro                   |
-| ---------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `getState`             | `{}`                                                           | `ReviewStatePayload` (repos + diff + viewed + config for the current selection)                                           | it.1/it.2               |
-| `setViewed`            | `{ filePath, viewed }`                                         | `{ ok: true }`                                                                                                            | it.2                    |
-| `setViewPref`          | `{ viewMode?, whitespace? }`                                   | `{ ok: true }`                                                                                                            | it.3                    |
-| `getFileTexts`         | `{ files: {path, oldPath?}[] }`                                | `{ texts }` — full old/new text per file (host resolves repo/source/base) for whole-file highlighting                     | it.3                    |
-| `addComment`           | `{ filePath, side?, startLine?, endLine?, body, suggestion? }` | `CommentThread` — host authors the `Anchor` from its own diff (D2); side+startLine absent = file-level [it.17]            | it.4 / it.4b / it.17    |
-| `editComment`          | `{ threadId, commentId, body, suggestion? }`                   | `CommentThread` — `suggestion` string sets, `null` clears, omit leaves                                                    | it.4 / suggestion it.4b |
-| `deleteComment`        | `{ threadId, commentId }`                                      | `{ threadId, threadDeleted: boolean }`                                                                                    | it.4                    |
-| `replyComment`         | `{ threadId, body, suggestion? }`                              | `CommentThread`                                                                                                           | it.4 / suggestion it.4b |
-| `resolveThread`        | `{ threadId, resolved }`                                       | `CommentThread`                                                                                                           | it.4                    |
-| `toggleReaction`       | `{ threadId, commentId, emoji }`                               | `CommentThread` — toggle the viewer's reaction on a comment                                                               | it.16                   |
-| `saveReview`           | `{ repoRoot, name }`                                           | `Review`                                                                                                                  | it.5                    |
-| `clearActiveReview`    | `{ repoRoot }`                                                 | `{ ok: true }`                                                                                                            | it.5                    |
-| `listSavedReviews`     | `{ repoRoot }`                                                 | `Review[]`                                                                                                                | it.5                    |
-| `loadSavedReview`      | `{ savedReviewId }`                                            | `{ repoRoot, threads: CommentThread[] }` — **replaces** the active review for `repoRoot` (warn if it has unsaved threads) | it.5                    |
-| `deleteSavedReview`    | `{ savedReviewId }`                                            | `{ ok: true }`                                                                                                            | it.5                    |
-| `generateExport`       | `{ repoRoot, source, scope, target }`                          | `{ markdown, wrotePath? }`                                                                                                | it.6                    |
-| `submitReview`         | `{}`                                                           | `{ ok: true }` — host owns the event picker + confirmation; pushes refreshed state when done                              | it.12                   |
-| `refreshPullRequest`   | `{}`                                                           | `{ ok: true }` — load the PR's new head + re-import in place (the "new commits" banner action)                            | it.12                   |
-| `syncPullRequest`      | `{}`                                                           | `{ ok: true }` — pull the latest comments and re-check the head (the PR bar's Sync); an explicit sync                     | it.13                   |
-| `discardPendingReview` | `{}`                                                           | `{ ok: true }` — throw away everything staged and take current upstream; the host confirms first                          | it.13                   |
+| `type`                 | payload                                                        | response payload                                                                                                                         | Intro                   |
+| ---------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `getState`             | `{}`                                                           | `ReviewStatePayload` (repos + diff + viewed + config for the current selection)                                                          | it.1/it.2               |
+| `setViewed`            | `{ filePath, viewed }`                                         | `{ ok: true }`                                                                                                                           | it.2                    |
+| `setViewPref`          | `{ viewMode?, whitespace?, wrap? }`                            | `{ ok: true }`                                                                                                                           | it.3 / `wrap` #21       |
+| `getFileTexts`         | `{ files: {path, oldPath?}[] }`                                | `{ texts }` — full old/new text per file (host resolves repo/source/base) for whole-file highlighting                                    | it.3                    |
+| `addComment`           | `{ filePath, side?, startLine?, endLine?, body, suggestion? }` | `CommentThread` — host authors the `Anchor` from its own diff (D2); side+startLine absent = file-level [it.17]                           | it.4 / it.4b / it.17    |
+| `editComment`          | `{ threadId, commentId, body, suggestion? }`                   | `CommentThread` — `suggestion` string sets, `null` clears, omit leaves                                                                   | it.4 / suggestion it.4b |
+| `deleteComment`        | `{ threadId, commentId }`                                      | `{ threadId, threadDeleted: boolean }`                                                                                                   | it.4                    |
+| `replyComment`         | `{ threadId, body, suggestion? }`                              | `CommentThread`                                                                                                                          | it.4 / suggestion it.4b |
+| `resolveThread`        | `{ threadId, resolved }`                                       | `CommentThread`                                                                                                                          | it.4                    |
+| `toggleReaction`       | `{ threadId, commentId, emoji }`                               | `CommentThread` — toggle the viewer's reaction on a comment                                                                              | it.16                   |
+| `submitReview`         | `{}`                                                           | `{ ok: true }` — host owns the event picker + confirmation; pushes refreshed state when done                                             | it.12                   |
+| `refreshPullRequest`   | `{}`                                                           | `{ ok: true }` — load the PR's new head + re-import in place (the "new commits" banner action)                                           | it.12                   |
+| `syncPullRequest`      | `{}`                                                           | `{ ok: true }` — pull the latest comments and re-check the head (the PR bar's Sync); an explicit sync                                    | it.13                   |
+| `discardPendingReview` | `{}`                                                           | `{ ok: true }` — throw away everything staged and take current upstream; the host confirms first                                         | it.13                   |
+| `panelRendered`        | `{}`                                                           | `{ ok: true }`. The panel has painted the current diff. The sidebar makes comments clickable only after this, once they can be revealed. | it.12                   |
 
-`scope: 'all' | 'unresolved' | 'file'` and `target: 'clipboard' | 'file'` (it.6). There is no `reanchorThread` — all re-anchoring is the host's automatic load-time computation (§4), surfaced via `threadsUpdated`. There is no `getThreads` — the (re-anchored) active review rides in `ReviewStatePayload.threads` and updates via `threadsUpdated`, mirroring how `viewed` works (D1). `addComment` sends only a line locator; the host authors the durable `Anchor` (exact line text, `originalDiffHunk`, source) from its own diff — the webview never constructs anchor internals (D2). A comment may carry a **suggestion** `[it.4b]`: the payload's `suggestion` is the proposed replacement text; the host captures the range's current code as `original` and stores `{ original, replacement }`. Suggestions are capture-and-export only (rendered as a before→after diff; serialized by export) — never written to disk.
+There is no `reanchorThread` — all re-anchoring is the host's automatic load-time computation (§4), surfaced via `threadsUpdated`. There is no `getThreads` — the (re-anchored) active review rides in `ReviewStatePayload.threads` and updates via `threadsUpdated`, mirroring how `viewed` works (D1). `addComment` sends only a line locator; the host authors the durable `Anchor` (exact line text, `originalDiffHunk`, source) from its own diff — the webview never constructs anchor internals (D2). A comment may carry a **suggestion** `[it.4b]`: the payload's `suggestion` is the proposed replacement text; the host captures the range's current code as `original` and stores `{ original, replacement }`. Suggestions are capture-and-export only (rendered as a before→after diff; serialized by export) — never written to disk.
 
 ### 7.2 Events (host → webview, no `id`, no response)
 
-| `type`                | payload                                                  | Intro                                                                                                                                                        |
-| --------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `stateChanged`        | `ReviewStatePayload`                                     | it.1/it.2 (after refresh / source / repo switch)                                                                                                             |
-| `viewedUpdated`       | `{ viewed: Record<string, boolean> }`                    | it.2                                                                                                                                                         |
-| `revealFile`          | `{ filePath }`                                           | it.2 (scroll the panel to a file)                                                                                                                            |
-| `threadsUpdated`      | `{ threads: CommentThread[]; pending?: PendingSummary }` | it.4 (lightweight push after a mutation; diff not re-sent). `pending` [it.12] keeps the PR's pending count + Submit button live without re-sending the diff. |
-| `savedReviewsUpdated` | `{ repoRoot, reviews: Review[] }`                        | it.5                                                                                                                                                         |
-| `configChanged`       | `{ viewMode?, source? }`                                 | it.2 (echo of a persisted pref; host value wins)                                                                                                             |
-| `showError`           | `{ message }`                                            | it.1                                                                                                                                                         |
+| `type`           | payload                                                  | Intro                                                                                                                                                        |
+| ---------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `stateChanged`   | `ReviewStatePayload`                                     | it.1/it.2 (after refresh / source / repo switch)                                                                                                             |
+| `viewedUpdated`  | `{ viewed: Record<string, boolean> }`                    | it.2                                                                                                                                                         |
+| `revealFile`     | `{ filePath, threadId? }`                                | it.2 (scroll the panel to a file). `threadId` (#24) scrolls to that comment thread instead.                                                                  |
+| `navigate`       | `{ target: 'file' \| 'comment', dir: 'next' \| 'prev' }` | it.7 (keyboard nav: scroll to the next or previous changed file or comment)                                                                                  |
+| `threadsUpdated` | `{ threads: CommentThread[]; pending?: PendingSummary }` | it.4 (lightweight push after a mutation; diff not re-sent). `pending` [it.12] keeps the PR's pending count + Submit button live without re-sending the diff. |
+| `showError`      | `{ message }`                                            | it.1                                                                                                                                                         |
 
-Export (it.6) is host-side too — a `localReview.exportReview` command with QuickPicks (scope / context mode / target), rendering via a pure formatter; no messages. Source / repo / base-branch selection is **host-side** (commands `localReview.selectSource` / `localReview.selectRepo`, backed by QuickPick) — not webview messages. "Viewed" is host-owned and persisted; the panel toggles it via `setViewed` and both surfaces converge via `viewedUpdated`. Scroll position stays webview-only.
+Export (it.6) is host-side too — an `agenticReview.exportReview` command with QuickPicks (scope `all` / `unresolved` / `file`, context mode, target `clipboard` / `file` / editor), rendering via a pure formatter; no messages. Review sessions (it.5) are host-side as well: the sidebar's `agenticReview.newReview` / `switchReview` / `renameReview` / `deleteReview` / `moveReviewToCurrentBranch` commands change the store, and the host pushes the result to the panel with `stateChanged` or `threadsUpdated`. Source / repo / base-branch selection is **host-side** (commands `agenticReview.selectSource` / `agenticReview.selectRepo`, backed by QuickPick) — not webview messages. View prefs changed from the palette (`toggleViewMode` / `toggleWhitespace` / `toggleWrap`) likewise reach the panel through `stateChanged`. "Viewed" is host-owned and persisted; the panel toggles it via `setViewed` and both surfaces converge via `viewedUpdated`. Scroll position stays webview-only.
 
 ## 8. Validation & versioning
 

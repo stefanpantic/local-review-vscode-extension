@@ -63,6 +63,21 @@ The cost is that the agent can now rewrite or withdraw a comment the human typed
 already could, the human sees every change in the panel as it lands, and nothing reaches GitHub without the
 human's explicit Submit.
 
+## Addendum (iterations 16 and 17): reactions, file-level comments, and the config location
+
+**`react` joins the surface.** It toggles an emoji reaction on a comment, recorded as `AI Agent`. It has no
+permission gate: the agent can react to any comment in the review, including a third party's, the same as
+the human in the panel. On a pull request the reaction is staged like any other change and posted under the
+human's account on Submit.
+
+**`post_comment` makes file-level comments.** Omitting `startLine` and `side` attaches the comment to the
+whole file. The file must be in the current diff.
+
+**The config moved out of the repo.** The Decision above describes `.local-review/mcp.json`, gitignored in
+the repo, and the `localReview.mcp.autoStart` setting. The connect file now lives in the extension's
+per-workspace storage, so nothing is written into the repository, and **Open MCP Config** opens it. The
+setting is `agenticReview.mcp.autoStart`, renamed with the extension.
+
 ## Consequences
 
 - No second source of truth and no IPC layer — the agent path and the UI path converge on one controller, so agent comments drift, persist, and render identically to human ones.

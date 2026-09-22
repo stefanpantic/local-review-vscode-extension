@@ -29,7 +29,7 @@ Hover a code line → **+** → type a comment → it renders inline beneath the
 - [x] **AC11 — Non-commentable guard.** No **+** on binary/unsupported files; empty / no-repo / error states are unaffected.
 - [x] **AC12 — Green gates + anchoring coverage.** `build`, `typecheck`, `test`, `lint` pass; `anchoring.ts` has unit fixtures for anchored / moved / outdated / rename / range. _(build + typecheck + 32/32 tests + lint clean; `test/anchoring.test.ts` covers anchored / moved (+ closest-wins) / outdated (text & file gone) / rename / old-side / range / createAnchor / reconstructHunk.)_
 
-**Verification status.** Automated checks PASS (AC12 ✓). **AC1–AC11 require a manual `F5` session** (steps in [`notes.md`](./notes.md)); tick them there after the run. Note: re-anchoring (AC7–AC10) runs on diff (re)load, so after editing code use **Local Review: Refresh** — live auto-refresh is it.7.
+**Verification status.** Automated checks PASS (AC12 ✓). **AC1–AC11 require a manual `F5` session** (steps in [`notes.md`](./notes.md)); tick them there after the run. Note: re-anchoring (AC7–AC10) runs on diff (re)load, so after editing code use **Local Review: Refresh** — live auto-refresh is it.7. **Update:** the manual checks were later confirmed through real use and are ticked above (PR #88).
 
 ## Scope
 

@@ -1,7 +1,7 @@
 // The GitHub implementation of the neutral ReviewProvider seam: it composes auth (a token source),
-// the API client, and the thread mapper. A fresh client is built per call with a just-fetched token, so
-// tokens stay short-lived and current. github.com and GitHub Enterprise share this class (only the base
-// URLs differ), so both hosts are first-class.
+// the API client, and the thread mapper. Each call fetches a current token and reuses the client while the
+// token is unchanged, so the throttling plugin keeps its rate-limit state. github.com and GitHub Enterprise
+// share this class (only the base URLs differ), so both hosts are first-class.
 import type { CommentThread } from '../model/Comment';
 import type { ReviewDiff, Side } from '../model/ReviewDiff';
 import type { PullRequestDetail, PullRequestSummary, RemoteRepoRef, ReviewProvider } from '../review/provider';

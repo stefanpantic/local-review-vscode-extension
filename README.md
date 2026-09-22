@@ -7,13 +7,13 @@
 
 A pull-request review surface inside VS Code, for three things: your own uncommitted changes, a real GitHub pull request, and a coding agent reviewing alongside you.
 
-> **Local-first.** Reviewing your git diff happens entirely on your machine. The only network traffic is GitHub pull request review: fetching a PR when you open one, and posting your review when you press **Submit**. Nothing else leaves your box. No account. No telemetry.
+> **Local-first.** Reviewing your git diff happens entirely on your machine. The only network traffic is GitHub pull request review: listing open PRs in the sidebar when the repo has a GitHub remote and VS Code is signed in to GitHub, fetching and polling a PR while you have it open, and posting your review when you press **Submit**. Nothing else leaves your box. No account. No telemetry.
 
 ![ReviewMate: a local git diff reviewed like a pull request in VS Code, with an inline comment and a suggested change, and a sidebar of changed files, active comments, and saved reviews. You and your coding agent comment in the same review over MCP.](docs/images/review-panel.png)
 
 ## What it does
 
-- **Reviews your working-tree diff** as a continuous, PR-style surface: unified or side-by-side, syntax-highlighted, with comments on any line or range.
+- **Reviews your working-tree diff** as a continuous, PR-style surface: unified or side-by-side, syntax-highlighted, with comments on any line, range, or whole file.
 - **Reviews a real GitHub pull request** in the same UI. The PR is fetched in place, with no checkout and no change to your working tree, and every existing review thread is imported. github.com and GitHub Enterprise.
 - **Writes your review back.** Comment, reply, resolve, edit, and suggest, then post the lot as one GitHub review with **Comment**, **Approve**, or **Request changes**.
 - **Lets a coding agent review with you** over a local MCP server. It reads the diff and posts its own comments, replies, and suggestions into the same review, attributed to "AI Agent".
@@ -25,7 +25,7 @@ A pull-request review surface inside VS Code, for three things: your own uncommi
 
 Install the extension (see [Install](#install)), then open **ReviewMate** from the activity bar. Pick whichever of these you came for.
 
-**Review your own changes.** Your uncommitted diff opens in a full-width tab. Hover a line and click **+**, or drag to select a range, to comment. Reply and resolve as you go.
+**Review your own changes.** Your uncommitted diff opens in a full-width tab. Hover a line and click **+**, or drag to select a range, to comment. Use the comment button on a file header to comment on the whole file. Reply and resolve as you go.
 
 **Review a GitHub pull request.** If the repo's `origin` is a GitHub remote, a **Pull Requests** section lists the open PRs. Click one. Review it exactly like a local diff, then press **Submit review** to post everything back. See [Review a GitHub pull request](#review-a-github-pull-request).
 
@@ -33,11 +33,11 @@ Install the extension (see [Install](#install)), then open **ReviewMate** from t
 
 ## Review a GitHub pull request
 
-When the current repo's `origin` is a GitHub remote, a **Pull Requests** section appears in the ReviewMate sidebar listing the open PRs. Click one to review it. You can also run **ReviewMate: Review Pull Request** (or pick it from **Select Diff Source**), which signs you in with VS Code's built-in GitHub sign-in the first time, lists the open PRs, and also accepts a PR URL or number. Either way it:
+When the current repo's `origin` is a GitHub remote, a **Pull Requests** section appears in the ReviewMate sidebar listing the open PRs, most recently updated first, up to 200. Click one to review it. You can also run **ReviewMate: Review Pull Request** (or pick it from **Select Diff Source**), which signs you in with VS Code's built-in GitHub sign-in the first time, lists the open PRs, and also accepts a PR URL or number. Either way it:
 
 - fetches the PR head and base **in place** (into hidden refs under `refs/agentic-review/`), so your working tree, index, and current branch are never touched.
 - renders `base...head` in the usual diff UI, with a header pill showing the source and target branches and a card with the PR title, state, and description.
-- imports all review threads at their correct file, side, and line, including resolved and outdated ones, with suggestions.
+- imports all review threads at their correct file, side, and line, including resolved, outdated, and file-level ones, with suggestions and reactions.
 - lists the PR as its own group in the **Reviews** sidebar, separate from your local branch reviews, and tracks "viewed" state per PR.
 
 ### Filter the list
@@ -73,7 +73,7 @@ Reviewing a PR adds a **pull request bar** across the top of the review, always 
 
 The same actions sit in the **Pull Requests** sidebar title bar, and as **ReviewMate:** commands.
 
-Comment, reply, resolve, and edit or delete your own and your agent's comments. These changes stay on your machine until you submit. Submit asks for one event, **Comment**, **Approve**, or **Request changes**, then an optional summary. Your changes post as one GitHub review, pinned to the commit you reviewed. Submit is the only network write.
+Comment, reply, resolve, react, and edit or delete your own and your agent's comments. These changes stay on your machine until you submit. Submit asks for one event, **Comment**, **Approve**, or **Request changes**, then an optional summary. Your changes post as one GitHub review, pinned to the commit you reviewed. Submit is the only network write.
 
 Approve and Request changes are unavailable on a pull request you opened yourself, and on a closed or merged one, because GitHub rejects them. Only Comment is offered there.
 
@@ -95,7 +95,7 @@ ReviewMate runs a standard, local MCP server (bound to `127.0.0.1`, token-guarde
 2. It generates an mcp.json (URL, token, and ready-to-run connect commands: Claude Code, plus a generic `mcpServers` config for other clients) and opens it. Reopen it anytime with **Open MCP Config**. It lives in the extension's per-workspace storage, not in your repo.
 3. Connect your client. Use **Start MCP Server** / **Stop MCP Server** to control it anytime.
 
-Tools the agent gets: `get_diff`, `get_active_review`, `get_review`, `list_reviews`, `post_comment`, `reply`, `resolve`, `edit_comment`, `delete_comment`. On a pull request, `get_diff` hands over the request as well as its lines: number, title, state, base and head, the description, and the commits, all read locally. It can revise and withdraw comments under the same rule you get, measured against the same identity: on a pull request its own comments and yours, so someone else's is never touchable, and on a local review any comment, because the only authors there are you and it. It never writes to your files: it posts comments and makes the changes by editing code itself. The server is loopback-only and has no GitHub access of its own.
+Tools the agent gets: `get_diff`, `get_active_review`, `get_review`, `list_reviews`, `post_comment`, `reply`, `resolve`, `edit_comment`, `delete_comment`, `react`. `post_comment` without a line makes a file-level comment. `react` works on any comment, like the reaction button in the panel. On a pull request, `get_diff` hands over the request as well as its lines: number, title, state, base and head, the description, and the commits, all read locally. It can revise and withdraw comments under the same rule you get, measured against the same identity: on a pull request its own comments and yours, so someone else's is never touchable, and on a local review any comment, because the only authors there are you and it. It never writes to your files: it posts comments and makes the changes by editing code itself. The server is loopback-only and has no GitHub access of its own.
 
 ### Or export a work list
 
@@ -109,11 +109,26 @@ For an agent you have not connected, **Export Review** produces agent-ready Mark
 - **Hide whitespace** changes.
 - **Find in the diff** with Ctrl+F (Cmd+F on macOS). Only expanded files are searched, so use **Expand all files** in the summary bar to cover files you have marked viewed or that opened collapsed.
 - **Inline comments** on single lines or ranges, old or new side, with edit, delete, reply, resolve.
+- **File-level comments** on a whole file, from the comment button on the file header. Imported from and posted to GitHub like line comments.
 - **Suggestions:** propose replacement code in a comment, rendered as a before/after diff. Posted to GitHub as an applicable suggestion, and included in the export. Never written to your files.
 - **Markdown comments**, rendered in the panel.
+- **Reactions** (👍 👎 👀 ❤️ 🎉) on any comment. On a pull request, Submit posts your reaction changes to GitHub.
 - **Back to top** button once you have scrolled into a long diff.
 - **Line drift:** comments follow their lines. When they can't be matched they go "outdated" and stay in the review.
 - **Branch-tied reviews:** saved automatically per branch, and per pull request. Reviews for deleted or merged branches are archived and can be moved to the current branch.
+
+## Filter, group, and sort comments
+
+The **Current Review** sidebar lists every thread in the review. Click the funnel in its title bar to filter it. The picker offers presets (Unresolved, Resolved, Outdated, Mine, AI Agent) and a row per author, each with how many threads it would leave. You can also type the tokens yourself:
+
+| Filter                                     | Shows                                                      |
+| ------------------------------------------ | ---------------------------------------------------------- |
+| `author:<name>`                            | Threads where that person wrote any comment, root or reply |
+| `author:@me` / `author:@agent`             | Threads you commented in, or the agent did                 |
+| `is:unresolved` / `is:resolved`            | Open or resolved threads                                   |
+| `is:anchored` / `is:moved` / `is:outdated` | Threads by where their line is now                         |
+
+Filters combine, so `author:@agent is:unresolved` means both. A token the filter doesn't recognize matches nothing, and the list says so. **Group Comments** (by file, by author, or ungrouped) and **Sort Comments** (by position, newest first, or oldest first) are in the title bar's `⋯` menu, next to **Clear Comment Filter**. The view header names the active filter, and all three settings are remembered across restarts. The filter only narrows this list. The diff panel still shows every thread, and export keeps its own scope.
 
 ## Diff sources
 

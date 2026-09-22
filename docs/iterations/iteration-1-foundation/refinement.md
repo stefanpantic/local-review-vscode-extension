@@ -21,7 +21,7 @@ Open a repository with uncommitted changes, click the **Local Review** activity-
 - [x] **AC9 — Unit tests.** `normalize` passes fixture tests for: single-file modify, added file, deleted file, rename, binary, one `unsupported` (submodule or mode-change), multi-hunk, and "no newline at end of file". _(9/9 pass; also validated against real `git diff` output.)_
 - [x] **AC10 — Multi-root safe.** In a multi-root/multi-repo workspace the extension picks a sensible default repo and does not crash (the picker UI is Iteration 2).
 
-**Verification status (2026-07-03).** Automated checks PASS: `pnpm run build` (both bundles emit), `pnpm run typecheck` (clean), `pnpm test` (9/9), and `normalize` validated against real `git diff` output (add / modify / rename with correct old+new line numbers). **AC9 ✓**; the build/typecheck/pipeline portions of **AC1/AC8 ✓**. **AC2–AC7 and AC10 need a manual `F5` Extension Development Host session** — see [`notes.md`](./notes.md) for steps. Tick them there after the run.
+**Verification status (2026-07-03).** Automated checks PASS: `pnpm run build` (both bundles emit), `pnpm run typecheck` (clean), `pnpm test` (9/9), and `normalize` validated against real `git diff` output (add / modify / rename with correct old+new line numbers). **AC9 ✓**; the build/typecheck/pipeline portions of **AC1/AC8 ✓**. **AC2–AC7 and AC10 need a manual `F5` Extension Development Host session** — see [`notes.md`](./notes.md) for steps. Tick them there after the run. **Update:** the manual checks were later confirmed through real use and are ticked above (PR #88).
 
 ## 3. Scope
 
