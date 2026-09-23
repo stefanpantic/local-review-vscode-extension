@@ -20,6 +20,7 @@ import { AGENT_AUTHOR } from './model/Comment';
 import { parsePrReference, type GithubProviderId } from './github/remote';
 import { githubTokenSource } from './github/auth';
 import { githubErrorText } from './github/errors';
+import { log } from './log';
 import { nextPollDelay } from './poll';
 import type { SubmitEvent, SubmitCounts } from './review/submit';
 import type { OrphanReport } from './review/reconcile';
@@ -310,7 +311,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Uses setTimeout (not setInterval) so the delay can grow on consecutive failures and reset on success.
   let polling = false;
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
-  let consecutivePollFailures = 0;
   const pollTick = async (): Promise<void> => {
     if (polling || controller.source !== 'pr') {
       schedulePoll();
@@ -319,7 +319,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     polling = true;
     try {
       const { orphans, incoming } = await controller.pollPullRequest();
-      consecutivePollFailures = 0;
       if (orphans)
         void vscode.window.showInformationMessage(`ReviewMate: synced upstream changes.${orphanNote(orphans)}`);
       if (incoming)
@@ -327,7 +326,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           `ReviewMate: ${incoming} new comment${incoming === 1 ? '' : 's'} on this pull request.`,
         );
     } catch {
-      consecutivePollFailures++;
+      controller.recordPollFailure();
     } finally {
       polling = false;
       schedulePoll();
@@ -338,20 +337,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     pollTimer = undefined;
     const baseSecs = vscode.workspace.getConfiguration('agenticReview').get<number>('github.pollInterval', 60);
     if (baseSecs <= 0) return;
-    const ms = nextPollDelay(baseSecs, consecutivePollFailures);
+    // The failure count lives on the controller, because that is what counts the errors the tick swallows.
+    // A second count kept here would only ever see zero and hold every retry at the base interval.
+    const failures = controller.pollFailures;
+    const ms = nextPollDelay(baseSecs, failures);
+    log('[poll] next tick in', ms / 1000, 'secs; consecutive failures:', failures);
     pollTimer = setTimeout(() => void pollTick(), ms);
   };
-  const restartPoll = (): void => {
-    consecutivePollFailures = 0;
-    schedulePoll();
-  };
-  restartPoll();
+  schedulePoll();
   context.subscriptions.push(
     new vscode.Disposable(() => {
       if (pollTimer != null) clearTimeout(pollTimer);
     }),
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('agenticReview.github.pollInterval')) restartPoll();
+      // Re-arm on a new interval. A failure run is not cleared here: changing a setting says nothing about
+      // whether the remote is reachable again, and that run is also what drives the paused indicator.
+      if (e.affectsConfiguration('agenticReview.github.pollInterval')) schedulePoll();
     }),
   );
 
