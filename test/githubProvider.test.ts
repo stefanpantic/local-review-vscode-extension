@@ -52,15 +52,18 @@ class FakeClient implements GithubWriteClient {
   ): Promise<{ id: number }> {
     this.reviews.push(input);
     for (const c of input.comments) {
-      this.posted.push({ id: this.nextId++, path: c.path, line: c.line ?? null, side: c.side, body: c.body });
+      const id = this.nextId++;
+      this.posted.push({ id, nodeId: `node-${id}`, path: c.path, line: c.line ?? null, side: c.side, body: c.body });
     }
     return { id: 1 };
   }
   async listReviewComments(): Promise<GhPostedComment[]> {
     return this.posted;
   }
-  async reply(_repo: unknown, _number: number, input: { inReplyTo: number; body: string }): Promise<void> {
+  async reply(_repo: unknown, _number: number, input: { inReplyTo: number; body: string }): Promise<GhPostedComment> {
     this.replies.push(input);
+    const id = this.nextId++;
+    return { id, nodeId: `node-${id}`, path: 'a.ts', line: null, body: input.body };
   }
   async editComment(_repo: unknown, input: { commentId: number; body: string }): Promise<void> {
     this.edits.push(input);
@@ -71,8 +74,13 @@ class FakeClient implements GithubWriteClient {
   async resolveThread(input: { threadId: string; resolved: boolean }): Promise<void> {
     this.resolves.push(input);
   }
-  async addReaction(): Promise<void> {}
-  async removeReaction(): Promise<void> {}
+  reactions: { subjectId: string; content: string; add: boolean }[] = [];
+  async addReaction(subjectId: string, content: string): Promise<void> {
+    this.reactions.push({ subjectId, content, add: true });
+  }
+  async removeReaction(subjectId: string, content: string): Promise<void> {
+    this.reactions.push({ subjectId, content, add: false });
+  }
   async listPullRequests(): Promise<PullRequestSummary[]> {
     return [{ number: 1, title: 'PR', author: 'a', state: 'open', url: 'u', updatedAt: 't', isDraft: false }];
   }
@@ -246,7 +254,7 @@ test('submitReview posts a new draft thread root and its follow-up reply in the 
     event: 'comment',
     commitId: 'H',
     body: '',
-    newThreads: [{ root: { path: 'a.ts', side: 'new', line: 4, body: 'first' }, replies: ['second'] }],
+    newThreads: [{ root: { path: 'a.ts', side: 'new', line: 4, body: 'first' }, replies: [{ body: 'second' }] }],
     replies: [],
     edits: [],
     deletes: [],
@@ -259,6 +267,90 @@ test('submitReview posts a new draft thread root and its follow-up reply in the 
   assert.equal(client.replies.length, 1);
   assert.equal(client.replies[0].body, 'second');
   assert.equal(client.replies[0].inReplyTo, 500); // the id FakeClient assigned to the created root
+});
+
+// --- reactions on content the same Submit creates (#93) ---
+
+test('a reaction staged on a draft root posts against the id the created root comes back with', async () => {
+  const client = new FakeClient();
+  const p = new GithubReviewProvider('github', async () => client);
+  await p.submitReview(repo, 7, {
+    event: 'comment',
+    commitId: 'H',
+    body: '',
+    newThreads: [
+      { root: { path: 'a.ts', side: 'new', line: 4, body: 'first', reactions: ['THUMBS_UP'] }, replies: [] },
+    ],
+    replies: [],
+    edits: [],
+    deletes: [],
+    resolves: [],
+    reactions: [],
+  });
+  // node-500 is the node id FakeClient gave the root that createReview created.
+  assert.deepEqual(client.reactions, [{ subjectId: 'node-500', content: 'THUMBS_UP', add: true }]);
+});
+
+test('a reaction staged on a draft follow-up reply posts against that reply, not its root', async () => {
+  const client = new FakeClient();
+  const p = new GithubReviewProvider('github', async () => client);
+  await p.submitReview(repo, 7, {
+    event: 'comment',
+    commitId: 'H',
+    body: '',
+    newThreads: [
+      {
+        root: { path: 'a.ts', side: 'new', line: 4, body: 'first' },
+        replies: [{ body: 'second', reactions: ['HOORAY'] }],
+      },
+    ],
+    replies: [],
+    edits: [],
+    deletes: [],
+    resolves: [],
+    reactions: [],
+  });
+  assert.deepEqual(client.replies, [{ inReplyTo: 500, body: 'second' }]);
+  assert.deepEqual(client.reactions, [{ subjectId: 'node-501', content: 'HOORAY', add: true }]);
+});
+
+test('a reaction staged on an unsent reply to an imported thread posts against the created reply', async () => {
+  const client = new FakeClient();
+  const p = new GithubReviewProvider('github', async () => client);
+  await p.submitReview(repo, 7, {
+    event: 'comment',
+    commitId: 'H',
+    body: '',
+    newThreads: [],
+    replies: [{ rootId: '100', body: 'agreed', reactions: ['EYES'] }],
+    edits: [],
+    deletes: [],
+    resolves: [],
+    reactions: [],
+  });
+  assert.deepEqual(client.replies, [{ inReplyTo: 100, body: 'agreed' }]);
+  assert.deepEqual(client.reactions, [{ subjectId: 'node-500', content: 'EYES', add: true }]);
+});
+
+test('a root that cannot be matched back leaves its reaction for the next Submit', async () => {
+  const client = new FakeClient();
+  client.listReviewComments = async (): Promise<GhPostedComment[]> => []; // the read-back finds nothing
+  const p = new GithubReviewProvider('github', async () => client);
+  await p.submitReview(repo, 7, {
+    event: 'comment',
+    commitId: 'H',
+    body: '',
+    newThreads: [
+      { root: { path: 'a.ts', side: 'new', line: 4, body: 'first', reactions: ['THUMBS_UP'] }, replies: [] },
+    ],
+    replies: [],
+    edits: [],
+    deletes: [],
+    resolves: [],
+    reactions: [],
+  });
+  assert.equal(client.reviews.length, 1); // the comment itself did post
+  assert.deepEqual(client.reactions, []); // its reaction did not, and stays staged
 });
 
 // --- client caching via createGithubProvider ---

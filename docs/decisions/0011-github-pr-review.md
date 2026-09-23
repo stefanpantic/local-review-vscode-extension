@@ -87,7 +87,10 @@ network capability.
 - **Reactions round-trip (iteration 16).** Import reads each comment's reactions for five emoji as a
   `remoteReactions` baseline, the same pattern as `remoteBody`. Submit sends the difference as GraphQL
   `addReaction` / `removeReaction` mutations before it creates the review. GitHub's rocket, laugh and confused
-  reactions are dropped on import.
+  reactions are dropped on import. A reaction mutation needs the comment's node id, so a reaction on a comment
+  that has never been posted cannot go in that pass. It travels with its comment in the batch instead and is
+  applied from the id the creation reports back, which is also why the created roots are read back for their
+  node ids and not only to thread a follow-up reply (#93).
 - **File-level threads round-trip (iteration 17).** Import no longer drops a thread with no line. It becomes
   a `FileAnchor` thread, and a new file-level comment posts with `subject_type: "file"`.
 - **Rate limits (PR #89).** The client uses Octokit's throttling plugin. It retries a request once after a

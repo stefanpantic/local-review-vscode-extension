@@ -17,6 +17,13 @@ export interface NewInlineComment {
   startLine?: number; // first line of a multi-line comment; absent for single-line and file-level
   body: string;
   subject_type?: 'file'; // present for file-level comments
+  reactions?: string[]; // reactions staged on it locally, applied once posting gives it an id
+}
+
+/** A brand-new reply, with any reactions staged on it before it existed on the remote. */
+export interface NewReply {
+  body: string;
+  reactions?: string[];
 }
 
 /**
@@ -26,7 +33,7 @@ export interface NewInlineComment {
  */
 export interface NewThread {
   root: NewInlineComment;
-  replies: string[]; // follow-up reply bodies, in order
+  replies: NewReply[]; // follow-up replies, in order
 }
 
 /** Everything one Submit posts, in provider-neutral terms (opaque string ids so non-GitHub providers fit). */
@@ -35,7 +42,7 @@ export interface SubmitReviewInput {
   commitId: string; // the reviewed head sha; pins comment lines so they stay valid
   body: string; // the review summary body (empty for now)
   newThreads: NewThread[]; // new local-draft threads: a positioned root and its follow-up replies
-  replies: { rootId: string; body: string }[]; // replies to imported threads (in reply to the thread root)
+  replies: (NewReply & { rootId: string })[]; // replies to imported threads (in reply to the thread root)
   edits: { commentId: string; body: string }[]; // edited posted comments
   deletes: string[]; // remote ids of posted comments to delete
   resolves: { threadId: string; resolved: boolean }[]; // resolve/unresolve toggles
@@ -97,6 +104,19 @@ function bodyForSubmit(c: Comment): string {
   return c.body ? `${c.body}\n\n${block}` : block;
 }
 
+/**
+ * The reactions staged on a comment that has never been posted, as the content strings its creation will
+ * apply, spread in so the field is absent when there are none. Only additions are possible, since there is
+ * nothing on the remote to take a reaction away from, and one content string is sent once however many local
+ * identities carry it: they all post under yours.
+ */
+function stagedReactions(c: Comment): { reactions?: string[] } {
+  const local = c.reactions;
+  if (!local) return {};
+  const reactions = REACTION_EMOJIS.filter((e) => (local[e]?.length ?? 0) > 0).map((e) => EMOJI_TO_GITHUB[e]);
+  return reactions.length > 0 ? { reactions } : {};
+}
+
 /** GitHub anchors a multi-line comment on its last line, with the first as the range start. */
 function positionOf(t: CommentThread): { line: number; startLine?: number } {
   const { anchor } = t;
@@ -126,7 +146,9 @@ export function unsubmittedRemoteReview(review: Review, viewer?: string): boolea
  *   comment, and any follow-up comments you added to it locally are its replies (posted after the root);
  * - a comment with no remote id inside an imported thread is a reply to that thread's root;
  * - a posted comment whose body changed since import is an edit; a staged delete is a delete;
- * - a thread whose resolved state differs from the imported baseline is a resolve/unresolve toggle.
+ * - a thread whose resolved state differs from the imported baseline is a resolve/unresolve toggle;
+ * - a reaction on a posted comment is an add/remove op against its node id, while one staged on a comment
+ *   that has never been posted travels with that comment, for the provider to apply once posting names it.
  * A local review, or one with nothing staged, yields an empty batch. AI-agent comments are included (posted
  * under the human's identity) and counted so the confirmation can show how many are agent-authored.
  * `body` is the optional review summary, posted as the review's own text.
@@ -139,7 +161,7 @@ export function buildSubmitPlan(
   if (review.kind !== 'remote') return { input: EMPTY_INPUT, counts: EMPTY_COUNTS };
 
   const newThreads: NewThread[] = [];
-  const replies: { rootId: string; body: string }[] = [];
+  const replies: (NewReply & { rootId: string })[] = [];
   const edits: { commentId: string; body: string }[] = [];
   const resolves: { threadId: string; resolved: boolean }[] = [];
   let agentComments = 0;
@@ -156,7 +178,7 @@ export function buildSubmitPlan(
       for (const c of t.comments) {
         if (!c.remoteId) {
           if (t.remoteRootId) {
-            replies.push({ rootId: t.remoteRootId, body: bodyForSubmit(c) });
+            replies.push({ rootId: t.remoteRootId, body: bodyForSubmit(c), ...stagedReactions(c) });
             countAgent(c);
           }
         } else if (c.remoteBody !== undefined && c.body !== c.remoteBody) {
@@ -170,9 +192,18 @@ export function buildSubmitPlan(
         const followups = t.comments.slice(1).filter((c) => !c.remoteId);
         const rootComment: NewInlineComment =
           t.anchor.kind === 'file'
-            ? { path: t.anchor.filePath, body: bodyForSubmit(root), subject_type: 'file' }
-            : { path: t.anchor.filePath, side: t.anchor.side, ...positionOf(t), body: bodyForSubmit(root) };
-        newThreads.push({ root: rootComment, replies: followups.map(bodyForSubmit) });
+            ? { path: t.anchor.filePath, body: bodyForSubmit(root), subject_type: 'file', ...stagedReactions(root) }
+            : {
+                path: t.anchor.filePath,
+                side: t.anchor.side,
+                ...positionOf(t),
+                body: bodyForSubmit(root),
+                ...stagedReactions(root),
+              };
+        newThreads.push({
+          root: rootComment,
+          replies: followups.map((c) => ({ body: bodyForSubmit(c), ...stagedReactions(c) })),
+        });
         countAgent(root);
         followups.forEach(countAgent);
       }
@@ -202,6 +233,11 @@ export function buildSubmitPlan(
 
   const deletes = [...(review.pendingDeletes ?? [])];
   const draftReplies = newThreads.reduce((n, t) => n + t.replies.length, 0);
+  // Reactions ride along with the content they sit on, so they are ops of their own for the confirmation.
+  const countReactions = (rs: NewReply[]): number => rs.reduce((n, r) => n + (r.reactions?.length ?? 0), 0);
+  const newContentReactions =
+    newThreads.reduce((n, t) => n + (t.root.reactions?.length ?? 0) + countReactions(t.replies), 0) +
+    countReactions(replies);
   const input: SubmitReviewInput = {
     event,
     commitId: review.remote.headSha,
@@ -219,7 +255,7 @@ export function buildSubmitPlan(
     edits: edits.length,
     deletes: deletes.length,
     resolves: resolves.length,
-    reactions: reactionOps.length,
+    reactions: reactionOps.length + newContentReactions,
     agentComments,
     total:
       newThreads.length +
@@ -228,7 +264,8 @@ export function buildSubmitPlan(
       edits.length +
       deletes.length +
       resolves.length +
-      reactionOps.length,
+      reactionOps.length +
+      newContentReactions,
   };
   return { input, counts };
 }

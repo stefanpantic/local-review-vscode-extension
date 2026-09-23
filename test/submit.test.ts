@@ -181,7 +181,7 @@ test('a draft thread you replied to before submitting carries its follow-up repl
   assert.equal(counts.replies, 1);
   assert.equal(input.newThreads.length, 1);
   assert.equal(input.newThreads[0].root.body, 'first');
-  assert.deepEqual(input.newThreads[0].replies, ['second']);
+  assert.deepEqual(input.newThreads[0].replies, [{ body: 'second' }]);
   assert.equal(input.replies.length, 0); // it's a follow-up on a new thread, not an imported-thread reply
 });
 
@@ -237,4 +237,56 @@ test('a file-level draft thread produces subject_type file with no line/side', (
   assert.equal(root.subject_type, 'file');
   assert.equal(root.line, undefined);
   assert.equal(root.side, undefined);
+});
+
+// --- reactions staged on content that has never been posted (#93) ---
+
+test('a reaction on a draft root travels with the new thread', () => {
+  const draft = thread({ comments: [comment({ id: 'root', body: 'first', reactions: { '👍': ['me'] } })] });
+  const { input, counts } = buildSubmitPlan(remoteReview([draft]), 'comment');
+  assert.deepEqual(input.newThreads[0].root.reactions, ['THUMBS_UP']);
+  assert.deepEqual(input.reactions, []); // not an id-addressed op: it has no remote id to address
+  assert.equal(counts.reactions, 1);
+  assert.equal(counts.total, 2); // the comment and its reaction
+});
+
+test('a reaction on a draft follow-up reply travels with that reply', () => {
+  const draft = thread({
+    comments: [
+      comment({ id: 'root', body: 'first' }),
+      comment({ id: 'reply', body: 'second', reactions: { '🎉': ['me'] } }),
+    ],
+  });
+  const { input } = buildSubmitPlan(remoteReview([draft]), 'comment');
+  assert.equal(input.newThreads[0].root.reactions, undefined);
+  assert.deepEqual(input.newThreads[0].replies, [{ body: 'second', reactions: ['HOORAY'] }]);
+});
+
+test('a reaction on an unsent reply to an imported thread travels with that reply', () => {
+  const imported = thread({
+    remoteThreadId: 'T1',
+    remoteRootId: '100',
+    comments: [
+      comment({ id: 'posted', remoteId: '100', remoteBody: 'b' }),
+      comment({ id: 'mine', body: 'agreed', reactions: { '👀': ['me'] } }),
+    ],
+  });
+  const { input } = buildSubmitPlan(remoteReview([imported]), 'comment');
+  assert.deepEqual(input.replies, [{ rootId: '100', body: 'agreed', reactions: ['EYES'] }]);
+});
+
+test('every staged emoji on a draft is sent once, however many identities carry it locally', () => {
+  const draft = thread({
+    comments: [comment({ id: 'root', reactions: { '👍': ['me', AGENT_AUTHOR], '👀': [] } })],
+  });
+  const { input } = buildSubmitPlan(remoteReview([draft]), 'comment');
+  // One op per emoji: they all post under your identity, and an emoji nobody carries is not sent at all.
+  assert.deepEqual(input.newThreads[0].root.reactions, ['THUMBS_UP']);
+});
+
+test('a draft with no reactions carries no reactions field', () => {
+  const draft = thread({ comments: [comment({ id: 'root' })] });
+  const { input, counts } = buildSubmitPlan(remoteReview([draft]), 'comment');
+  assert.equal('reactions' in input.newThreads[0].root, false);
+  assert.equal(counts.reactions, 0);
 });

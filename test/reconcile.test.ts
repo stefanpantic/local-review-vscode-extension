@@ -517,3 +517,65 @@ test("a third party's comment is never relabelled as the agent's", () => {
   const { threads } = reconcile(local, [], fresh, { viewer: 'me' });
   assert.equal(threads[0].comments[0].author, 'someone-else');
 });
+
+// --- a reaction staged on content that has since posted (#93) ---
+
+test("a draft's reaction settles to the remote baseline once it posted with the comment", () => {
+  const draft = thread({
+    id: 'draft',
+    comments: [comment({ id: 'n1', body: 'looks wrong', author: 'me', reactions: { '👍': ['me'] } })],
+  });
+  // Submit created the comment and applied its reaction, so the fetch carries both.
+  const fresh = [
+    imported('T9', 'looks wrong', {
+      comments: [
+        comment({
+          id: 'T9c',
+          remoteId: 'T9c',
+          body: 'looks wrong',
+          remoteBody: 'looks wrong',
+          author: 'me',
+          reactions: { '👍': ['me'] },
+          remoteReactions: { '👍': ['me'] }, // import always stamps the baseline alongside
+        }),
+      ],
+    }),
+  ];
+  const { threads } = reconcile([draft], [], fresh, { viewer: 'me' });
+  const root = threads[0].comments[0];
+  assert.deepEqual(root.reactions, { '👍': ['me'] });
+  assert.deepEqual(root.remoteReactions, { '👍': ['me'] }); // baseline caught up, so nothing is staged
+});
+
+test("a draft's reaction stays staged when the comment posted without it", () => {
+  const draft = thread({
+    id: 'draft',
+    comments: [comment({ id: 'n1', body: 'looks wrong', author: 'me', reactions: { '👍': ['me'] } })],
+  });
+  // The comment landed but the reaction call did not, so the fetch has the comment bare.
+  const fresh = [
+    imported('T9', 'looks wrong', {
+      comments: [comment({ id: 'T9c', remoteId: 'T9c', body: 'looks wrong', remoteBody: 'looks wrong', author: 'me' })],
+    }),
+  ];
+  const { threads } = reconcile([draft], [], fresh, { viewer: 'me' });
+  const root = threads[0].comments[0];
+  assert.deepEqual(root.reactions, { '👍': ['me'] }); // kept, so the next Submit finishes the job
+  assert.equal(root.remoteReactions, undefined);
+});
+
+test("a pending reply's reaction is kept when the reply turns out to have posted", () => {
+  const local = [imported('T1', 'root')];
+  local[0].comments.push(comment({ id: 'r1', body: 'me too', author: 'me', reactions: { '🎉': ['me'] } }));
+  const fresh = [
+    imported('T1', 'root', {
+      comments: [
+        comment({ id: 'T1c', remoteId: 'T1c', body: 'root', remoteBody: 'root' }),
+        comment({ id: 'T1r', remoteId: 'T1r', body: 'me too', remoteBody: 'me too', author: 'me' }),
+      ],
+    }),
+  ];
+  const { threads } = reconcile(local, [], fresh, { viewer: 'me' });
+  assert.equal(threads[0].comments[1].remoteId, 'T1r');
+  assert.deepEqual(threads[0].comments[1].reactions, { '🎉': ['me'] });
+});

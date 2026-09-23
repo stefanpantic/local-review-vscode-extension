@@ -26,14 +26,16 @@ function ghComment(root: NewInlineComment): GhNewComment {
   };
 }
 
-/** Find the id of a just-posted root among a review's created comments (exact position + body match). */
-function matchPostedId(posted: GhPostedComment[], root: NewInlineComment): number | undefined {
+/**
+ * Find a just-posted root among a review's created comments (exact position + body match). The whole comment
+ * comes back, because a root is both a reply target (its database id) and a reaction subject (its node id).
+ */
+function matchPosted(posted: GhPostedComment[], root: NewInlineComment): GhPostedComment | undefined {
   if (root.subject_type === 'file') {
-    return posted.find((c) => c.path === root.path && c.line == null && c.body === root.body)?.id;
+    return posted.find((c) => c.path === root.path && c.line == null && c.body === root.body);
   }
   const side = ghSide(root.side!);
-  return posted.find((c) => c.path === root.path && c.side === side && c.line === root.line && c.body === root.body)
-    ?.id;
+  return posted.find((c) => c.path === root.path && c.side === side && c.line === root.line && c.body === root.body);
 }
 
 /** How the provider builds a client. Overridable in tests with a fake; production uses Octokit. */
@@ -102,7 +104,11 @@ class GithubReviewProvider implements ReviewProvider {
       await client.deleteComment(repo, { commentId: Number(id) });
       await onApplied?.({ kind: 'delete', commentId: id });
     }
-    for (const r of input.replies) await client.reply(repo, number, { inReplyTo: Number(r.rootId), body: r.body });
+    // A reaction staged on a reply that has never been posted can only be applied once the reply exists.
+    for (const r of input.replies) {
+      const created = await client.reply(repo, number, { inReplyTo: Number(r.rootId), body: r.body });
+      await addReactions(client, created.nodeId, r.reactions);
+    }
     for (const rs of input.resolves) {
       await client.resolveThread({ threadId: rs.threadId, resolved: rs.resolved });
       await onApplied?.({ kind: 'resolve', threadId: rs.threadId, resolved: rs.resolved });
@@ -134,16 +140,27 @@ class GithubReviewProvider implements ReviewProvider {
       comments: input.newThreads.map((t) => ghComment(t.root)),
     });
 
-    if (input.newThreads.some((t) => t.replies.length > 0)) {
+    // The created roots have to be read back for anything that needs their ids: threading a follow-up reply
+    // to its root, and applying the reactions staged on a root or on one of those replies.
+    const needsPostedIds = input.newThreads.some((t) => t.replies.length > 0 || (t.root.reactions?.length ?? 0) > 0);
+    if (needsPostedIds) {
       const posted = await client.listReviewComments(repo, number, review.id);
       for (const t of input.newThreads) {
-        if (t.replies.length === 0) continue;
-        const rootId = matchPostedId(posted, t.root);
-        if (rootId == null) continue; // exact match; a miss would leave the reply for the next Submit
-        for (const body of t.replies) await client.reply(repo, number, { inReplyTo: rootId, body });
+        const root = matchPosted(posted, t.root);
+        if (!root) continue; // exact match; a miss leaves the reply and the reactions for the next Submit
+        await addReactions(client, root.nodeId, t.root.reactions);
+        for (const r of t.replies) {
+          const created = await client.reply(repo, number, { inReplyTo: root.id, body: r.body });
+          await addReactions(client, created.nodeId, r.reactions);
+        }
       }
     }
   }
+}
+
+/** Apply the reactions a newly created comment carried, now that posting it has given it a node id. */
+async function addReactions(client: GithubWriteClient, nodeId: string, contents: string[] | undefined): Promise<void> {
+  for (const content of contents ?? []) await client.addReaction(nodeId, content);
 }
 
 /**

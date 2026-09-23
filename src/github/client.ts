@@ -39,6 +39,7 @@ export interface GhNewComment {
 /** A review comment as posted, enough to match it back to the local thread that created it. */
 export interface GhPostedComment {
   id: number; // databaseId — the reply target
+  nodeId: string; // GraphQL node id — the reaction subject
   path: string;
   line: number | null;
   side?: 'LEFT' | 'RIGHT';
@@ -59,7 +60,8 @@ export interface GithubWriteClient extends GithubReadClient {
   ): Promise<{ id: number }>;
   /** The comments a review created, so a just-posted root can be found to reply to it in the same Submit. */
   listReviewComments(repo: RemoteRepoRef, number: number, reviewId: number): Promise<GhPostedComment[]>;
-  reply(repo: RemoteRepoRef, number: number, input: { inReplyTo: number; body: string }): Promise<void>;
+  /** Returns the created reply, so a reaction staged on it can be applied once it has an id. */
+  reply(repo: RemoteRepoRef, number: number, input: { inReplyTo: number; body: string }): Promise<GhPostedComment>;
   editComment(repo: RemoteRepoRef, input: { commentId: number; body: string }): Promise<void>;
   deleteComment(repo: RemoteRepoRef, input: { commentId: number }): Promise<void>;
   resolveThread(input: { threadId: string; resolved: boolean }): Promise<void>;
@@ -331,6 +333,7 @@ class OctokitClient implements GithubWriteClient {
     });
     return data.map((c) => ({
       id: c.id,
+      nodeId: c.node_id,
       path: c.path,
       line: c.line ?? c.original_line ?? null,
       side: c.side === 'LEFT' || c.side === 'RIGHT' ? c.side : undefined,
@@ -338,14 +341,26 @@ class OctokitClient implements GithubWriteClient {
     }));
   }
 
-  async reply(repo: RemoteRepoRef, number: number, input: { inReplyTo: number; body: string }): Promise<void> {
-    await this.kit.rest.pulls.createReplyForReviewComment({
+  async reply(
+    repo: RemoteRepoRef,
+    number: number,
+    input: { inReplyTo: number; body: string },
+  ): Promise<GhPostedComment> {
+    const { data } = await this.kit.rest.pulls.createReplyForReviewComment({
       owner: repo.owner,
       repo: repo.repo,
       pull_number: number,
       comment_id: input.inReplyTo,
       body: input.body,
     });
+    return {
+      id: data.id,
+      nodeId: data.node_id,
+      path: data.path,
+      line: data.line ?? data.original_line ?? null,
+      side: data.side === 'LEFT' || data.side === 'RIGHT' ? data.side : undefined,
+      body: data.body,
+    };
   }
 
   async editComment(repo: RemoteRepoRef, input: { commentId: number; body: string }): Promise<void> {
