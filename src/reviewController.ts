@@ -25,6 +25,7 @@ import type { RemoteRepoRef, ReviewProvider } from './review/provider';
 import { parseRemoteUrl, type GithubProviderId } from './github/remote';
 import { getViewerLogin } from './github/auth';
 import { resolveProvider } from './review/resolveProvider';
+import { nextFailureCount } from './poll';
 import { pendingChangeSet, type PendingSummary } from './review/pending';
 import { mergeRequestMeta } from './review/requestMeta';
 import { buildSubmitPlan, unsubmittedRemoteReview, type SubmitCounts, type SubmitEvent } from './review/submit';
@@ -61,7 +62,7 @@ export class ReviewController {
   private viewerLogin: string | undefined; // signed-in GitHub login, when a session exists — the preferred author
   private headStale = false; // the open PR advanced upstream; surfaced as a Refresh banner, never auto-applied
   private prMutation?: Promise<void>; // held while a PR network mutation runs, so the poll cannot interleave
-  private pollFailures = 0; // consecutive failed poll ticks — surfaced as "sync paused" past the threshold
+  private failedPolls = 0; // consecutive failed poll ticks — drives the backoff and "sync paused"
   private incoming = 0; // upstream comments the poll brought in since you last synced explicitly
   private lastSyncedAt?: string; // ISO time of the last successful sync with the remote
   private restoredPr?: string; // PRs already fetched/imported in this session, so a restore runs once
@@ -110,6 +111,10 @@ export class ReviewController {
   }
   get wrap(): boolean {
     return this.state.getPref().wrap;
+  }
+  /** Consecutive failed poll ticks. The caller that schedules the next tick spaces it out by this. */
+  get pollFailures(): number {
+    return this.failedPolls;
   }
   files(): FileDiff[] {
     return this.current.state === 'ok' && this.current.diff ? this.current.diff.files : [];
@@ -457,7 +462,7 @@ export class ReviewController {
     if (pref.source !== 'pr') return undefined;
     return {
       incoming: this.incoming || undefined,
-      paused: this.pollFailures >= POLL_FAILURES_BEFORE_PAUSED || undefined,
+      paused: this.failedPolls >= POLL_FAILURES_BEFORE_PAUSED || undefined,
       lastSyncedAt: this.lastSyncedAt,
     };
   }
@@ -638,10 +643,14 @@ export class ReviewController {
     });
   }
 
-  /** A successful explicit sync clears the incoming badge and the paused state and stamps the sync time. */
+  /**
+   * A successful explicit sync clears the incoming badge, the paused state, and the poll's backoff, and
+   * stamps the sync time. Reaching the remote once is what says it is reachable again, so the failure run
+   * ends here as well as on a successful tick.
+   */
   private resetSyncSignals(): void {
     this.incoming = 0;
-    this.pollFailures = 0;
+    this.failedPolls = 0;
     this.lastSyncedAt = new Date().toISOString();
   }
 
@@ -823,7 +832,9 @@ export class ReviewController {
    * The tick is strictly non-destructive: it never removes anyone's comment, so nothing can vanish under an
    * open composer, and an upstream deletion waits for an explicit Sync or Refresh. It also skips entirely
    * while a submit, refresh, or open is in flight, so the two can never interleave writes. Errors (offline,
-   * rate limit) are counted and swallowed; enough of them in a row surfaces a "sync paused" state.
+   * rate limit) are counted and swallowed; a run of them spaces the ticks further apart and past a threshold
+   * surfaces a "sync paused" state. A tick that never ran leaves that count alone, so being outside PR mode
+   * or losing a race to a mutation neither backs the poll off nor clears a real failure run.
    */
   async pollPullRequest(): Promise<{ orphans?: OrphanReport; headChanged?: boolean; incoming?: number }> {
     const pref = this.state.getPref();
@@ -883,13 +894,24 @@ export class ReviewController {
       failed = true;
     }
 
-    this.pollFailures = failed ? this.pollFailures + 1 : 0;
+    this.failedPolls = nextFailureCount(this.failedPolls, failed);
     if (threadsChanged) this.afterThreadChange();
     if (headChanged || metaChanged || incoming || failed) {
       this._onDidChange.fire();
       this.panelPost?.('stateChanged', this.buildState());
     }
     return { orphans, headChanged, incoming: incoming || undefined };
+  }
+
+  /**
+   * Count a poll tick that failed before it could report its own outcome. The tick swallows the errors from
+   * the two calls it makes, so this is for anything that throws around them, which would otherwise be
+   * counted nowhere and leave the poll hammering an unreachable remote at full rate.
+   */
+  recordPollFailure(): void {
+    this.failedPolls = nextFailureCount(this.failedPolls, true);
+    this._onDidChange.fire();
+    this.panelPost?.('stateChanged', this.buildState());
   }
 
   /** Apply the upstream head change the banner announced: re-fetch the new head, re-diff, re-import. */

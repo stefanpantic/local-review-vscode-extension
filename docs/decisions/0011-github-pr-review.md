@@ -93,6 +93,8 @@ network capability.
 - **Rate limits (PR #89).** The client uses Octokit's throttling plugin. It retries a request once after a
   primary or secondary rate limit, and spaces writes out so a large Submit doesn't burst. The provider reuses
   one client while the token is unchanged, so the plugin keeps its rate-limit state across calls. The
-  Pull Requests list stops at 200 open PRs, most recently updated first. The same PR meant the background
-  poll to back off on repeated failures, but the backoff never starts yet because the poll catches its own
-  errors (bug, #91).
+  Pull Requests list stops at 200 open PRs, most recently updated first. The same PR backs the background poll
+  off on repeated failures: each consecutive failed tick waits twice as long, capped at 10 minutes, and a
+  successful tick or explicit sync returns to the configured interval. The poll swallows its own errors, so
+  the count of them lives with the poll rather than with the code that schedules the next tick. Splitting that
+  count in two is what kept the backoff from ever starting (#91).
