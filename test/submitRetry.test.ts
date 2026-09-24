@@ -34,7 +34,7 @@ class FlakyClient implements GithubWriteClient {
   edits: { commentId: number; body: string }[] = [];
   deletes: number[] = [];
   resolves: { threadId: string; resolved: boolean }[] = [];
-  failOn?: 'edit' | 'delete' | 'resolve' | 'createReview' | 'reply';
+  failOn?: 'edit' | 'delete' | 'resolve' | 'createReview' | 'reply' | 'reaction';
   private nextId = 500;
   async viewer(): Promise<string> {
     return 'me';
@@ -55,16 +55,19 @@ class FlakyClient implements GithubWriteClient {
     if (this.failOn === 'createReview') throw new Error('network died');
     this.reviews.push(input);
     for (const c of input.comments) {
-      this.posted.push({ id: this.nextId++, path: c.path, line: c.line ?? null, side: c.side, body: c.body });
+      const id = this.nextId++;
+      this.posted.push({ id, nodeId: `node-${id}`, path: c.path, line: c.line ?? null, side: c.side, body: c.body });
     }
     return { id: 1 };
   }
   async listReviewComments(): Promise<GhPostedComment[]> {
     return this.posted;
   }
-  async reply(_repo: unknown, _number: number, input: { inReplyTo: number; body: string }): Promise<void> {
+  async reply(_repo: unknown, _number: number, input: { inReplyTo: number; body: string }): Promise<GhPostedComment> {
     if (this.failOn === 'reply') throw new Error('network died');
     this.replies.push(input);
+    const id = this.nextId++;
+    return { id, nodeId: `node-${id}`, path: 'a.ts', line: null, body: input.body };
   }
   async editComment(_repo: unknown, input: { commentId: number; body: string }): Promise<void> {
     if (this.failOn === 'edit') throw new Error('network died');
@@ -78,8 +81,14 @@ class FlakyClient implements GithubWriteClient {
     if (this.failOn === 'resolve') throw new Error('network died');
     this.resolves.push(input);
   }
-  async addReaction(): Promise<void> {}
-  async removeReaction(): Promise<void> {}
+  reactions: { subjectId: string; content: string; add: boolean }[] = [];
+  async addReaction(subjectId: string, content: string): Promise<void> {
+    if (this.failOn === 'reaction') throw new Error('network died');
+    this.reactions.push({ subjectId, content, add: true });
+  }
+  async removeReaction(subjectId: string, content: string): Promise<void> {
+    this.reactions.push({ subjectId, content, add: false });
+  }
   async listPullRequests(): Promise<PullRequestSummary[]> {
     return [];
   }
@@ -320,4 +329,57 @@ test('a summary alone is enough to submit with nothing else staged (#7)', async 
   );
   assert.equal(client.reviews.length, 1, 'a non-empty body makes the bare comment review worth posting');
   assert.equal(client.reviews[0].body, 'just a thought');
+});
+
+test("a draft's reaction is finished by the retry when its own call is the one that failed (#93)", async () => {
+  // The comment posts, then the reaction call dies. The reaction must not be silently lost.
+  const draft: CommentThread = {
+    id: 'draft',
+    anchor,
+    resolved: false,
+    comments: [{ id: 'd1', body: 'new note', createdAt: '', updatedAt: '', author: 'me', reactions: { '👍': ['me'] } }],
+  };
+  const { store, id } = await seed([draft]);
+
+  const client = new FlakyClient();
+  client.failOn = 'reaction';
+  const provider = new GithubReviewProvider('github', async () => client);
+  const first = buildSubmitPlan(current(store, id), 'comment');
+  assert.deepEqual(first.input.newThreads[0].root.reactions, ['THUMBS_UP']);
+  await assert.rejects(() => provider.submitReview(repo, 7, first.input, () => undefined), /network died/);
+  assert.equal(client.reviews.length, 1, 'the comment did post');
+  assert.deepEqual(client.reactions, [], 'its reaction did not');
+
+  // The follow-up reconcile adopts the posted comment. Upstream has no reaction on it, so ours stays staged.
+  const upstream: CommentThread[] = [
+    {
+      id: 'T9',
+      anchor,
+      resolved: false,
+      remoteThreadId: 'T9',
+      remoteRootId: '500',
+      remoteResolved: false,
+      comments: [
+        {
+          id: 'node-500',
+          body: 'new note',
+          createdAt: '',
+          updatedAt: '',
+          author: 'me',
+          remoteId: '500',
+          remoteBody: 'new note',
+        },
+      ],
+    },
+  ];
+  const rec = reconcile(current(store, id).threads, [], upstream, { viewer: 'me' });
+  await store.updateThreads('/r', id, rec.threads);
+
+  // Retry: the comment is linked, so only the reaction is left, now addressable by the comment's node id.
+  client.failOn = undefined;
+  const retry = buildSubmitPlan(current(store, id), 'comment');
+  assert.equal(retry.counts.newComments, 0, 'the comment is linked, not re-posted');
+  assert.equal(retry.counts.reactions, 1, 'the reaction is what remains');
+  await provider.submitReview(repo, 7, retry.input, () => undefined);
+  assert.deepEqual(client.reactions, [{ subjectId: 'node-500', content: 'THUMBS_UP', add: true }]);
 });

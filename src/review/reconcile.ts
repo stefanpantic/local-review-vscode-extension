@@ -111,14 +111,19 @@ function adoptPostedDrafts(
     adopted++;
     // Take the posted root (it carries the remote ids and the imported baselines), keeping the agent's
     // authorship that the post itself could not carry, and keep the local follow-ups after it, where the
-    // normal rebuild picks them up as pending replies.
+    // normal rebuild picks them up as pending replies. A reaction staged on the draft is kept over the
+    // fetched copy too: if it posted with the comment the two agree and nothing stays staged, and if it did
+    // not it is still pending, so the next Submit finishes it instead of dropping it.
     return {
       ...t,
       remoteThreadId: match.remoteThreadId,
       remoteRootId: match.remoteRootId,
       remoteResolved: match.resolved,
       resolved: match.resolved,
-      comments: [keepAgentAuthor(match.comments[0], root), ...t.comments.slice(1)],
+      comments: [
+        { ...keepAgentAuthor(match.comments[0], root), ...mergeReactions(root, match.comments[0]) },
+        ...t.comments.slice(1),
+      ],
     };
   });
   return { threads, adopted };
@@ -246,9 +251,9 @@ export function reconcile(
       );
       if (i >= 0) {
         // Already on the remote: the fetched copy stands and the pending one is retired, so the fetched copy
-        // is where the agent's authorship has to land.
+        // is where the agent's authorship and any reaction staged on the pending copy have to land.
         const [u] = unseen.splice(i, 1);
-        comments[u.at] = keepAgentAuthor(comments[u.at], r);
+        comments[u.at] = { ...keepAgentAuthor(comments[u.at], r), ...mergeReactions(r, u.comment) };
         adopted++;
         continue;
       }

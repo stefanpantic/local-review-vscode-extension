@@ -759,6 +759,7 @@ function summarizeCounts(c: SubmitCounts): string {
   add(c.edits, 'edit', 'edits');
   add(c.deletes, 'deletion', 'deletions');
   add(c.resolves, 'resolution', 'resolutions');
+  add(c.reactions, 'reaction', 'reactions');
   return parts.length ? parts.join(', ') : 'no changes';
 }
 
