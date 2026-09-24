@@ -1,6 +1,6 @@
 # Iteration 18: JSON export
 
-> **Status: built, waiting on the F5 check.** Tracks issue #95.
+> **Status: done.** Shipped in PR #97. Tracks issue #95.
 
 **Export Review** writes Markdown only. Markdown works for pasting into a chat with a coding agent. Scripts and custom agent harnesses have to parse `path:line` headings and `<!-- thread -->` markers to get the structure back, and the Markdown leaves out comment authors, comment ids, the original code behind a suggestion, and reactions. This iteration adds JSON as a second export format.
 
@@ -112,15 +112,15 @@ When no thread matches the scope, `exportReviewJson` returns an empty string, th
 
 ## Acceptance criteria
 
-- [ ] **Export Review** asks for the format first, Markdown or JSON. The scope, file, line-reference, and target steps work the same for both formats. _(Needs the F5 check.)_
-- [ ] A JSON export sent to the editor opens with the `json` language. The save dialog filters on `.json` and suggests `<review name>.json`. _(Needs the F5 check.)_
+- [x] **Export Review** asks for the format first, Markdown or JSON. The scope, file, line-reference, and target steps work the same for both formats.
+- [x] A JSON export sent to the editor opens with the `json` language. The save dialog filters on `.json` and suggests `<review name>.json`.
 - [x] `exportReviewJson` is a pure function. Its output contains `version: 1`, the `review` block with `lineReferences`, and `summary` counts equal to the Markdown header counts. _(One test renders both formats from the same threads and compares the counts.)_
 - [x] Every thread in the output has `id`, `kind`, `file`, `oldPath`, `side`, `startLine`, `endLine`, `status`, `resolved`, `diffHunk`, and `comments`. File-level threads have `null` for `side`, `startLine`, `endLine`, and `diffHunk`. `diffHunk` is `null` when no hunk was captured.
 - [x] Every comment in the output has `id`, `author`, `body`, `createdAt`, `suggestion` with `original` and `replacement`, and `reactions`. PR write-back state and extra suggestion keys stay out of the output.
 - [x] Both formatters filter and sort through `selectThreads` in `src/export/common.ts`. Markdown output changes only in the three cases listed under "Markdown changes".
 - [x] The export order doesn't depend on the host locale. The sidebar order doesn't change.
-- [ ] A current export of a thread whose file was renamed after the comment was made has the new path as `file`, the earlier path as `oldPath`, and lines from the new file. The Markdown heading shows the new path. _(Unit-tested. Needs the F5 check.)_
+- [x] A current export of a thread whose file was renamed after the comment was made has the new path as `file`, the earlier path as `oldPath`, and lines from the new file. The Markdown heading shows the new path. _(Unit-tested.)_
 - [x] `lineReferences` is `"current"` only when the controller re-anchored the threads. _(Checked in code. The controller needs VS Code, so there's no unit test.)_
-- [ ] When no thread matches the scope, both formats show the existing "no comments match that scope" message. _(Both formatters return an empty string in unit tests. The message needs the F5 check.)_
+- [x] When no thread matches the scope, both formats show the existing "no comments match that scope" message. _(Both formatters return an empty string in unit tests.)_
 - [x] ADR-0009 has an addendum for JSON export. `docs/spec.md` has roadmap row 18. `docs/protocol.md` documents the JSON shape. `README.md` mentions JSON export.
 - [x] `test/exportJson.test.ts` covers the formatter. A test fails under each mutation the review listed. The gates pass: `format:check`, `lint`, `typecheck`, `test`, `build`, `package`.
