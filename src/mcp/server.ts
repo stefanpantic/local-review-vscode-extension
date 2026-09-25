@@ -43,7 +43,14 @@ function buildServer(ws: McpWorkspaceApi, version: string): McpServer {
 /** Start the MCP server on 127.0.0.1 (ephemeral port when `port` is 0), one MCP session per client. */
 export async function startMcpServer(
   ws: McpWorkspaceApi,
-  opts: { port: number; version: string; token: string },
+  opts: {
+    port: number;
+    version: string;
+    token: string;
+    // A client reached the server with a missing or wrong token, most often a registration made for another
+    // window or before the token changed.
+    onUnauthorized?: () => void;
+  },
 ): Promise<McpServerHandle> {
   const token = opts.token;
   const transports = new Map<string, StreamableHTTPServerTransport>();
@@ -58,6 +65,7 @@ export async function startMcpServer(
   async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     if (req.headers['authorization'] !== `Bearer ${token}`) {
       res.writeHead(401).end('Unauthorized');
+      opts.onUnauthorized?.();
       return;
     }
     const sessionId = req.headers['mcp-session-id'] as string | undefined;

@@ -11,6 +11,7 @@ import { ReviewPanel } from './webview/ReviewPanel';
 import { hasRelevantChange, listBranches } from './git/git';
 import { watchRepoChanges } from './git/watch';
 import { startMcpServer, type McpServerHandle } from './mcp/server';
+import { claudeRegisterCommand } from './mcp/connect';
 import { exportReviewMarkdown } from './export/exportMarkdown';
 import { exportReviewJson } from './export/exportJson';
 import type { ExportMeta, ExportOpts } from './export/common';
@@ -105,6 +106,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
     return t;
   };
+  // A refused client usually holds a registration for another window's server, or one made before this
+  // window's server moved. Say so once per server start, with the command that registers this server.
+  let unauthorizedNoticeShown = false;
+  const noticeUnauthorized = async (): Promise<void> => {
+    if (unauthorizedNoticeShown || !mcpHandle) return;
+    unauthorizedNoticeShown = true;
+    const { url, token } = mcpHandle;
+    const choice = await vscode.window.showWarningMessage(
+      'ReviewMate: an MCP client was refused because it is registered with a different token. Register it again for this window, then reconnect it (in Claude Code, run /mcp).',
+      'Copy Claude Code command',
+      'Open mcp.json',
+    );
+    if (choice === 'Copy Claude Code command') {
+      await vscode.env.clipboard.writeText(claudeRegisterCommand(url, token, claudeFolder()));
+    } else if (choice === 'Open mcp.json') {
+      const jsonUri = await writeMcpArtifacts(context, url, token);
+      if (jsonUri) await vscode.window.showTextDocument(jsonUri);
+    }
+  };
   // Make the running server match `mcpDesired`: tear down, then (re)start if wanted (also applies a port change).
   const syncMcp = (): Promise<void> => {
     mcpOp = mcpOp.then(async () => {
@@ -114,7 +134,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       if (!mcpDesired) return;
       const cfg = vscode.workspace.getConfiguration('agenticReview');
-      const opts = { version: context.extension.packageJSON.version as string, token: mcpToken() };
+      unauthorizedNoticeShown = false;
+      const opts = {
+        version: context.extension.packageJSON.version as string,
+        token: mcpToken(),
+        onUnauthorized: () => void noticeUnauthorized(),
+      };
       const cfgPort = cfg.get<number>('mcp.port', 0);
       // A fixed port wins; otherwise take this workspace's stable slot from the cross-window registry.
       const wantPort = cfgPort > 0 ? cfgPort : assignedPort(context);
@@ -160,7 +185,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       'ReviewMate MCP server is running.',
       {
         modal: true,
-        detail: `URL: ${url}\n\nConnect your MCP client using the mcp.json this opens (or the "Open MCP Config" command anytime). It has the URL, token, and ready-to-run connect commands for Claude Code and other clients.`,
+        detail: `URL: ${url}\n\nConnect your MCP client using the mcp.json this opens (or the "Open MCP Config" command anytime). It has the URL, token, and ready-to-run connect commands for Claude Code and other clients. After registering, reconnect the client: in Claude Code, run /mcp or start a new session.${claudeFolder() ? `\n\nThe Claude Code command registers the server in ${claudeFolder()}, the first folder in this window, where Claude Code starts.` : ''}`,
       },
       'Open mcp.json',
       'Copy URL',
@@ -179,7 +204,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (!mcpHandle) return;
     const jsonUri = await writeMcpArtifacts(context, mcpHandle.url, mcpHandle.token);
     const choice = await vscode.window.showInformationMessage(
-      `ReviewMate MCP server is running at ${mcpHandle.url}.`,
+      `ReviewMate MCP server is running at ${mcpHandle.url}. If your client was registered for another window, register it again from mcp.json and reconnect it.`,
       'Open mcp.json',
     );
     if (choice === 'Open mcp.json' && jsonUri) await vscode.window.showTextDocument(jsonUri);
@@ -400,12 +425,17 @@ async function writeMcpArtifacts(
   if (!dir) return undefined; // no workspace storage (no folder open)
   await fs.mkdir(dir.fsPath, { recursive: true });
 
+  const folder = claudeFolder();
+  const where = folder
+    ? `It registers the server in ${folder}, the first folder in this window. Claude Code in this window starts
+// there, and a local-scope server belongs to the folder it was added from. If you reorder the folders, run it again.`
+    : 'Run it in the folder you start Claude Code in.';
   const content = `// ReviewMate MCP server. A standard, local (127.0.0.1), token-guarded MCP server over Streamable HTTP.
 // Connect any MCP client with the url + token below. Ready-to-use options:
 //
-// Claude Code (CLI). The first remove clears the old name this server used to register under, so an
-// upgrade does not leave two entries pointing at the same port:
-//   claude mcp remove agentic-review 2>/dev/null; claude mcp remove reviewmate 2>/dev/null; claude mcp add --transport http reviewmate ${url} --header "Authorization: Bearer ${token}"
+// Claude Code (CLI). ${where}
+// The removes clear any earlier registration of this server, so only one entry is left:
+//   ${claudeRegisterCommand(url, token, folder)}
 //
 // mcpServers config for Claude Desktop, Cursor, Windsurf, VS Code, and other clients. Add under "mcpServers"
 // (and drop any earlier "agentic-review" entry):
@@ -421,6 +451,14 @@ ${JSON.stringify({ url, token, transport: 'http' }, null, 2)}
   const jsonUri = vscode.Uri.joinPath(dir, 'mcp.json');
   await fs.writeFile(jsonUri.fsPath, content, 'utf8');
   return jsonUri;
+}
+
+/**
+ * The folder Claude Code starts in for this window: the first workspace folder. Claude Code keeps a local-scope
+ * server under that folder, so that is where the connect command registers this window's server.
+ */
+function claudeFolder(): string | undefined {
+  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
 
 // MCP ports come from a registry in globalState (shared across every window), so each workspace keeps a
