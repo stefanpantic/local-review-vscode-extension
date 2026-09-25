@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.8.1...agentic-review-v0.9.0) (2026-09-24)
+
+
+### Features
+
+* export a review as JSON ([#97](https://github.com/stefanpantic/local-review-vscode-extension/issues/97)) ([1792a00](https://github.com/stefanpantic/local-review-vscode-extension/commit/1792a00498c7899fe8a197f6edd507cc2a09bdc1))
+
+
+### Bug Fixes
+
+* add GitHub API rate-limit handling ([#89](https://github.com/stefanpantic/local-review-vscode-extension/issues/89)) ([bba3c1f](https://github.com/stefanpantic/local-review-vscode-extension/commit/bba3c1fa321d30b766a5ffbf2d7e67b72885f28c))
+* back off the pull request poll after failed GitHub calls ([#98](https://github.com/stefanpantic/local-review-vscode-extension/issues/98)) ([2aed9db](https://github.com/stefanpantic/local-review-vscode-extension/commit/2aed9dbed357e891aa742e324e62f1817e450e1b))
+* post a reaction staged on a comment that is not on GitHub yet ([#99](https://github.com/stefanpantic/local-review-vscode-extension/issues/99)) ([f106833](https://github.com/stefanpantic/local-review-vscode-extension/commit/f1068332fa382382a46ad5ce4a2861029550209c))
+
 ## [0.8.1](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.8.0...agentic-review-v0.8.1) (2026-09-04)
 
 
