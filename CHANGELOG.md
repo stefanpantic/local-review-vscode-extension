@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.10.0...agentic-review-v0.10.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* register the MCP server where Claude Code starts, and flag refused clients ([#103](https://github.com/stefanpantic/local-review-vscode-extension/issues/103)) ([a4473a1](https://github.com/stefanpantic/local-review-vscode-extension/commit/a4473a17c236729f2bcf60d811fa3223599251c8))
+
 ## [0.10.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.9.0...agentic-review-v0.10.0) (2026-09-25)
 
 
