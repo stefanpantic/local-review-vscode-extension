@@ -274,6 +274,13 @@ test('get_review returns the current review, or errors when none', async () => {
   await assert.rejects(() => tool('get_review').handler(new FakeApi(DIFF, []), {}), /Review not found/);
 });
 
+test('a thread on a renamed file shows the path it re-anchored to', async () => {
+  const thread = { ...makeThread('old.ts', 'new', 2, 'hi', 'tester'), resolvedPath: 'a.ts' };
+  const out = await tool('get_active_review').handler(new FakeApi(DIFF, [reviewWith(thread)]), {});
+  assert.match(out, /\[thread1\] a\.ts:2 \(new\)/);
+  assert.doesNotMatch(out, /old\.ts/);
+});
+
 test('a formatted thread carries every comment id, so a comment can be addressed', async () => {
   const review = reviewWith(makeThread('a.ts', 'new', 2, 'hi', 'tester'));
   const out = await tool('get_review').handler(new FakeApi(DIFF, [review]), {});
