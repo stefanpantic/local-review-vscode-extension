@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.9.0...agentic-review-v0.10.0) (2026-09-25)
+
+
+### Features
+
+* review multi-root workspaces with a section and session per repository ([#101](https://github.com/stefanpantic/local-review-vscode-extension/issues/101)) ([31746bc](https://github.com/stefanpantic/local-review-vscode-extension/commit/31746bce8e1fb78f24ef0ae6134a6a942dc70aae))
+
 ## [0.9.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.8.1...agentic-review-v0.9.0) (2026-09-24)
 
 
