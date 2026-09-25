@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import type { ReviewController } from '../reviewController';
+import type { RepoSession } from '../repoSession';
+import type { WorkspaceReviews } from '../workspaceReviews';
 import type { ReviewState } from '../reviewState';
 import type { CommentThread } from '../model/Comment';
 import { AGENT_AUTHOR } from '../model/Comment';
@@ -21,10 +22,17 @@ import {
 } from '../review/commentGroups';
 
 type CommentsNode =
-  | { kind: 'group'; mode: CommentGroupBy; key: string; label: string; threads: CommentThread[] }
-  | { kind: 'thread'; thread: CommentThread }
-  | { kind: 'info'; label: string; icon: string; command?: string }
-  | { kind: 'loading' };
+  | { kind: 'repo'; repoRoot: string; total: number; shown: number }
+  | { kind: 'group'; repoRoot: string; mode: CommentGroupBy; key: string; label: string; threads: CommentThread[] }
+  | { kind: 'thread'; repoRoot: string; thread: CommentThread }
+  | { kind: 'info'; repoRoot: string; label: string; icon: string; command?: string }
+  | { kind: 'loading'; repoRoot: string };
+
+/** One repository's threads and who `@me` means there, for the filter box's rows and counts. */
+export interface ThreadSet {
+  threads: CommentThread[];
+  viewer: string;
+}
 
 const GROUP_LABELS: Record<CommentGroupBy, string> = {
   file: 'By file',
@@ -57,11 +65,12 @@ function lineLabel(t: CommentThread): string {
 }
 
 /**
- * Sidebar "Current Review" panel: every thread in the active review, re-anchored. Clicking a thread reveals
- * its file in the panel. Refreshes with the controller (mutations + diff loads).
+ * Sidebar "Current Review" panel: every thread in the active review, re-anchored. With several repositories,
+ * each repository that has comments gets a section. Clicking a thread reveals its file in that repository's
+ * panel. Refreshes with the sessions (mutations + diff loads).
  *
- * The filter and the arrangement narrow and reorder the threads the controller already holds, so changing
- * either is a repaint and never a re-anchor or a fetch.
+ * The filter and the arrangement apply to every section alike. They narrow and reorder the threads the
+ * sessions already hold, so changing either is a repaint and never a re-anchor or a fetch.
  */
 export class CommentsView implements vscode.TreeDataProvider<CommentsNode> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
@@ -69,10 +78,10 @@ export class CommentsView implements vscode.TreeDataProvider<CommentsNode> {
   private view?: vscode.TreeView<CommentsNode>;
 
   constructor(
-    private readonly controller: ReviewController,
+    private readonly workspace: WorkspaceReviews,
     private readonly state: ReviewState,
   ) {
-    controller.onDidChange(() => this._onDidChangeTreeData.fire());
+    workspace.onDidChange(() => this._onDidChangeTreeData.fire());
     void this.publishFilterActive();
   }
 
@@ -82,31 +91,26 @@ export class CommentsView implements vscode.TreeDataProvider<CommentsNode> {
   }
 
   filter(): CommentFilter {
-    return parseCommentFilter(this.state.getPref().commentFilter ?? '');
+    return parseCommentFilter(this.state.view().commentFilter ?? '');
   }
 
   groupBy(): CommentGroupBy {
-    return this.state.getPref().commentGroup ?? DEFAULT_GROUP_BY;
+    return this.state.view().commentGroup ?? DEFAULT_GROUP_BY;
   }
 
   sortBy(): CommentSortBy {
-    return this.state.getPref().commentSort ?? DEFAULT_SORT_BY;
+    return this.state.view().commentSort ?? DEFAULT_SORT_BY;
   }
 
-  /** The threads the picker builds its author rows and live match counts from. */
-  threads(): CommentThread[] {
-    return this.controller.activeThreads();
-  }
-
-  /** What `@me` resolves to: the same identity your own comments are attributed to. */
-  viewer(): string {
-    return this.controller.authorIdentity();
+  /** Every repository's threads, for the picker's author rows and live match counts. */
+  threadSets(): ThreadSet[] {
+    return this.workspace.list().map((s) => ({ threads: s.activeThreads(), viewer: s.authorIdentity() }));
   }
 
   /** Persist a filter and repaint. Nothing is refetched. */
   async setFilter(tokens: string): Promise<void> {
     // Store the canonical form, so what is persisted round-trips and the header label is predictable.
-    await this.state.setPref({ commentFilter: formatCommentFilter(parseCommentFilter(tokens)) });
+    await this.state.setView({ commentFilter: formatCommentFilter(parseCommentFilter(tokens)) });
     await this.publishFilterActive();
     this._onDidChangeTreeData.fire();
   }
@@ -114,7 +118,7 @@ export class CommentsView implements vscode.TreeDataProvider<CommentsNode> {
   /** Change the grouping, the ordering, or both. Only the named keys are written, so setting one of them
    * cannot reset the other: a stored pref merge treats a key held as `undefined` as a value to overwrite. */
   async setArrangement(patch: { groupBy?: CommentGroupBy; sortBy?: CommentSortBy }): Promise<void> {
-    await this.state.setPref({
+    await this.state.setView({
       ...(patch.groupBy !== undefined ? { commentGroup: patch.groupBy } : {}),
       ...(patch.sortBy !== undefined ? { commentSort: patch.sortBy } : {}),
     });
@@ -122,31 +126,82 @@ export class CommentsView implements vscode.TreeDataProvider<CommentsNode> {
   }
 
   getChildren(node?: CommentsNode): CommentsNode[] {
-    if (node) return node.kind === 'group' ? node.threads.map((thread) => ({ kind: 'thread', thread })) : [];
-    const threads = this.controller.activeThreads();
+    const filter = this.filter();
+    if (!node) {
+      const sole = this.workspace.sole();
+      if (sole) {
+        const threads = sole.activeThreads();
+        this.updateHeader(filter, threads.length, applyCommentFilter(threads, filter, sole.authorIdentity()).length);
+        return this.section(sole, threads, filter);
+      }
+      // Only repositories with comments get a section. With none anywhere, the welcome content shows.
+      const repos: CommentsNode[] = [];
+      let total = 0;
+      let shown = 0;
+      for (const s of this.workspace.list()) {
+        const threads = s.activeThreads();
+        if (!threads.length) continue;
+        const n = applyCommentFilter(threads, filter, s.authorIdentity()).length;
+        total += threads.length;
+        shown += n;
+        repos.push({ kind: 'repo', repoRoot: s.repoRoot, total: threads.length, shown: n });
+      }
+      this.updateHeader(filter, total, shown);
+      return repos;
+    }
+    if (node.kind === 'repo') {
+      const session = this.workspace.session(node.repoRoot);
+      return session ? this.section(session, session.activeThreads(), filter) : [];
+    }
+    if (node.kind === 'group') {
+      return node.threads.map((thread) => ({ kind: 'thread', repoRoot: node.repoRoot, thread }));
+    }
+    return [];
+  }
+
+  /** One repository's threads, filtered and arranged. */
+  private section(session: RepoSession, threads: CommentThread[], filter: CommentFilter): CommentsNode[] {
+    const repoRoot = session.repoRoot;
     // While a PR's diff is still painting, show one honest placeholder rather than comments that can't yet
     // be revealed on it. This runs before any filtering, so the placeholder is never narrowed away.
-    if (threads.length > 0 && !this.controller.commentsReady()) return [{ kind: 'loading' }];
-    const filter = this.filter();
-    const shown = applyCommentFilter(threads, filter, this.viewer());
-    this.updateHeader(filter, threads.length, shown.length);
+    if (threads.length > 0 && !session.commentsReady()) return [{ kind: 'loading', repoRoot }];
+    const shown = applyCommentFilter(threads, filter, session.authorIdentity());
     // A filtered list that comes back empty has to say so; returning nothing would hand the view over to the
     // "no comments yet" welcome, which would be a lie about the review.
     if (threads.length > 0 && shown.length === 0) {
       return [
-        { kind: 'info', label: emptyReason(filter), icon: 'filter', command: 'agenticReview.clearCommentFilter' },
+        {
+          kind: 'info',
+          repoRoot,
+          label: emptyReason(filter),
+          icon: 'filter',
+          command: 'agenticReview.clearCommentFilter',
+        },
       ];
     }
     const mode = this.groupBy();
     const groups = arrangeComments(shown, { groupBy: mode, sortBy: this.sortBy() });
-    if (mode === 'none') return (groups[0]?.threads ?? []).map((thread) => ({ kind: 'thread', thread }));
-    return groups.map((g) => ({ kind: 'group', mode, key: g.key, label: g.label, threads: g.threads }));
+    if (mode === 'none') return (groups[0]?.threads ?? []).map((thread) => ({ kind: 'thread', repoRoot, thread }));
+    return groups.map((g) => ({ kind: 'group', repoRoot, mode, key: g.key, label: g.label, threads: g.threads }));
   }
 
   getTreeItem(node: CommentsNode): vscode.TreeItem {
+    if (node.kind === 'repo') {
+      const session = this.workspace.session(node.repoRoot);
+      const item = new vscode.TreeItem(session?.repoName() ?? '', vscode.TreeItemCollapsibleState.Expanded);
+      item.id = `crepo:${node.repoRoot}`;
+      item.iconPath = new vscode.ThemeIcon('repo');
+      item.description =
+        node.shown === node.total
+          ? `${node.total} comment${node.total === 1 ? '' : 's'}`
+          : `${node.shown} of ${node.total}`;
+      item.tooltip = node.repoRoot;
+      item.contextValue = 'agenticReview.repo';
+      return item;
+    }
     if (node.kind === 'loading') {
       const item = new vscode.TreeItem('Loading comments…');
-      item.id = 'comments-loading';
+      item.id = `comments-loading:${node.repoRoot}`;
       item.iconPath = new vscode.ThemeIcon('loading~spin');
       return item;
     }
@@ -159,7 +214,7 @@ export class CommentsView implements vscode.TreeDataProvider<CommentsNode> {
     if (node.kind === 'group') {
       const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.Expanded);
       // The mode is part of the id so expansion state doesn't carry over when the grouping changes.
-      item.id = `cgroup:${node.mode}:${node.key}`;
+      item.id = `cgroup:${node.repoRoot}:${node.mode}:${node.key}`;
       item.description = String(node.threads.length);
       item.tooltip = node.label;
       item.iconPath =
@@ -170,7 +225,7 @@ export class CommentsView implements vscode.TreeDataProvider<CommentsNode> {
     }
     const t = node.thread;
     const item = new vscode.TreeItem(preview(t));
-    item.id = `cthread:${t.id}`;
+    item.id = `cthread:${node.repoRoot}:${t.id}`;
     // Range-aware label; status is conveyed by the icon, so it's kept out of the description.
     const label = lineLabel(t);
     const replies = t.comments.length - 1;
@@ -180,7 +235,11 @@ export class CommentsView implements vscode.TreeDataProvider<CommentsNode> {
       `**${label}**${tag ? ` · _${tag}_` : ''}\n\n${t.comments.map((c) => c.body).join('\n\n---\n\n')}`,
     );
     item.iconPath = new vscode.ThemeIcon(t.resolved ? 'check' : t.status === 'outdated' ? 'warning' : 'comment');
-    item.command = { command: 'agenticReview.revealFile', title: 'Reveal', arguments: [t.anchor.filePath, t.id] };
+    item.command = {
+      command: 'agenticReview.revealFile',
+      title: 'Reveal',
+      arguments: [t.anchor.filePath, t.id, node.repoRoot],
+    };
     return item;
   }
 

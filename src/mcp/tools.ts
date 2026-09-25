@@ -28,7 +28,7 @@ export interface PrContext {
   total: number; // how many commits there are, which may exceed `commits.length`
 }
 
-/** The narrow host surface the MCP tools need. Implemented by `ReviewController`; faked in tests. */
+/** The narrow host surface the MCP tools need. Implemented by each repository's session; faked in tests. */
 export interface McpReviewApi {
   /** The current normalized diff, or undefined when no repo/changes are loaded. */
   getDiff(): ReviewDiff | undefined;
@@ -65,6 +65,22 @@ export interface McpReviewApi {
     emoji: ReactionEmoji;
     author: string;
   }): Promise<CommentThread>;
+}
+
+/** A repository the agent can address, as `list_repos` reports it. */
+export interface RepoListing {
+  name: string;
+  repoRoot: string;
+  source: string; // the diff source label, e.g. "Uncommitted changes" or "Pull request #12"
+  isDefault: boolean; // what a tool call without `repo` would act on
+}
+
+/** The workspace around the per-repository surfaces: which repositories there are, and how to reach one. */
+export interface McpWorkspaceApi {
+  /** The repository a call targets: the named one, else the default. Throws, listing the choices, when neither applies. */
+  target(repo?: string): { api: McpReviewApi; name: string };
+  listRepos(): RepoListing[];
+  multiRepo(): boolean;
 }
 
 // --- readable formatting (text, not JSON — compact and easy for the agent + human to read) ---
@@ -225,6 +241,7 @@ export interface ToolDef {
   title: string;
   description: string;
   inputShape: z.ZodRawShape;
+  writes?: true; // changes the review, so with several repositories the call must name one
   handler: (api: McpReviewApi, args: Record<string, unknown>) => Promise<string>;
 }
 
@@ -273,6 +290,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'post_comment',
+    writes: true,
     title: 'Post comment',
     description:
       'Add a review comment on a line, range, or file. For a line comment: side="new" for added/context lines, "old" for removed lines; the line must exist in the current diff (see get_diff). For a file-level comment (attached to the file, not a line): omit startLine and side. Optionally include a `suggestion` (replacement code for the range; not available on file-level comments).',
@@ -320,6 +338,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'reply',
+    writes: true,
     title: 'Reply to a thread',
     description: 'Add a reply to an existing comment thread (by its id).',
     inputShape: { threadId: z.string(), body: z.string() },
@@ -334,6 +353,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'resolve',
+    writes: true,
     title: 'Resolve or reopen a thread',
     description: 'Mark a comment thread resolved, or reopen it with resolved=false.',
     inputShape: { threadId: z.string(), resolved: z.boolean() },
@@ -344,6 +364,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'edit_comment',
+    writes: true,
     title: 'Edit a comment',
     description:
       'Rewrite a comment in the review (get_active_review lists comment ids). On a pull request you can edit your own comments and the reviewer\'s, never a third party\'s. `suggestion` replaces the proposed code, `null` removes the suggestion, and omitting it leaves the current one alone; a suggestion only applies to a thread on the "new" side.',
@@ -368,6 +389,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'delete_comment',
+    writes: true,
     title: 'Delete a comment',
     description:
       "Remove a comment from the review (get_active_review lists comment ids). On a pull request you can delete your own comments and the reviewer's, never a third party's. Deleting a thread's first comment removes the whole thread. A comment already posted on a pull request is deleted there when the review is submitted.",
@@ -384,6 +406,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'react',
+    writes: true,
     title: 'React to a comment',
     description:
       'Toggle a reaction on a comment (add if not present, remove if already reacted). Any comment in the review can be reacted to.',
@@ -407,3 +430,51 @@ export const TOOLS: ToolDef[] = [
     },
   },
 ];
+
+const REPO_ARG = z
+  .string()
+  .optional()
+  .describe(
+    'Repository name or path, from list_repos. Defaults to the only repository. With several repositories, required for tools that change the review; reads default to the review panel the reviewer focused last.',
+  );
+
+/** A repository-scoped tool's input: its own fields plus the optional `repo` every one of them accepts. */
+export function toolShape(tool: ToolDef): z.ZodRawShape {
+  return { ...tool.inputShape, repo: REPO_ARG };
+}
+
+/**
+ * Run a repository-scoped tool against the repository the call names, or the default one. With several
+ * repositories a tool that changes the review must name its repository: the default follows the reviewer's
+ * focus, which can move between reading a diff and commenting on it, and would put the comment on another
+ * repository. Reads keep the default. With several repositories the answer starts by naming the repository it
+ * came from, so the agent can tell which one answered.
+ */
+export async function runTool(ws: McpWorkspaceApi, tool: ToolDef, args: Record<string, unknown>): Promise<string> {
+  const repo = (args.repo as string | undefined)?.trim() || undefined;
+  if (tool.writes && !repo && ws.multiRepo()) {
+    throw new Error(
+      `This workspace has several repositories, so ${tool.name} needs \`repo\`. Call list_repos for the names.`,
+    );
+  }
+  const { api, name } = ws.target(repo);
+  const text = await tool.handler(api, args);
+  return ws.multiRepo() ? `Repository: ${name}\n\n${text}` : text;
+}
+
+/** The workspace-level tool: which repositories a call can target, and which one it defaults to. */
+export const LIST_REPOS = {
+  name: 'list_repos',
+  title: 'List repositories',
+  description:
+    'List the git repositories open in the workspace, with the diff each shows. Pass a name or path as `repo` to any other tool to target one; without it tools act on the one marked as the default.',
+  handler: (ws: McpWorkspaceApi): string => formatRepos(ws.listRepos()),
+};
+
+export function formatRepos(repos: RepoListing[]): string {
+  if (repos.length === 0) return 'No git repository is open in this workspace.';
+  const hasDefault = repos.some((r) => r.isDefault);
+  const lines = repos.map((r) => `${r.isDefault ? '*' : ' '} ${r.name} (${r.repoRoot}) · ${r.source}`);
+  if (!hasDefault) lines.push('', 'No default: pass `repo` to choose one.');
+  return lines.join('\n');
+}

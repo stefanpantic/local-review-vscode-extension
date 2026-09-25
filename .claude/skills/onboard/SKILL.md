@@ -29,14 +29,15 @@ It can also write your PR review back to GitHub on one explicit Submit.
 
 Two sides talk over a small typed message bridge (`src/protocol/messages.ts`, imported by both bundles).
 
-- Host (Node, the extension). Owns all durable state. Entry point `src/extension.ts`. The coordination hub is `src/reviewController.ts`. Both the sidebar trees and the editor panel read and mutate through it.
+- Host (Node, the extension). Owns all durable state. Entry point `src/extension.ts`. There is one `RepoSession` per git repository in the workspace (`src/repoSession.ts`), held by `WorkspaceReviews` (`src/workspaceReviews.ts`). The sidebar trees and each repository's editor panel read and mutate through its session. There is no selected repository: views have a section per repository, and commands resolve theirs from the item, the focused panel, or the active editor.
 - Webview (React, `webview-ui/`). A view. It holds only ephemeral UI state and renders what the host sends. Entry `webview-ui/main.tsx`, diff rendering under `webview-ui/render/`.
 
-Data flow: the git module produces a normalized `ReviewDiff`. The controller builds a state payload and pushes it. The webview renders it and sends mutations back (add comment, resolve, submit). The host stays the single source of truth in `workspaceState`.
+Data flow: the git module produces a normalized `ReviewDiff`. The repository's session builds a state payload and pushes it to its panel. The webview renders it and sends mutations back (add comment, resolve, submit). The host stays the single source of truth in `workspaceState`.
 
 ## Key files
 
-- `src/reviewController.ts`. The hub. Diff refresh, comment mutations, PR open/submit/poll, and the state payload.
+- `src/repoSession.ts`. One repository's hub. Diff refresh, comment mutations, PR open/submit/poll, and the state payload. `src/prPoller.ts` is its PR poll.
+- `src/workspaceReviews.ts`. The sessions for every repository: discovery, command repository resolution, path routing, context keys, and the MCP surface.
 - `src/comments/ReviewStore.ts`. Durable reviews in `workspaceState`, keyed by `(repoRoot, branch)`.
 - `src/comments/anchoring.ts`. Content-match anchoring. A comment follows its line or goes outdated.
 - `src/model/Comment.ts`, `src/model/ReviewDiff.ts`. The core types.
@@ -74,7 +75,7 @@ One iteration at a time. The rhythm is refine, implement, verify.
 
 ## MCP
 
-A local MCP server lets a coding agent join a review. Set it up with the "ReviewMate: Set up MCP" command. It binds to `127.0.0.1` and is token-guarded. Tools: `get_diff`, `get_review`, `get_active_review`, `list_reviews`, `post_comment`, `reply`, `resolve`, `edit_comment`, `delete_comment`, `react`. Edit and delete follow the same `canEditComment` rule the human UI enforces, measured against the human's identity. On a PR an agent can touch its own comments and the human's, never a third party's. `react` works on any comment. It never writes your files and has no GitHub or network capability. Agent comments are attributed to "AI Agent" and anchor like a human's.
+A local MCP server lets a coding agent join a review. Set it up with the "ReviewMate: Set up MCP" command. It binds to `127.0.0.1` and is token-guarded. Tools: `list_repos`, `get_diff`, `get_review`, `get_active_review`, `list_reviews`, `post_comment`, `reply`, `resolve`, `edit_comment`, `delete_comment`, `react`. Every tool except `list_repos` takes an optional `repo`. Reads default to the only repository or the review panel focused last. With several repositories, a tool that changes the review requires `repo`. Edit and delete follow the same `canEditComment` rule the human UI enforces, measured against the human's identity. On a PR an agent can touch its own comments and the human's, never a third party's. `react` works on any comment. The MCP server never writes your files and has no GitHub or network capability. Agent comments are attributed to "AI Agent" and anchor like a human's.
 
 ## Invariants to respect
 

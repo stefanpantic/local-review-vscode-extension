@@ -1,49 +1,79 @@
 import * as vscode from 'vscode';
-import type { DiffSource, PrRef, ViewMode } from './model/ReviewDiff';
-import type { CommentGroupBy, CommentSortBy } from './review/commentGroups';
+import type { DiffSource, ViewMode } from './model/ReviewDiff';
+import {
+  planPrefMigration,
+  repoPrefFrom,
+  viewPrefsFrom,
+  type LegacyPref,
+  type PrefDefaults,
+  type RepoPref,
+  type ViewPrefs,
+} from './review/prefs';
 
-export interface Pref {
-  repoRoot?: string;
-  source: DiffSource;
-  baseRef?: string;
-  viewMode: ViewMode;
-  whitespace: boolean; // true = hide whitespace (git diff -w)
-  wrap: boolean; // true = wrap long lines instead of scrolling horizontally
-  pr?: PrRef; // the pull request under review; present (and restored on reload) when source === 'pr'
-  prFilter?: string; // filter tokens narrowing the Pull Requests list; stored as text and re-parsed on read
-  commentFilter?: string; // filter tokens narrowing the Current Review list; stored as text, re-parsed on read
-  commentGroup?: CommentGroupBy; // how the Current Review list is grouped
-  commentSort?: CommentSortBy; // how the Current Review list is ordered
-}
-
-const PREF_KEY = 'agenticReview.pref';
+const LEGACY_PREF_KEY = 'agenticReview.pref';
+const VIEW_PREFS_KEY = 'agenticReview.viewPrefs';
+const REPO_PREFS_KEY = 'agenticReview.repoPrefs';
 const VIEWED_KEY = 'agenticReview.viewed';
 // NUL joins the key parts: it's the one character that can't appear in a file path, so parts never collide.
 const SEP = String.fromCharCode(0);
 
 /**
- * Host-owned, persisted review state (docs/decisions/0004-state-ownership.md).
- * Prefs (repo/source/baseRef) and the per-file "viewed" flags live in workspaceState.
+ * Host-owned, persisted review state in workspaceState. View prefs are one set for the workspace. The store
+ * keeps diff prefs (source, base ref, open PR) per repository and restores each repository to the diff it last
+ * showed. The store also keys the per-file "viewed" flags by repository.
  */
 export class ReviewState {
   constructor(private readonly ctx: vscode.ExtensionContext) {}
 
-  getPref(): Pref {
+  /**
+   * Split the single pref object older versions stored into view prefs and per-repository diff prefs. Runs
+   * once: the migration writes the new keys, then clears the old key, and leaves existing new keys unchanged.
+   */
+  async migrate(): Promise<void> {
+    const plan = planPrefMigration({
+      legacy: this.ctx.workspaceState.get<LegacyPref>(LEGACY_PREF_KEY),
+      view: this.ctx.workspaceState.get<Partial<ViewPrefs>>(VIEW_PREFS_KEY),
+      repos: this.ctx.workspaceState.get<Record<string, Partial<RepoPref>>>(REPO_PREFS_KEY),
+    });
+    if (!plan) return;
+    if (plan.view) await this.ctx.workspaceState.update(VIEW_PREFS_KEY, plan.view);
+    if (plan.repos) await this.ctx.workspaceState.update(REPO_PREFS_KEY, plan.repos);
+    await this.ctx.workspaceState.update(LEGACY_PREF_KEY, undefined);
+  }
+
+  private defaults(): PrefDefaults {
     const cfg = vscode.workspace.getConfiguration('agenticReview');
-    const defaults: Pref = {
+    return {
       source: cfg.get<DiffSource>('defaultSource', 'worktree-vs-head'),
       viewMode: cfg.get<ViewMode>('defaultViewMode', 'unified'),
       whitespace: cfg.get<boolean>('defaultHideWhitespace', false),
       wrap: cfg.get<boolean>('defaultWrap', false),
     };
-    const stored = this.ctx.workspaceState.get<Partial<Pref>>(PREF_KEY);
-    return { ...defaults, ...stored };
   }
 
-  async setPref(patch: Partial<Pref>): Promise<Pref> {
-    const next = { ...this.getPref(), ...patch };
-    await this.ctx.workspaceState.update(PREF_KEY, next);
-    return next;
+  private storedRepoPrefs(): Record<string, Partial<RepoPref>> {
+    return this.ctx.workspaceState.get<Record<string, Partial<RepoPref>>>(REPO_PREFS_KEY) ?? {};
+  }
+
+  view(): ViewPrefs {
+    return viewPrefsFrom(this.ctx.workspaceState.get<Partial<ViewPrefs>>(VIEW_PREFS_KEY), this.defaults());
+  }
+
+  async setView(patch: Partial<ViewPrefs>): Promise<ViewPrefs> {
+    const stored = this.ctx.workspaceState.get<Partial<ViewPrefs>>(VIEW_PREFS_KEY) ?? {};
+    await this.ctx.workspaceState.update(VIEW_PREFS_KEY, { ...stored, ...patch });
+    return this.view();
+  }
+
+  /** A repository's diff prefs. The store keeps them after the folder leaves the workspace, so re-adding the folder restores them. */
+  repo(repoRoot: string): RepoPref {
+    return repoPrefFrom(this.storedRepoPrefs()[repoRoot], this.defaults());
+  }
+
+  async setRepo(repoRoot: string, patch: Partial<RepoPref>): Promise<RepoPref> {
+    const all = this.storedRepoPrefs();
+    await this.ctx.workspaceState.update(REPO_PREFS_KEY, { ...all, [repoRoot]: { ...all[repoRoot], ...patch } });
+    return this.repo(repoRoot);
   }
 
   private viewedMap(): Record<string, boolean> {

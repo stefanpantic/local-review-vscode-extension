@@ -473,7 +473,7 @@ export function DiffView({
           diff={d}
           source={state.source}
           baseRef={state.baseRef}
-          branch={state.repos.find((r) => r.repoRoot === state.repoRoot)?.branch ?? null}
+          branch={state.repo?.branch ?? null}
           viewMode={state.viewMode}
           whitespace={state.whitespace}
           wrap={state.wrap}

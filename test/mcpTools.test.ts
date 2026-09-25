@@ -1,6 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TOOLS, formatDiff, lineInDiff, AGENT_AUTHOR, type McpReviewApi, type PrContext } from '../src/mcp/tools';
+import {
+  TOOLS,
+  LIST_REPOS,
+  formatDiff,
+  formatRepos,
+  lineInDiff,
+  runTool,
+  toolShape,
+  AGENT_AUTHOR,
+  type McpReviewApi,
+  type McpWorkspaceApi,
+  type PrContext,
+} from '../src/mcp/tools';
 import type { CommentThread, Review } from '../src/model/Comment';
 import type { PrCommit, ReviewDiff, Side } from '../src/model/ReviewDiff';
 
@@ -321,4 +333,112 @@ test('edit_comment and delete_comment reject ids that are not in the active revi
   );
   assert.equal(api.edited.length, 0);
   assert.equal(api.deleted.length, 0);
+});
+
+// --- the repository layer every tool call goes through ---
+
+const workspace = (repos: { name: string; api: McpReviewApi }[], fallback?: string): McpWorkspaceApi => ({
+  target: (repo) => {
+    const hit = repos.find((r) => r.name === (repo ?? fallback));
+    if (!hit) throw new Error(`no repository ${repo ?? '(default)'}`);
+    return { api: hit.api, name: hit.name };
+  },
+  listRepos: () =>
+    repos.map((r) => ({
+      name: r.name,
+      repoRoot: `/w/${r.name}`,
+      source: 'Uncommitted changes',
+      isDefault: r.name === fallback,
+    })),
+  multiRepo: () => repos.length > 1,
+});
+
+test('every repository-scoped tool accepts an optional repo argument', () => {
+  for (const t of TOOLS) assert.ok('repo' in toolShape(t), t.name);
+});
+
+test('a call goes to the named repository and says which one when there are several', async () => {
+  const api = new FakeApi(DIFF);
+  const other = new FakeApi(undefined);
+  const ws = workspace(
+    [
+      { name: 'api', api },
+      { name: 'web', api: other },
+    ],
+    'web',
+  );
+  const out = await runTool(ws, tool('get_diff'), { repo: 'api' });
+  assert.match(out, /^Repository: api\n\n# a\.ts/);
+  await assert.rejects(() => runTool(ws, tool('get_diff'), {}), /No diff is loaded/);
+});
+
+test('with one repository the output is unchanged', async () => {
+  const api = new FakeApi(DIFF);
+  const out = await runTool(workspace([{ name: 'api', api }], 'api'), tool('get_diff'), {});
+  assert.equal(out, await tool('get_diff').handler(api, {}));
+});
+
+test('a repository that cannot be resolved surfaces the error', async () => {
+  const ws = workspace([
+    { name: 'api', api: new FakeApi(DIFF) },
+    { name: 'web', api: new FakeApi(DIFF) },
+  ]);
+  await assert.rejects(() => runTool(ws, tool('get_diff'), {}), /no repository \(default\)/);
+});
+
+test('list_repos marks the default, and says when there is none', () => {
+  const api = new FakeApi(DIFF);
+  const withDefault = LIST_REPOS.handler(
+    workspace(
+      [
+        { name: 'api', api },
+        { name: 'web', api },
+      ],
+      'web',
+    ),
+  );
+  assert.equal(withDefault, '  api (/w/api) · Uncommitted changes\n* web (/w/web) · Uncommitted changes');
+  const without = LIST_REPOS.handler(
+    workspace([
+      { name: 'api', api },
+      { name: 'web', api },
+    ]),
+  );
+  assert.match(without, /No default: pass `repo` to choose one\.$/);
+  assert.equal(formatRepos([]), 'No git repository is open in this workspace.');
+});
+
+test('with several repositories, a tool that changes the review needs repo, and a read does not', async () => {
+  const api = new FakeApi(DIFF);
+  const ws = workspace(
+    [
+      { name: 'api', api },
+      { name: 'web', api },
+    ],
+    'api',
+  );
+  await assert.rejects(
+    () => runTool(ws, tool('post_comment'), { file: 'a.ts', side: 'new', startLine: 2, body: 'x' }),
+    /several repositories, so post_comment needs `repo`/,
+  );
+  assert.equal(api.posted.length, 0);
+  await runTool(ws, tool('post_comment'), { repo: 'api', file: 'a.ts', side: 'new', startLine: 2, body: 'x' });
+  assert.equal(api.posted.length, 1);
+  assert.match(await runTool(ws, tool('get_diff'), {}), /^Repository: api/);
+});
+
+test('every tool that changes the review is marked as a write', () => {
+  const writes = TOOLS.filter((t) => t.writes).map((t) => t.name);
+  assert.deepEqual(writes.sort(), ['delete_comment', 'edit_comment', 'post_comment', 'react', 'reply', 'resolve']);
+});
+
+test('with one repository, a write needs no repo', async () => {
+  const api = new FakeApi(DIFF);
+  await runTool(workspace([{ name: 'api', api }], 'api'), tool('post_comment'), {
+    file: 'a.ts',
+    side: 'new',
+    startLine: 2,
+    body: 'x',
+  });
+  assert.equal(api.posted.length, 1);
 });

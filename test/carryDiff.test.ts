@@ -16,7 +16,6 @@ const diff = (contentId?: string, generatedAt = 'now'): ReviewDiff => ({
 const payload = (d: ReviewDiff | undefined, viewed: Record<string, boolean> = {}): ReviewStatePayload => ({
   result: d ? { state: 'ok', diff: d } : { state: 'no-changes' },
   source: 'worktree-vs-head',
-  repos: [],
   viewed,
   viewMode: 'unified',
   whitespace: false,

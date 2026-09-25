@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
 import { ReviewState } from './reviewState';
 import { ReviewStore } from './comments/ReviewStore';
-import { ReviewController, type SubmitPreview } from './reviewController';
+import type { RepoSession, SubmitPreview } from './repoSession';
+import { WorkspaceReviews, repoRootOf } from './workspaceReviews';
+import { orphanNote } from './prPoller';
 import { FilesView } from './webview/filesView';
 import { CommentsView } from './webview/commentsView';
 import { ReviewsView } from './webview/reviewsView';
@@ -20,13 +22,13 @@ import { AGENT_AUTHOR } from './model/Comment';
 import { parsePrReference, type GithubProviderId } from './github/remote';
 import { githubTokenSource } from './github/auth';
 import { githubErrorText } from './github/errors';
-import { log } from './log';
-import { nextPollDelay } from './poll';
 import type { SubmitEvent, SubmitCounts } from './review/submit';
-import type { OrphanReport } from './review/reconcile';
 import { PullRequestsView } from './webview/pullRequestsView';
 import type { ReviewProvider, RemoteRepoRef, PullRequestSummary } from './review/provider';
-import { applyPrFilter, formatPrFilter, parsePrFilter, type Viewer } from './review/prFilter';
+import type { ThreadSet } from './webview/commentsView';
+import { formatPrFilter, parsePrFilter } from './review/prFilter';
+import { groupPullRequests, groupTotals, type PrSection } from './review/prGroups';
+import { reposForRemote } from './review/repoResolve';
 import { applyCommentFilter, formatCommentFilter, parseCommentFilter } from './review/commentFilter';
 import type { CommentGroupBy, CommentSortBy } from './review/commentGroups';
 
@@ -37,48 +39,58 @@ function asReview(x: unknown): Review | undefined {
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const state = new ReviewState(context);
+  await state.migrate();
   const reviewStore = new ReviewStore(context.workspaceState);
-  const controller = new ReviewController(state, reviewStore);
-  const filesView = new FilesView(controller);
+  const workspace = new WorkspaceReviews(state, reviewStore);
+  const filesView = new FilesView(workspace);
   const tree = vscode.window.createTreeView('agenticReview.files', {
     treeDataProvider: filesView,
     showCollapseAll: true,
   });
 
-  const commentsView = new CommentsView(controller, state);
+  const commentsView = new CommentsView(workspace, state);
   const commentsTree = vscode.window.createTreeView('agenticReview.comments', {
     treeDataProvider: commentsView,
     showCollapseAll: true,
   });
   commentsView.bind(commentsTree);
 
-  const reviewsView = new ReviewsView(controller);
+  const reviewsView = new ReviewsView(workspace);
   const reviewsTree = vscode.window.createTreeView('agenticReview.reviews', { treeDataProvider: reviewsView });
 
-  const pullRequestsView = new PullRequestsView(controller, state);
+  const pullRequestsView = new PullRequestsView(workspace, state);
   const pullRequestsTree = vscode.window.createTreeView('agenticReview.pullRequests', {
     treeDataProvider: pullRequestsView,
   });
   pullRequestsView.bind(pullRequestsTree);
 
-  // Badge the activity-bar icon with the number of changed files still to review; the count drops as
-  // files are marked viewed and rises when unmarked (like the SCM count).
+  // Badge the activity-bar icon with the number of changed files still to review across every repository.
+  // The count falls as the reviewer marks files viewed and rises when the reviewer unmarks them (like the SCM count).
   const updateBadge = (): void => {
-    const n = controller.files().filter((f) => !controller.isViewed(f.path)).length;
+    let n = 0;
+    for (const s of workspace.list()) n += s.files().filter((f) => !s.isViewed(f.path)).length;
     tree.badge = n > 0 ? { value: n, tooltip: `${n} file${n === 1 ? '' : 's'} left to review` } : undefined;
   };
 
-  // Name the current source in the Changes view header (e.g. "Pull request #117"); the compare icon in
-  // that title bar switches it.
+  // Name the diff source in the Changes view header (e.g. "Pull request #117") when there is one repository.
+  // With several, each repository's section names its own.
   const updateSourceHeader = (): void => {
-    tree.description = controller.repoRoot ? controller.sourceLabel() : undefined;
+    tree.description = workspace.sole()?.sourceLabel();
   };
 
-  // Show the Pull Requests section only when the current repo's origin is a supported review host.
-  const updateHasRemote = async (): Promise<void> => {
-    const remote = await controller.currentRemote();
-    await vscode.commands.executeCommand('setContext', 'agenticReview.hasRemote', remote != null);
-  };
+  const showPanel = (session: RepoSession): void => workspace.showPanel(context.extensionUri, session);
+
+  // The repository a PR command acts on: one with a pull request open.
+  const pickPrSession = (arg: unknown): Promise<RepoSession | undefined> =>
+    workspace.pickSession(arg, {
+      eligible: (s) => s.source === 'pr',
+      placeHolder: 'Repository with the pull request',
+      none: 'open a pull request first.',
+    });
+
+  // The session to navigate in: the focused panel's, else the one focused last while it is still open.
+  const navigate = (target: 'file' | 'comment', dir: 'next' | 'prev'): void =>
+    workspace.session(workspace.focusedRepo())?.navigate(target, dir);
 
   // --- MCP server lifecycle (binds to 127.0.0.1 only). Runs on launch when agenticReview.mcp.autoStart,
   //     or on demand via Start/Stop; `mcpDesired` is the session's running intent. ---
@@ -107,9 +119,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // A fixed port wins; otherwise take this workspace's stable slot from the cross-window registry.
       const wantPort = cfgPort > 0 ? cfgPort : assignedPort(context);
       try {
-        mcpHandle = await startMcpServer(controller.mcpApi(), { ...opts, port: wantPort });
+        mcpHandle = await startMcpServer(workspace.mcpWorkspace(), { ...opts, port: wantPort });
       } catch {
-        mcpHandle = await startMcpServer(controller.mcpApi(), { ...opts, port: 0 }); // slot taken by another process — take any free one
+        mcpHandle = await startMcpServer(workspace.mcpWorkspace(), { ...opts, port: 0 }); // another process holds the slot, so bind any free port
       }
       if (cfgPort === 0) rememberPort(context, mcpHandle.port);
     });
@@ -195,8 +207,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   tree.onDidChangeCheckboxState(
     (e) => {
       for (const [node, cbState] of e.items) {
-        if (node.kind === 'file') {
-          void controller.setViewed(node.file.path, cbState === vscode.TreeItemCheckboxState.Checked);
+        if (node.kind === 'tree' && node.node.kind === 'file') {
+          const checked = cbState === vscode.TreeItemCheckboxState.Checked;
+          void workspace.session(node.repoRoot)?.setViewed(node.node.file.path, checked);
         }
       }
     },
@@ -209,66 +222,107 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     commentsTree,
     reviewsTree,
     pullRequestsTree,
-    controller.onDidChange(updateBadge),
-    controller.onDidChange(updateSourceHeader),
-    controller.onDidChange(() => void updateHasRemote()),
-    vscode.commands.registerCommand('agenticReview.newReview', () => newReview(controller)),
+    workspace,
+    workspace.onDidChange(updateBadge),
+    workspace.onDidChange(updateSourceHeader),
+    vscode.commands.registerCommand('agenticReview.newReview', async (arg?: unknown) => {
+      const session = await workspace.pickSession(arg, { placeHolder: 'Repository to start a review in' });
+      if (session) await newReview(session);
+    }),
     vscode.commands.registerCommand('agenticReview.switchReview', (r) => {
       const rev = asReview(r);
-      if (rev) void controller.switchReview(rev.id);
+      if (rev) void workspace.session(rev.repoRoot)?.switchReview(rev.id);
     }),
-    vscode.commands.registerCommand('agenticReview.renameReview', (r) =>
-      renameReview(controller, asReview(r) ?? asReview(reviewsTree.selection[0])),
-    ),
-    vscode.commands.registerCommand('agenticReview.deleteReview', (r) =>
-      deleteReview(controller, asReview(r) ?? asReview(reviewsTree.selection[0])),
-    ),
+    vscode.commands.registerCommand('agenticReview.renameReview', (r) => {
+      const rev = asReview(r) ?? asReview(reviewsTree.selection[0]);
+      return renameReview(workspace.session(rev?.repoRoot), rev);
+    }),
+    vscode.commands.registerCommand('agenticReview.deleteReview', (r) => {
+      const rev = asReview(r) ?? asReview(reviewsTree.selection[0]);
+      return deleteReview(workspace.session(rev?.repoRoot), rev);
+    }),
     vscode.commands.registerCommand('agenticReview.moveReviewToCurrentBranch', (r) => {
       const rev = asReview(r) ?? asReview(reviewsTree.selection[0]);
-      if (rev) void controller.moveReviewToCurrentBranch(rev.id);
+      if (rev) void workspace.session(rev.repoRoot)?.moveReviewToCurrentBranch(rev.id);
     }),
-    vscode.commands.registerCommand('agenticReview.exportReview', (r) => exportReview(controller, asReview(r))),
-    vscode.commands.registerCommand('agenticReview.nextChange', () => controller.navigate('file', 'next')),
-    vscode.commands.registerCommand('agenticReview.prevChange', () => controller.navigate('file', 'prev')),
-    vscode.commands.registerCommand('agenticReview.nextComment', () => controller.navigate('comment', 'next')),
-    vscode.commands.registerCommand('agenticReview.prevComment', () => controller.navigate('comment', 'prev')),
+    vscode.commands.registerCommand('agenticReview.exportReview', async (arg?: unknown) => {
+      const review = asReview(arg);
+      const session = review
+        ? workspace.session(review.repoRoot)
+        : await workspace.pickSession(arg, { placeHolder: 'Repository to export a review from' });
+      if (session) await exportReview(session, review);
+    }),
+    vscode.commands.registerCommand('agenticReview.nextChange', () => navigate('file', 'next')),
+    vscode.commands.registerCommand('agenticReview.prevChange', () => navigate('file', 'prev')),
+    vscode.commands.registerCommand('agenticReview.nextComment', () => navigate('comment', 'next')),
+    vscode.commands.registerCommand('agenticReview.prevComment', () => navigate('comment', 'prev')),
     // A PR diff is pinned to fetched refs, so working-tree / git-state changes (including our own fetch)
     // must not re-diff it — that would reset the "loading" state mid-review. Local sources still live-refresh.
     watchRepoChanges(
-      () => {
-        if (controller.source !== 'pr') void controller.refresh();
+      (repos) => {
+        const touched = repos === 'all' ? workspace.list() : [...repos].map((r) => workspace.session(r));
+        for (const s of touched) if (s && s.source !== 'pr') void s.refresh();
       },
       {
+        route: (fsPath) => workspace.routePath(fsPath),
         // Ignored paths (build output, logs) cannot change the diff, so a build must not refresh the review.
         // The PR test only avoids asking git a question whose answer is already moot — the guard above is
         // what actually holds in PR mode, because pathless git events never reach this filter.
-        relevant: async (paths) => controller.source !== 'pr' && (await hasRelevantChange(controller.repoRoot, paths)),
+        relevant: async (repoRoot, paths) =>
+          workspace.session(repoRoot)?.source !== 'pr' && (await hasRelevantChange(repoRoot, paths)),
+        onRepositoriesChanged: () => workspace.rediscover(),
       },
     ),
-    vscode.commands.registerCommand('agenticReview.startReview', async () => {
-      await controller.refresh();
-      ReviewPanel.show(context.extensionUri, controller);
+    vscode.workspace.onDidChangeWorkspaceFolders(() => workspace.rediscover()),
+    vscode.commands.registerCommand('agenticReview.startReview', async (arg?: unknown) => {
+      const session = await workspace.pickSession(arg, {
+        placeHolder: 'Repository to review',
+        none: 'no Git repository in this workspace.',
+      });
+      if (!session) return;
+      await session.refresh();
+      showPanel(session);
     }),
-    vscode.commands.registerCommand('agenticReview.refresh', () =>
-      // In PR mode, Refresh is a full sync: re-fetch the head + re-import threads (this is where an upstream
-      // deletion is reflected). For local sources it just re-diffs.
-      controller.source === 'pr' ? refreshOpenPullRequest(controller) : controller.refresh(),
-    ),
-    vscode.commands.registerCommand('agenticReview.revealFile', (filePath?: string, threadId?: string) => {
-      ReviewPanel.show(context.extensionUri, controller); // create or reveal (focuses the tab)
-      if (typeof filePath === 'string') controller.reveal(filePath, threadId);
+    // With an item, refresh that repository. Without one, refresh every repository. In PR mode Refresh is a
+    // full sync: it re-fetches the head and re-imports threads, which picks up upstream deletions. For local
+    // sources it re-diffs.
+    vscode.commands.registerCommand('agenticReview.refresh', async (arg?: unknown) => {
+      const one = workspace.session(repoRootOf(arg));
+      await Promise.all((one ? [one] : workspace.list()).map(refreshSession));
     }),
-    vscode.commands.registerCommand('agenticReview.selectSource', () => pickSource(controller)),
-    vscode.commands.registerCommand('agenticReview.selectRepo', () => pickRepo(controller)),
-    vscode.commands.registerCommand('agenticReview.reviewPullRequest', () =>
-      reviewPullRequest(controller, context.extensionUri),
+    // The review panel's own Refresh button acts on the panel's repository.
+    vscode.commands.registerCommand('agenticReview.refreshPanel', async () => {
+      const session = workspace.session(ReviewPanel.activeRepo());
+      if (session) await refreshSession(session);
+    }),
+    vscode.commands.registerCommand(
+      'agenticReview.revealFile',
+      async (filePath?: string, threadId?: string, repoRoot?: string) => {
+        const session = repoRoot
+          ? workspace.session(repoRoot)
+          : await workspace.pickSession(undefined, { placeHolder: 'Repository to reveal the file in' });
+        if (!session) return;
+        showPanel(session); // create or reveal (focuses the tab)
+        if (typeof filePath === 'string') session.reveal(filePath, threadId);
+      },
     ),
-    vscode.commands.registerCommand('agenticReview.refreshPullRequests', () => pullRequestsView.refresh()),
+    vscode.commands.registerCommand('agenticReview.selectSource', async (arg?: unknown) => {
+      const session = await workspace.pickSession(arg, { placeHolder: 'Repository to change the diff source of' });
+      if (session) await pickSource(session);
+    }),
+    vscode.commands.registerCommand('agenticReview.reviewPullRequest', (arg?: unknown) =>
+      reviewPullRequest(workspace, arg, showPanel),
+    ),
+    vscode.commands.registerCommand('agenticReview.refreshPullRequests', (arg?: unknown) =>
+      pullRequestsView.refresh(repoRootOf(arg)),
+    ),
     // Two commands, one handler: the title bar shows a filled funnel once a filter is on, and either icon
     // opens the box. Clearing is a row inside the box, so the visible affordance never destroys state.
-    vscode.commands.registerCommand('agenticReview.filterPullRequests', () => filterPullRequests(pullRequestsView)),
+    vscode.commands.registerCommand('agenticReview.filterPullRequests', () =>
+      filterPullRequests(pullRequestsView, workspace.multiRepo),
+    ),
     vscode.commands.registerCommand('agenticReview.changePullRequestFilter', () =>
-      filterPullRequests(pullRequestsView),
+      filterPullRequests(pullRequestsView, workspace.multiRepo),
     ),
     vscode.commands.registerCommand('agenticReview.clearPullRequestFilter', () => pullRequestsView.setFilter('')),
     // Same two-commands-one-handler shape as the pull request filter above, for the Current Review list.
@@ -277,23 +331,35 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('agenticReview.clearCommentFilter', () => commentsView.setFilter('')),
     vscode.commands.registerCommand('agenticReview.groupComments', () => groupComments(commentsView)),
     vscode.commands.registerCommand('agenticReview.sortComments', () => sortComments(commentsView)),
-    vscode.commands.registerCommand('agenticReview.openPullRequestFromList', (n: number) =>
-      openPullRequestFromList(controller, context.extensionUri, n),
-    ),
-    vscode.commands.registerCommand('agenticReview.github.submitReview', () => submitPullRequest(controller)),
-    vscode.commands.registerCommand('agenticReview.github.refreshPullRequest', () =>
-      refreshOpenPullRequest(controller),
-    ),
-    vscode.commands.registerCommand('agenticReview.github.syncPullRequest', () => syncOpenPullRequest(controller)),
-    vscode.commands.registerCommand('agenticReview.github.discardPending', () => discardPendingReview(controller)),
+    vscode.commands.registerCommand('agenticReview.openPullRequestFromList', async (repoRoot: string, n: number) => {
+      const session = workspace.session(repoRoot);
+      const remote = await session?.currentRemote();
+      if (session && remote) await openPr(session, remote.provider, remote.repo, n, showPanel);
+    }),
+    vscode.commands.registerCommand('agenticReview.github.submitReview', async (arg?: unknown) => {
+      const session = await pickPrSession(arg);
+      if (session) await submitPullRequest(session);
+    }),
+    vscode.commands.registerCommand('agenticReview.github.refreshPullRequest', async (arg?: unknown) => {
+      const session = await pickPrSession(arg);
+      if (session) await refreshOpenPullRequest(session);
+    }),
+    vscode.commands.registerCommand('agenticReview.github.syncPullRequest', async (arg?: unknown) => {
+      const session = await pickPrSession(arg);
+      if (session) await syncOpenPullRequest(session);
+    }),
+    vscode.commands.registerCommand('agenticReview.github.discardPending', async (arg?: unknown) => {
+      const session = await pickPrSession(arg);
+      if (session) await discardPendingReview(session);
+    }),
     vscode.commands.registerCommand('agenticReview.toggleViewMode', () =>
-      controller.setViewPref({ viewMode: controller.viewMode === 'split' ? 'unified' : 'split' }),
+      workspace.setViewPref({ viewMode: state.view().viewMode === 'split' ? 'unified' : 'split' }),
     ),
     vscode.commands.registerCommand('agenticReview.toggleWhitespace', () =>
-      controller.setViewPref({ whitespace: !controller.whitespace }),
+      workspace.setViewPref({ whitespace: !state.view().whitespace }),
     ),
     vscode.commands.registerCommand('agenticReview.toggleWrap', () =>
-      controller.setViewPref({ wrap: !controller.wrap }),
+      workspace.setViewPref({ wrap: !state.view().wrap }),
     ),
     vscode.commands.registerCommand('agenticReview.setupMcp', () => setupMcp()),
     vscode.commands.registerCommand('agenticReview.startMcp', () => startMcp()),
@@ -301,64 +367,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('agenticReview.openMcpConfig', () => openMcpConfig()),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('agenticReview.mcp.port')) void syncMcp(); // a port change restarts a running server
-      if (e.affectsConfiguration('agenticReview')) void controller.refresh();
+      // Re-arm on a new interval. A failure run is not cleared here: changing a setting says nothing about
+      // whether the remote is reachable again, and that run is also what drives the paused indicator.
+      if (e.affectsConfiguration('agenticReview.github.pollInterval')) {
+        for (const s of workspace.list()) s.rearmPoll();
+      }
+      if (e.affectsConfiguration('agenticReview')) void workspace.refreshAll();
     }),
     new vscode.Disposable(() => mcpHandle?.dispose()),
   );
 
-  // Background poll while a PR is open: pick up upstream comment changes live and flag an advanced head.
-  // Runs only in PR mode, skips if a tick is still in flight, and is disabled when the interval is 0.
-  // Uses setTimeout (not setInterval) so the delay can grow on consecutive failures and reset on success.
-  let polling = false;
-  let pollTimer: ReturnType<typeof setTimeout> | undefined;
-  const pollTick = async (): Promise<void> => {
-    if (polling || controller.source !== 'pr') {
-      schedulePoll();
-      return;
-    }
-    polling = true;
-    try {
-      const { orphans, incoming } = await controller.pollPullRequest();
-      if (orphans)
-        void vscode.window.showInformationMessage(`ReviewMate: synced upstream changes.${orphanNote(orphans)}`);
-      if (incoming)
-        void vscode.window.showInformationMessage(
-          `ReviewMate: ${incoming} new comment${incoming === 1 ? '' : 's'} on this pull request.`,
-        );
-    } catch {
-      controller.recordPollFailure();
-    } finally {
-      polling = false;
-      schedulePoll();
-    }
-  };
-  const schedulePoll = (): void => {
-    if (pollTimer != null) clearTimeout(pollTimer);
-    pollTimer = undefined;
-    const baseSecs = vscode.workspace.getConfiguration('agenticReview').get<number>('github.pollInterval', 60);
-    if (baseSecs <= 0) return;
-    // The failure count lives on the controller, because that is what counts the errors the tick swallows.
-    // A second count kept here would only ever see zero and hold every retry at the base interval.
-    const failures = controller.pollFailures;
-    const ms = nextPollDelay(baseSecs, failures);
-    log('[poll] next tick in', ms / 1000, 'secs; consecutive failures:', failures);
-    pollTimer = setTimeout(() => void pollTick(), ms);
-  };
-  schedulePoll();
-  context.subscriptions.push(
-    new vscode.Disposable(() => {
-      if (pollTimer != null) clearTimeout(pollTimer);
-    }),
-    vscode.workspace.onDidChangeConfiguration((e) => {
-      // Re-arm on a new interval. A failure run is not cleared here: changing a setting says nothing about
-      // whether the remote is reachable again, and that run is also what drives the paused indicator.
-      if (e.affectsConfiguration('agenticReview.github.pollInterval')) schedulePoll();
-    }),
-  );
-
-  await controller.refresh();
+  await workspace.discover();
   updateSourceHeader();
-  void updateHasRemote();
   void syncMcp();
 }
 
@@ -410,8 +430,13 @@ const PORT_REGISTRY_KEY = 'agenticReview.mcp.ports';
 const PORT_BASE = 39217;
 const PORT_SPAN = 20000;
 
+/**
+ * What identifies this workspace in the port registry: VS Code's per-workspace storage folder, which stays the
+ * same when folders are added, removed, or reordered. VS Code omits it only when no folder is open, and then
+ * there is no repository to serve.
+ */
 function mcpWorkspaceKey(context: vscode.ExtensionContext): string {
-  return context.storageUri?.fsPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? 'default';
+  return context.storageUri?.fsPath ?? 'default';
 }
 function hashString(s: string): number {
   let h = 2166136261;
@@ -464,8 +489,8 @@ const SOURCES: { label: string; icon: string; description: string; source: DiffS
   },
 ];
 
-async function pickSource(controller: ReviewController): Promise<void> {
-  const current = controller.source;
+async function pickSource(session: RepoSession): Promise<void> {
+  const current = session.source;
   const pr = {
     label: '$(git-pull-request) Review a GitHub pull request',
     description: 'fetch a PR and review it here',
@@ -484,27 +509,37 @@ async function pickSource(controller: ReviewController): Promise<void> {
   );
   if (!picked) return;
   if (picked.source === 'open-pr') {
-    await vscode.commands.executeCommand('agenticReview.reviewPullRequest');
+    await vscode.commands.executeCommand('agenticReview.reviewPullRequest', { repoRoot: session.repoRoot });
   } else if (picked.source === 'vs-base') {
-    const branches = controller.repoRoot ? await listBranches(controller.repoRoot) : [];
+    const branches = await listBranches(session.repoRoot);
     if (branches.length === 0) {
       void vscode.window.showWarningMessage('ReviewMate: no local branches to compare against.');
       return;
     }
     const base = await vscode.window.showQuickPick(branches, { placeHolder: 'Select the base branch' });
     if (!base) return;
-    await controller.setSource('vs-base', base);
+    await session.setSource('vs-base', base);
   } else {
-    await controller.setSource(picked.source);
+    await session.setSource(picked.source);
   }
 }
 
 /**
- * Detect the repo's review host, sign in via VS Code if needed, let the user pick an open PR (or type a
- * URL/number), then fetch and open it. Errors surface as clear messages; an unsupported host is skipped.
+ * Pick the repository, sign in via VS Code if needed, let the user pick an open PR (or type a URL/number), then
+ * fetch and open it. A pasted URL names its repository, so it opens in the workspace repository on that remote,
+ * whichever one the command started from. The command shows errors as messages and skips an unsupported host.
  */
-async function reviewPullRequest(controller: ReviewController, extensionUri: vscode.Uri): Promise<void> {
-  const remote = await controller.currentRemote();
+async function reviewPullRequest(
+  workspace: WorkspaceReviews,
+  arg: unknown,
+  show: (session: RepoSession) => void,
+): Promise<void> {
+  const session = await workspace.pickSession(arg, {
+    eligible: async (s) => (await s.currentRemote()) !== undefined,
+    placeHolder: 'Repository to review a pull request in',
+  });
+  if (!session) return; // the picker was dismissed
+  const remote = await session.currentRemote();
   if (!remote) {
     void vscode.window.showWarningMessage(
       'ReviewMate: this repo\'s origin isn\'t a supported review host. Use github.com, or set "agenticReview.github.enterpriseUri" for GitHub Enterprise.',
@@ -517,47 +552,72 @@ async function reviewPullRequest(controller: ReviewController, extensionUri: vsc
     void vscode.window.showInformationMessage('ReviewMate: sign in to GitHub to review a pull request.');
     return;
   }
-  const number = await pickPullRequest(remote.provider, remote.repo);
-  if (number == null) return;
-  await openPr(controller, extensionUri, remote.provider, remote.repo, number);
+  const picked = await pickPullRequest(remote.provider, remote.repo);
+  if (!picked) return;
+  const target = picked.repo ? await sessionForRemote(workspace, session, remote.repo, picked.repo) : session;
+  if (!target) return;
+  const targetRemote = target === session ? remote : await target.currentRemote();
+  if (targetRemote) await openPr(target, targetRemote.provider, targetRemote.repo, picked.number, show);
 }
 
-/** Open a PR chosen from the Pull Requests sidebar list (already detected + signed in). */
-async function openPullRequestFromList(
-  controller: ReviewController,
-  extensionUri: vscode.Uri,
-  number: number,
-): Promise<void> {
-  const remote = await controller.currentRemote();
-  if (remote) await openPr(controller, extensionUri, remote.provider, remote.repo, number);
+/**
+ * The session a pasted pull request URL belongs in. The one the command started from when it is on that
+ * remote, else the workspace repository on it, asking when several checkouts share it. When no open
+ * repository is on that remote, the function tells the user and returns undefined.
+ */
+async function sessionForRemote(
+  workspace: WorkspaceReviews,
+  from: RepoSession,
+  fromRemote: RemoteRepoRef,
+  ref: { host: string; owner: string; repo: string },
+): Promise<RepoSession | undefined> {
+  const same = (a: { host: string; owner: string; repo: string }): boolean =>
+    reposForRemote([{ remote: a }], ref).length > 0;
+  if (same(fromRemote)) return from;
+  const candidates = await Promise.all(
+    workspace.list().map(async (s) => ({ session: s, remote: (await s.currentRemote())?.repo })),
+  );
+  const matches = reposForRemote(candidates, ref);
+  if (matches.length === 1) return matches[0].session;
+  if (matches.length > 1) {
+    const picked = await vscode.window.showQuickPick(
+      matches.map((m) => ({ label: m.session.repoName(), description: m.session.repoRoot, session: m.session })),
+      { placeHolder: `Checkout of ${ref.owner}/${ref.repo} to review in` },
+    );
+    return picked?.session;
+  }
+  void vscode.window.showWarningMessage(
+    `ReviewMate: that pull request belongs to ${ref.owner}/${ref.repo}, which isn't open in this workspace.`,
+  );
+  return undefined;
 }
 
 /** Fetch + open a PR with progress, then reveal the panel; surface any failure as a clear message. */
 async function openPr(
-  controller: ReviewController,
-  extensionUri: vscode.Uri,
+  session: RepoSession,
   provider: ReviewProvider,
   repo: RemoteRepoRef,
   number: number,
+  show: (session: RepoSession) => void,
 ): Promise<void> {
   try {
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: `Loading pull request #${number}…` },
-      () => controller.openPullRequest({ provider, repo, number, remote: 'origin' }),
+      () => session.openPullRequest({ provider, repo, number, remote: 'origin' }),
     );
   } catch (err) {
     void vscode.window.showErrorMessage(`ReviewMate: could not open PR #${number}. ${errorText(err)}`);
     return;
   }
-  ReviewPanel.show(extensionUri, controller);
+  show(session);
 }
 
 /**
  * Submit the open PR's staged change set: pick the review event, confirm the counts, then post it as one
  * review and reconcile. All UI (picker, confirmation, result) lives here; errors surface as messages.
  */
-async function submitPullRequest(controller: ReviewController): Promise<void> {
-  const preview = controller.submitPreview();
+async function submitPullRequest(session: RepoSession): Promise<void> {
+  const preview = session.submitPreview();
   if (!preview) {
     void vscode.window.showInformationMessage('ReviewMate: open a pull request to submit a review.');
     return;
@@ -576,7 +636,7 @@ async function submitPullRequest(controller: ReviewController): Promise<void> {
   try {
     const { counts, orphans } = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'Submitting review to GitHub…' },
-      () => controller.submitPullRequest(event, body),
+      () => session.submitPullRequest(event, body),
     );
     const note = orphanNote(orphans);
     void vscode.window.showInformationMessage(`ReviewMate: submitted ${summarizeCounts(counts)}.${note}`);
@@ -628,8 +688,8 @@ async function askReviewSummary(): Promise<string | undefined> {
  * someone reaching for a generic "new review" button intends, so there it is confirmed and spelled out.
  * Everything else in the PR flow continues the review you already have.
  */
-async function newReview(controller: ReviewController): Promise<void> {
-  const onPr = controller.source === 'pr';
+async function newReview(session: RepoSession): Promise<void> {
+  const onPr = session.source === 'pr';
   if (onPr) {
     const start = 'Start a second review';
     const choice = await vscode.window.showWarningMessage(
@@ -644,22 +704,27 @@ async function newReview(controller: ReviewController): Promise<void> {
     if (choice !== start) return;
   }
   try {
-    if (!onPr) return await controller.newReview();
+    if (!onPr) return await session.newReview();
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'Starting a second review…' },
-      () => controller.newReview(),
+      () => session.newReview(),
     );
   } catch (err) {
     void vscode.window.showErrorMessage(`ReviewMate: could not start the review. ${errorText(err)}`);
   }
 }
 
+/** Refresh one repository: a full sync for an open pull request, a re-diff for a local source. */
+function refreshSession(session: RepoSession): Promise<void> {
+  return session.source === 'pr' ? refreshOpenPullRequest(session) : session.refresh();
+}
+
 /** Apply the "new commits" banner: re-fetch the open PR's advanced head, re-diff, and re-import in place. */
-async function refreshOpenPullRequest(controller: ReviewController): Promise<void> {
+async function refreshOpenPullRequest(session: RepoSession): Promise<void> {
   try {
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'Refreshing pull request…' },
-      () => controller.reloadPullRequest(),
+      () => session.reloadPullRequest(),
     );
   } catch (err) {
     void vscode.window.showErrorMessage(`ReviewMate: could not refresh the pull request. ${errorText(err)}`);
@@ -667,11 +732,11 @@ async function refreshOpenPullRequest(controller: ReviewController): Promise<voi
 }
 
 /** Pull the latest upstream comments on demand. Unlike the poll, this is where an upstream deletion lands. */
-async function syncOpenPullRequest(controller: ReviewController): Promise<void> {
+async function syncOpenPullRequest(session: RepoSession): Promise<void> {
   try {
     const orphans = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'Syncing pull request comments…' },
-      () => controller.syncPullRequest(),
+      () => session.syncPullRequest(),
     );
     void vscode.window.showInformationMessage(`ReviewMate: comments are up to date.${orphanNote(orphans)}`);
   } catch (err) {
@@ -683,8 +748,8 @@ async function syncOpenPullRequest(controller: ReviewController): Promise<void> 
  * Throw away everything staged on the open PR and take current upstream as it stands. Confirmed modally and
  * spelled out, because drafts, edits, resolve toggles, and queued deletes all go and none of it comes back.
  */
-async function discardPendingReview(controller: ReviewController): Promise<void> {
-  const preview = controller.submitPreview();
+async function discardPendingReview(session: RepoSession): Promise<void> {
+  const preview = session.submitPreview();
   if (!preview) {
     void vscode.window.showInformationMessage('ReviewMate: open a pull request first.');
     return;
@@ -705,23 +770,12 @@ async function discardPendingReview(controller: ReviewController): Promise<void>
   try {
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'Discarding pending changes…' },
-      () => controller.discardPendingReview(),
+      () => session.discardPendingReview(),
     );
     void vscode.window.showInformationMessage('ReviewMate: pending review changes discarded.');
   } catch (err) {
     void vscode.window.showErrorMessage(`ReviewMate: could not discard the pending changes. ${errorText(err)}`);
   }
-}
-
-/** A trailing sentence describing content whose upstream target vanished during a re-fetch, or empty. */
-function orphanNote(o: OrphanReport): string {
-  const parts: string[] = [];
-  if (o.localOnly > 0)
-    parts.push(
-      `${o.localOnly} of your comment${o.localOnly === 1 ? ' was' : 's were'} deleted on GitHub and kept here, badged "deleted on GitHub" (Submit reposts, or delete to discard)`,
-    );
-  if (o.deletes > 0) parts.push(`${o.deletes} staged delete${o.deletes === 1 ? '' : 's'} already gone upstream`);
-  return parts.length ? ` (${parts.join('; ')}.)` : '';
 }
 
 /** Modal confirmation showing what the Submit will post, including how many comments are AI-authored. */
@@ -763,8 +817,14 @@ function summarizeCounts(c: SubmitCounts): string {
   return parts.length ? parts.join(', ') : 'no changes';
 }
 
-/** A QuickPick of open PRs that also accepts a typed number or full PR URL. */
-async function pickPullRequest(provider: ReviewProvider, repo: RemoteRepoRef): Promise<number | undefined> {
+/**
+ * A QuickPick of open PRs that also accepts a typed number or full PR URL. A URL also names its repository,
+ * which is returned so the caller can open it in the right one.
+ */
+async function pickPullRequest(
+  provider: ReviewProvider,
+  repo: RemoteRepoRef,
+): Promise<{ number: number; repo?: { host: string; owner: string; repo: string } } | undefined> {
   const qp = vscode.window.createQuickPick<vscode.QuickPickItem & { number?: number }>();
   qp.title = 'Review a pull request';
   qp.placeholder = 'Pick an open pull request, or type a number or URL';
@@ -799,8 +859,11 @@ async function pickPullRequest(provider: ReviewProvider, repo: RemoteRepoRef): P
 
   return new Promise((resolve) => {
     qp.onDidAccept(() => {
-      const picked = qp.selectedItems[0]?.number ?? parsePrReference(qp.value)?.number;
-      resolve(picked);
+      const typed = parsePrReference(qp.value);
+      const chosen = qp.selectedItems[0]?.number;
+      if (chosen != null && chosen !== typed?.number) resolve({ number: chosen });
+      else if (typed) resolve({ number: typed.number, repo: typed.repo });
+      else resolve(undefined);
       qp.hide();
     });
     qp.onDidHide(() => {
@@ -811,9 +874,8 @@ async function pickPullRequest(provider: ReviewProvider, repo: RemoteRepoRef): P
 }
 
 /** Open the filter box for the Pull Requests list, then apply whatever it returns. */
-async function filterPullRequests(view: PullRequestsView): Promise<void> {
-  const { prs, viewer } = await view.summaries();
-  const tokens = await pickPrFilter(formatPrFilter(view.filter()), prs, viewer);
+async function filterPullRequests(view: PullRequestsView, multiRepo: boolean): Promise<void> {
+  const tokens = await pickPrFilter(formatPrFilter(view.filter()), await view.sections(), multiRepo);
   if (tokens !== undefined) await view.setFilter(tokens);
 }
 
@@ -822,21 +884,27 @@ type FilterItem = vscode.QuickPickItem & { tokens?: string };
 /**
  * The filter box: presets for the common questions, the authors actually present in the list, and free-text
  * tokens. It filters as you type and reports how many pull requests the typed filter would leave, so the
- * effect is visible before you commit to it. Runs entirely against the already-fetched list.
+ * effect is visible before you commit to it. Runs against the already-fetched lists, each counted
+ * with the identity its own host resolves `@me` to. With several repositories it offers each one as well.
  */
-function pickPrFilter(current: string, prs: PullRequestSummary[], viewer: Viewer): Promise<string | undefined> {
+function pickPrFilter(current: string, sections: PrSection[], multiRepo: boolean): Promise<string | undefined> {
   const qp = vscode.window.createQuickPick<FilterItem>();
   qp.title = 'Filter pull requests';
-  qp.placeholder = 'author:@me · review-requested:@me · is:draft · is:ready · or any text';
+  qp.placeholder = multiRepo
+    ? 'repo:<name> · author:@me · review-requested:@me · is:draft · or any text'
+    : 'author:@me · review-requested:@me · is:draft · is:ready · or any text';
   qp.value = current;
   qp.matchOnDescription = true;
 
+  const prs = sections.flatMap((sec) => sec.prs);
   const matches = (tokens: string): string => {
-    const n = applyPrFilter(prs, parsePrFilter(tokens), viewer).length;
-    return `${n} of ${prs.length}`;
+    const { shown, total } = groupTotals(groupPullRequests(sections, parsePrFilter(tokens)));
+    return `${shown} of ${total}`;
   };
   // Without a signed-in login there is nothing for `@me` to mean, so say that instead of reporting zero.
-  const meNote = (tokens: string): string => (viewer.login ? matches(tokens) : 'sign in to use');
+  const signedIn = sections.some((sec) => sec.viewer.login);
+  const meNote = (tokens: string): string => (signedIn ? matches(tokens) : 'sign in to use');
+  const myTeams = sections.flatMap((sec) => sec.viewer.teams ?? []);
 
   // The box is also where a filter gets cleared, so the title-bar funnel can stay non-destructive.
   const clearRow: FilterItem = current
@@ -877,9 +945,17 @@ function pickPrFilter(current: string, prs: PullRequestSummary[], viewer: Viewer
   // could be resolved, so this is also the way through when the teams lookup is unavailable.
   const teams: FilterItem[] = tally((pr) => pr.reviewerTeams ?? []).map(([slug, n]) => ({
     label: slug,
-    description: viewer.teams?.some((t) => t.toLowerCase() === slug.toLowerCase()) ? `${n} · your team` : `${n}`,
+    description: myTeams.some((t) => t.toLowerCase() === slug.toLowerCase()) ? `${n} · your team` : `${n}`,
     tokens: `team-review-requested:${slug}`,
   }));
+
+  const repos: FilterItem[] = multiRepo
+    ? sections.map((sec) => ({
+        label: sec.repo.name,
+        description: `${sec.prs.length}${sec.repo.owner ? ` · ${sec.repo.owner}/${sec.repo.repo}` : ''}`,
+        tokens: `repo:${sec.repo.name}`,
+      }))
+    : [];
 
   const render = (): void => {
     // Whatever is typed leads the list, so Enter always applies what the box shows. Without this, opening
@@ -893,6 +969,7 @@ function pickPrFilter(current: string, prs: PullRequestSummary[], viewer: Viewer
     qp.items = [
       ...head,
       ...section('Presets', presets),
+      ...section('Repositories', repos),
       ...section('Teams awaiting review', teams),
       ...section('Authors in this list', authors),
     ];
@@ -916,24 +993,30 @@ function pickPrFilter(current: string, prs: PullRequestSummary[], viewer: Viewer
 
 /** Open the filter box for the Current Review list, then apply whatever it returns. */
 async function filterComments(view: CommentsView): Promise<void> {
-  const tokens = await pickCommentFilter(formatCommentFilter(view.filter()), view.threads(), view.viewer());
+  const tokens = await pickCommentFilter(formatCommentFilter(view.filter()), view.threadSets());
   if (tokens !== undefined) await view.setFilter(tokens);
 }
 
 /**
  * The comment filter box: presets for the states a thread can be in, the authors actually present in the
  * review, and free-typed tokens. Every row reports how many threads it would leave, so the effect is visible
- * before it is applied. Runs entirely against the threads already loaded.
+ * before it is applied. Runs against the threads already loaded, in every repository, each counted
+ * with the identity `@me` means there.
  */
-function pickCommentFilter(current: string, threads: CommentThread[], viewer: string): Promise<string | undefined> {
+function pickCommentFilter(current: string, sets: ThreadSet[]): Promise<string | undefined> {
   const qp = vscode.window.createQuickPick<FilterItem>();
   qp.title = 'Filter comments';
   qp.placeholder = 'is:unresolved · is:outdated · author:@me · author:@agent';
   qp.value = current;
   qp.matchOnDescription = true;
 
-  const matches = (tokens: string): string =>
-    `${applyCommentFilter(threads, parseCommentFilter(tokens), viewer).length} of ${threads.length}`;
+  const threads = sets.flatMap((set) => set.threads);
+  const matches = (tokens: string): string => {
+    const filter = parseCommentFilter(tokens);
+    const shown = sets.reduce((n, set) => n + applyCommentFilter(set.threads, filter, set.viewer).length, 0);
+    return `${shown} of ${threads.length}`;
+  };
+  const viewer = [...new Set(sets.map((set) => set.viewer))].join(', ');
 
   // The box is also where a filter gets cleared, so the title-bar funnel can stay non-destructive.
   const clearRow: FilterItem = current
@@ -1048,8 +1131,8 @@ const EXPORT_FORMATS: ExportFormat[] = [
   { label: 'JSON', description: 'For scripts and tools', language: 'json', ext: 'json', render: exportReviewJson },
 ];
 
-async function exportReview(controller: ReviewController, arg?: Review): Promise<void> {
-  const review = arg ?? controller.reviewToExport();
+async function exportReview(session: RepoSession, arg?: Review): Promise<void> {
+  const review = arg ?? session.reviewToExport();
   if (!review) {
     void vscode.window.showInformationMessage('ReviewMate: no review to export.');
     return;
@@ -1083,7 +1166,7 @@ async function exportReview(controller: ReviewController, arg?: Review): Promise
   }
 
   let live = false;
-  if (controller.canExportLive(review)) {
+  if (session.canExportLive(review)) {
     const modePick = await vscode.window.showQuickPick(
       [
         { label: 'Current positions', description: 'Re-anchored to the working tree (recommended)', live: true },
@@ -1096,12 +1179,12 @@ async function exportReview(controller: ReviewController, arg?: Review): Promise
   }
 
   // The diff can unload while a pick is open, so the controller reports which line references it used.
-  const { threads, lineReferences } = controller.exportThreads(review, live);
+  const { threads, lineReferences } = session.exportThreads(review, live);
   const meta: ExportMeta = {
     name: review.name,
     branch: review.branch,
-    source: sourceLabel(controller.source, controller.baseRef),
-    repoName: controller.repoName(),
+    source: sourceLabel(session.source, session.baseRef),
+    repoName: session.repoName(),
     generatedAt: new Date().toISOString(),
     lineReferences,
   };
@@ -1120,7 +1203,7 @@ async function exportReview(controller: ReviewController, arg?: Review): Promise
     { placeHolder: 'Export to' },
   );
   if (!target) return;
-  await deliverExport(target.action, text, review.name, format);
+  await deliverExport(target.action, text, review.name, format, session.repoRoot);
 }
 
 function sourceLabel(source: DiffSource, baseRef?: string): string {
@@ -1133,6 +1216,7 @@ async function deliverExport(
   text: string,
   name: string,
   format: ExportFormat,
+  repoRoot: string,
 ): Promise<void> {
   if (action === 'clipboard') {
     await vscode.env.clipboard.writeText(text);
@@ -1142,37 +1226,23 @@ async function deliverExport(
     await vscode.window.showTextDocument(doc);
   } else {
     const safe = name.replace(/[^\w.-]+/g, '-') || 'review';
-    const folder = vscode.workspace.workspaceFolders?.[0];
     const uri = await vscode.window.showSaveDialog({
       saveLabel: 'Export review',
       filters: { [format.label]: [format.ext] },
-      defaultUri: folder ? vscode.Uri.joinPath(folder.uri, `${safe}.${format.ext}`) : undefined,
+      defaultUri: vscode.Uri.joinPath(vscode.Uri.file(repoRoot), `${safe}.${format.ext}`),
     });
     if (uri) await vscode.workspace.fs.writeFile(uri, Buffer.from(text, 'utf8'));
   }
 }
 
-async function renameReview(controller: ReviewController, review?: Review): Promise<void> {
-  if (!review) return;
+async function renameReview(session: RepoSession | undefined, review?: Review): Promise<void> {
+  if (!session || !review) return;
   const name = await vscode.window.showInputBox({ prompt: 'Rename review', value: review.name });
-  if (name?.trim()) await controller.renameReview(review.id, name.trim());
+  if (name?.trim()) await session.renameReview(review.id, name.trim());
 }
 
-async function deleteReview(controller: ReviewController, review?: Review): Promise<void> {
-  if (!review) return;
+async function deleteReview(session: RepoSession | undefined, review?: Review): Promise<void> {
+  if (!session || !review) return;
   const ok = await vscode.window.showWarningMessage(`Delete review "${review.name}"?`, { modal: true }, 'Delete');
-  if (ok === 'Delete') await controller.deleteReview(review.id);
-}
-
-async function pickRepo(controller: ReviewController): Promise<void> {
-  const repos = controller.repositories;
-  if (repos.length <= 1) {
-    void vscode.window.showInformationMessage('ReviewMate: only one repository in this workspace.');
-    return;
-  }
-  const picked = await vscode.window.showQuickPick(
-    repos.map((r) => ({ label: r.name, description: r.repoRoot, repoRoot: r.repoRoot })),
-    { placeHolder: 'Repository' },
-  );
-  if (picked) await controller.setRepo(picked.repoRoot);
+  if (ok === 'Delete') await session.deleteReview(review.id);
 }

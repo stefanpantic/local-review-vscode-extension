@@ -126,16 +126,16 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "agenticReview.refreshPanel",
+        "title": "Refresh",
+        "category": "ReviewMate",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "agenticReview.selectSource",
         "title": "Select Diff Source",
         "category": "ReviewMate",
         "icon": "$(git-compare)"
-      },
-      {
-        "command": "agenticReview.selectRepo",
-        "title": "Select Repository",
-        "category": "ReviewMate",
-        "icon": "$(repo)"
       },
       {
         "command": "agenticReview.reviewPullRequest",
@@ -330,18 +330,13 @@
       "view/title": [
         {
           "command": "agenticReview.selectSource",
-          "when": "view == agenticReview.files",
+          "when": "view == agenticReview.files && !agenticReview.multiRepo",
           "group": "navigation@1"
         },
         {
           "command": "agenticReview.startReview",
-          "when": "view == agenticReview.files",
+          "when": "view == agenticReview.files && !agenticReview.multiRepo",
           "group": "navigation@2"
-        },
-        {
-          "command": "agenticReview.selectRepo",
-          "when": "view == agenticReview.files",
-          "group": "navigation@3"
         },
         {
           "command": "agenticReview.refresh",
@@ -385,12 +380,12 @@
         },
         {
           "command": "agenticReview.github.submitReview",
-          "when": "view == agenticReview.pullRequests && agenticReview.source == pr",
+          "when": "view == agenticReview.pullRequests && !agenticReview.multiRepo && agenticReview.anyPr",
           "group": "navigation@1"
         },
         {
           "command": "agenticReview.github.syncPullRequest",
-          "when": "view == agenticReview.pullRequests && agenticReview.source == pr",
+          "when": "view == agenticReview.pullRequests && !agenticReview.multiRepo && agenticReview.anyPr",
           "group": "navigation@2"
         },
         {
@@ -410,11 +405,66 @@
         },
         {
           "command": "agenticReview.github.discardPending",
-          "when": "view == agenticReview.pullRequests && agenticReview.source == pr",
+          "when": "view == agenticReview.pullRequests && !agenticReview.multiRepo && agenticReview.anyPr",
           "group": "1_pr@1"
         }
       ],
       "view/item/context": [
+        {
+          "command": "agenticReview.selectSource",
+          "when": "view == agenticReview.files && viewItem =~ /^agenticReview.repo/",
+          "group": "inline@1"
+        },
+        {
+          "command": "agenticReview.startReview",
+          "when": "view == agenticReview.files && viewItem =~ /^agenticReview.repo/",
+          "group": "inline@2"
+        },
+        {
+          "command": "agenticReview.refresh",
+          "when": "view == agenticReview.files && viewItem =~ /^agenticReview.repo/",
+          "group": "inline@3"
+        },
+        {
+          "command": "agenticReview.exportReview",
+          "when": "view == agenticReview.comments && viewItem == agenticReview.repo",
+          "group": "inline@1"
+        },
+        {
+          "command": "agenticReview.newReview",
+          "when": "view == agenticReview.comments && viewItem == agenticReview.repo",
+          "group": "inline@2"
+        },
+        {
+          "command": "agenticReview.newReview",
+          "when": "view == agenticReview.reviews && viewItem == agenticReview.repo",
+          "group": "inline@1"
+        },
+        {
+          "command": "agenticReview.github.submitReview",
+          "when": "view == agenticReview.pullRequests && viewItem == agenticReview.repo.pr",
+          "group": "inline@1"
+        },
+        {
+          "command": "agenticReview.github.syncPullRequest",
+          "when": "view == agenticReview.pullRequests && viewItem == agenticReview.repo.pr",
+          "group": "inline@2"
+        },
+        {
+          "command": "agenticReview.reviewPullRequest",
+          "when": "view == agenticReview.pullRequests && viewItem =~ /^agenticReview.repo/",
+          "group": "inline@3"
+        },
+        {
+          "command": "agenticReview.refreshPullRequests",
+          "when": "view == agenticReview.pullRequests && viewItem =~ /^agenticReview.repo/",
+          "group": "inline@4"
+        },
+        {
+          "command": "agenticReview.github.discardPending",
+          "when": "view == agenticReview.pullRequests && viewItem == agenticReview.repo.pr",
+          "group": "1_pr@1"
+        },
         {
           "command": "agenticReview.exportReview",
           "when": "view == agenticReview.reviews && viewItem =~ /^agenticReview.review/",
@@ -443,12 +493,16 @@
           "group": "navigation@1"
         },
         {
-          "command": "agenticReview.refresh",
+          "command": "agenticReview.refreshPanel",
           "when": "activeWebviewPanelId == agenticReview.panel",
           "group": "navigation@2"
         }
       ],
       "commandPalette": [
+        {
+          "command": "agenticReview.refreshPanel",
+          "when": "false"
+        },
         {
           "command": "agenticReview.revealFile",
           "when": "false"
@@ -491,19 +545,19 @@
         },
         {
           "command": "agenticReview.github.submitReview",
-          "when": "agenticReview.source == pr"
+          "when": "agenticReview.anyPr"
         },
         {
           "command": "agenticReview.github.refreshPullRequest",
-          "when": "agenticReview.source == pr"
+          "when": "agenticReview.anyPr"
         },
         {
           "command": "agenticReview.github.syncPullRequest",
-          "when": "agenticReview.source == pr"
+          "when": "agenticReview.anyPr"
         },
         {
           "command": "agenticReview.github.discardPending",
-          "when": "agenticReview.source == pr"
+          "when": "agenticReview.anyPr"
         }
       ]
     },

@@ -33,22 +33,44 @@ async function currentBranch(repoRoot: string): Promise<string | null> {
   }
 }
 
-/** Discover the git repositories backing the current workspace folders (deduped by top-level path). */
-export async function getRepositories(): Promise<RepoInfo[]> {
+/** A discovered repository with the workspace folders that resolve to it, for routing paths back to it. */
+export type DiscoveredRepo = RepoInfo & { folders: string[] };
+
+/**
+ * Discover the git repositories backing the current workspace folders, in folder order, deduped by top-level
+ * path. Each keeps the folders that led to it: `--show-toplevel` resolves symlinks, so a folder's own path can
+ * differ from the root it reports, and the router needs those folders to map a path under one to its repository.
+ */
+export async function getRepositories(): Promise<DiscoveredRepo[]> {
   const folders = vscode.workspace.workspaceFolders ?? [];
-  const byRoot = new Map<string, RepoInfo>();
+  const byRoot = new Map<string, DiscoveredRepo>();
   for (const folder of folders) {
     try {
       const top = (await git(folder.uri.fsPath, ['rev-parse', '--show-toplevel'])).trim();
-      if (!top || byRoot.has(top)) continue;
-      const headSha = (await isUnbornHead(top)) ? null : (await git(top, ['rev-parse', 'HEAD'])).trim();
-      const branch = await currentBranch(top);
-      byRoot.set(top, { repoRoot: top, name: path.basename(top), headSha, branch });
+      if (!top) continue;
+      const known = byRoot.get(top);
+      if (known) {
+        known.folders.push(folder.uri.fsPath);
+        continue;
+      }
+      const info = await getRepoInfo(top);
+      if (info) byRoot.set(top, { ...info, folders: [folder.uri.fsPath] });
     } catch {
       // not a git repository — skip this folder
     }
   }
   return [...byRoot.values()];
+}
+
+/** One repository's name, HEAD, and branch, re-read without rediscovering the workspace. Undefined when it is gone. */
+export async function getRepoInfo(repoRoot: string): Promise<RepoInfo | undefined> {
+  try {
+    const headSha = (await isUnbornHead(repoRoot)) ? null : (await git(repoRoot, ['rev-parse', 'HEAD'])).trim();
+    const branch = await currentBranch(repoRoot);
+    return { repoRoot, name: path.basename(repoRoot), headSha, branch };
+  } catch {
+    return undefined;
+  }
 }
 
 /** The configured git user name (for attributing comments), or undefined when unset. */

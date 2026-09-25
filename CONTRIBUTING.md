@@ -28,17 +28,17 @@ pnpm run watch
 
 ## Project layout
 
-| Path            | What it is                                                                                                           |
-| --------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `src/`          | Extension **host** code (git access, state, tree views, the webview panel).                                          |
-| `src/github/`   | The GitHub API client and provider. Apart from the git fetch of a PR's refs, the only code that goes to the network. |
-| `src/review/`   | Pull request write-back (pending set, submit, reconcile) and the comment and PR filters.                             |
-| `src/mcp/`      | The local MCP server and its tools.                                                                                  |
-| `webview-ui/`   | The **React** diff/review UI that runs inside the webview.                                                           |
-| `src/protocol/` | The typed message contract shared by host and webview.                                                               |
-| `test/`         | Unit tests for the pure logic (diffing, anchoring, export, store, write-back, filters, MCP tools).                   |
-| `docs/`         | Spec, decisions (ADRs), and per-iteration design/verification notes.                                                 |
-| `esbuild.mjs`   | Bundles two entry points: the Node host and the browser webview.                                                     |
+| Path            | What it is                                                                                                              |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `src/`          | Extension **host** code (git access, state, tree views, the webview panel).                                             |
+| `src/github/`   | The GitHub API client and provider. Apart from the git fetch of a PR's refs, the only code that goes to the network.    |
+| `src/review/`   | Pull request write-back (pending set, submit, reconcile), the comment and PR filters, prefs, and repository resolution. |
+| `src/mcp/`      | The local MCP server and its tools.                                                                                     |
+| `webview-ui/`   | The **React** diff/review UI that runs inside the webview.                                                              |
+| `src/protocol/` | The typed message contract shared by host and webview.                                                                  |
+| `test/`         | Unit tests for the pure logic (diffing, anchoring, export, store, write-back, filters, MCP tools).                      |
+| `docs/`         | Spec, decisions (ADRs), and per-iteration design/verification notes.                                                    |
+| `esbuild.mjs`   | Bundles two entry points: the Node host and the browser webview.                                                        |
 
 ## Quality gates
 

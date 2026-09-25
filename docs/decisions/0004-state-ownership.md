@@ -22,3 +22,7 @@ Webviews are disposed and re-created (tab hidden, window reload) and lose in-mem
 ## Iteration 2 addendum — shared "viewed" state
 
 With the sidebar added, "viewed" is reflected by **both** the tree and the panel, so it becomes **host-owned and persisted** in `workspaceState` (keyed by `repoRoot + source + filePath`) and broadcast to both surfaces via `viewedUpdated`. The `ReviewController` is the single hub — tree and panel never talk directly. Scroll position stays webview-only. This is the intended evolution of "the host owns durable state" once a second surface exists.
+
+## Iteration 19 addendum: one panel per repository
+
+The rule "one sidebar + at most one panel per repo" permits several panels at once, one for each repository in a multi-root workspace. The host keeps a session per repository, and each panel sends requests only to its own session. The host stores reading prefs as one set for the workspace and the loaded diff (source, base ref, open PR) per repository. The host remains the single source of truth. See [ADR-0012](./0012-workspace-wide-views.md).
