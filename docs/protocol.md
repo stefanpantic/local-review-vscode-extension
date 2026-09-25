@@ -104,11 +104,12 @@ interface DiffResult {
 // Snapshot the webview renders from (getState response / stateChanged event) — it.2.
 interface ReviewStatePayload {
   result: DiffResult;
-  repoRoot?: string;
+  repoRoot?: string; // [it.19] the repository this panel reviews (absent only in the webview's own error fallback)
+  repo?: RepoInfo; // [it.19] its name, HEAD, and branch. Replaces the old `repos` list.
+  multiRepo?: boolean; // [it.19] the workspace holds several repositories
   source: DiffSource;
   baseRef?: string;
-  repos: RepoInfo[];
-  viewed: Record<string, boolean>; // filePath -> viewed, for the current repo+source
+  viewed: Record<string, boolean>; // filePath -> viewed, for this repo+source
   viewMode: ViewMode; // [it.3]
   whitespace: boolean; // [it.3] hide whitespace (git diff -w)
   wrap: boolean; // [#21] wrap long lines instead of scrolling horizontally
@@ -308,6 +309,9 @@ interface RemoteRef {
 //   agenticReview.reviews        → Record<repoRoot, Review[]>
 //   agenticReview.currentReview  → Record<repoRoot, Record<branch, reviewId>>   (the current review per branch)
 //   agenticReview.threads        → LEGACY it.4 active threads; migrated into a Review on first load, then cleared.
+//   agenticReview.viewPrefs      → ViewPrefs [it.19]: viewMode, whitespace, wrap, prFilter, commentFilter, commentGroup, commentSort
+//   agenticReview.repoPrefs      → Record<repoRoot, RepoPref> [it.19]: { source, baseRef?, pr? } per repository
+//   agenticReview.pref           → LEGACY single pref object; split into the two keys above on activation, then cleared.
 
 interface RepoInfo {
   repoRoot: string;
@@ -359,7 +363,7 @@ The webview keeps `let seq = 0` and a `Map<number, {resolve, reject}>`. A reques
 
 | `type`                 | payload                                                        | response payload                                                                                                                         | Intro                   |
 | ---------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `getState`             | `{}`                                                           | `ReviewStatePayload` (repos + diff + viewed + config for the current selection)                                                          | it.1/it.2               |
+| `getState`             | `{}`                                                           | `ReviewStatePayload` (the panel's repository, its diff, viewed, and config)                                                              | it.1/it.2 / it.19       |
 | `setViewed`            | `{ filePath, viewed }`                                         | `{ ok: true }`                                                                                                                           | it.2                    |
 | `setViewPref`          | `{ viewMode?, whitespace?, wrap? }`                            | `{ ok: true }`                                                                                                                           | it.3 / `wrap` #21       |
 | `getFileTexts`         | `{ files: {path, oldPath?}[] }`                                | `{ texts }` — full old/new text per file (host resolves repo/source/base) for whole-file highlighting                                    | it.3                    |
@@ -381,14 +385,14 @@ There is no `reanchorThread` — all re-anchoring is the host's automatic load-t
 
 | `type`           | payload                                                  | Intro                                                                                                                                                        |
 | ---------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `stateChanged`   | `ReviewStatePayload`                                     | it.1/it.2 (after refresh / source / repo switch)                                                                                                             |
+| `stateChanged`   | `ReviewStatePayload`                                     | it.1/it.2 (after refresh / source switch / the workspace gaining or losing a repository)                                                                     |
 | `viewedUpdated`  | `{ viewed: Record<string, boolean> }`                    | it.2                                                                                                                                                         |
 | `revealFile`     | `{ filePath, threadId? }`                                | it.2 (scroll the panel to a file). `threadId` (#24) scrolls to that comment thread instead.                                                                  |
 | `navigate`       | `{ target: 'file' \| 'comment', dir: 'next' \| 'prev' }` | it.7 (keyboard nav: scroll to the next or previous changed file or comment)                                                                                  |
 | `threadsUpdated` | `{ threads: CommentThread[]; pending?: PendingSummary }` | it.4 (lightweight push after a mutation; diff not re-sent). `pending` [it.12] keeps the PR's pending count + Submit button live without re-sending the diff. |
 | `showError`      | `{ message }`                                            | it.1                                                                                                                                                         |
 
-Export (it.6) is host-side too — an `agenticReview.exportReview` command with QuickPicks (format `[it.18]`, scope `all` / `unresolved` / `file`, line references, target `clipboard` / `file` / editor), rendering via a pure formatter per format (Markdown, or JSON as in §9); no messages. Review sessions (it.5) are host-side as well: the sidebar's `agenticReview.newReview` / `switchReview` / `renameReview` / `deleteReview` / `moveReviewToCurrentBranch` commands change the store, and the host pushes the result to the panel with `stateChanged` or `threadsUpdated`. Source / repo / base-branch selection is **host-side** (commands `agenticReview.selectSource` / `agenticReview.selectRepo`, backed by QuickPick) — not webview messages. View prefs changed from the palette (`toggleViewMode` / `toggleWhitespace` / `toggleWrap`) likewise reach the panel through `stateChanged`. "Viewed" is host-owned and persisted; the panel toggles it via `setViewed` and both surfaces converge via `viewedUpdated`. Scroll position stays webview-only.
+Export (it.6) is host-side too: an `agenticReview.exportReview` command with QuickPicks (format `[it.18]`, scope `all` / `unresolved` / `file`, line references, target `clipboard` / `file` / editor), rendering via a pure formatter per format (Markdown, or JSON as in §9), with no messages. Review sessions (it.5) are host-side as well: the sidebar's `agenticReview.newReview` / `switchReview` / `renameReview` / `deleteReview` / `moveReviewToCurrentBranch` commands change the store, and the host pushes the result to the panel with `stateChanged` or `threadsUpdated`. Source / base-branch selection is **host-side** (command `agenticReview.selectSource`, backed by QuickPick) and uses no webview messages. `[it.19]` There is no repository selection: each panel belongs to one repository, and its requests act on that repository. The Iteration 2 `agenticReview.selectRepo` command is gone. View prefs changed from the palette (`toggleViewMode` / `toggleWhitespace` / `toggleWrap`) likewise reach the panel through `stateChanged`. "Viewed" is host-owned and persisted. The panel toggles it via `setViewed` and both surfaces converge via `viewedUpdated`. Scroll position stays webview-only.
 
 ## 8. Validation & versioning
 
@@ -462,3 +466,15 @@ interface ExportedComment {
 ```
 
 In a current export, `startLine` and `endLine` are the re-anchored lines. An as-reviewed export and an outdated thread use the lines saved on the anchor. When the file was renamed after the comment was made, a current export writes the new path as `file` and the path the comment was made on as `oldPath`. `reactions` is the comment's current state, including unsubmitted changes on a PR. The JSON leaves out PR write-back state (`remote*`, `localOnly`, `conflict`, `pendingDeletes`).
+
+## 10. MCP tools `[it.9; repositories it.19]`
+
+The MCP server exposes the review to a coding agent. Its tools run in the host against the same sessions the UI uses. Tool output is readable text, and the tool list and descriptions live in `src/mcp/tools.ts`.
+
+`[it.19]` A workspace can hold several repositories:
+
+- `list_repos` takes no arguments. It lists each repository's name, path, and diff source, and marks the one a read without `repo` would use.
+- Every other tool takes an optional `repo`: a repository name, folder name, or full path. A trailing separator is ignored. A name two repositories share is refused with the full paths to choose from.
+- Without `repo`, a read (`get_diff`, `get_review`, `get_active_review`, `list_reviews`) uses the only repository, else the repository of the review panel focused most recently. Otherwise it errors with the list.
+- With several repositories, a tool that changes the review (`post_comment`, `reply`, `resolve`, `react`, `edit_comment`, `delete_comment`) requires `repo`. The focus-based default can change between reading a diff and commenting on it, so it could put a comment on the wrong repository.
+- With several repositories, every answer starts with `Repository: <name>`.

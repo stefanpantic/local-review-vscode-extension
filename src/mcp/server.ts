@@ -1,11 +1,11 @@
-// In-process MCP server: runs inside the extension host (so tools call ReviewController directly),
+// In-process MCP server: runs inside the extension host (so tools call the repository sessions directly),
 // served over Streamable HTTP bound to 127.0.0.1 and guarded by a bearer token. Local only.
 import * as http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-import { TOOLS, type McpReviewApi } from './tools';
+import { LIST_REPOS, TOOLS, runTool, toolShape, type McpWorkspaceApi } from './tools';
 
 export interface McpServerHandle {
   url: string; // where Claude Code connects (an "http" MCP server)
@@ -14,23 +14,27 @@ export interface McpServerHandle {
   dispose(): void;
 }
 
-function buildServer(api: McpReviewApi, version: string): McpServer {
+type ToolResult = { content: { type: 'text'; text: string }[]; isError?: true };
+
+/** Run a tool body, turning a thrown error into an MCP error result the agent can read. */
+async function answer(run: () => Promise<string> | string): Promise<ToolResult> {
+  try {
+    return { content: [{ type: 'text' as const, text: await run() }] };
+  } catch (e) {
+    return { content: [{ type: 'text' as const, text: e instanceof Error ? e.message : String(e) }], isError: true };
+  }
+}
+
+function buildServer(ws: McpWorkspaceApi, version: string): McpServer {
   const server = new McpServer({ name: 'reviewmate', version });
+  server.registerTool(
+    LIST_REPOS.name,
+    { title: LIST_REPOS.title, description: LIST_REPOS.description, inputSchema: {} },
+    () => answer(() => LIST_REPOS.handler(ws)),
+  );
   for (const t of TOOLS) {
-    server.registerTool(
-      t.name,
-      { title: t.title, description: t.description, inputSchema: t.inputShape },
-      async (args) => {
-        try {
-          const text = await t.handler(api, (args ?? {}) as Record<string, unknown>);
-          return { content: [{ type: 'text' as const, text }] };
-        } catch (e) {
-          return {
-            content: [{ type: 'text' as const, text: e instanceof Error ? e.message : String(e) }],
-            isError: true,
-          };
-        }
-      },
+    server.registerTool(t.name, { title: t.title, description: t.description, inputSchema: toolShape(t) }, (args) =>
+      answer(() => runTool(ws, t, (args ?? {}) as Record<string, unknown>)),
     );
   }
   return server;
@@ -38,7 +42,7 @@ function buildServer(api: McpReviewApi, version: string): McpServer {
 
 /** Start the MCP server on 127.0.0.1 (ephemeral port when `port` is 0), one MCP session per client. */
 export async function startMcpServer(
-  api: McpReviewApi,
+  ws: McpWorkspaceApi,
   opts: { port: number; version: string; token: string },
 ): Promise<McpServerHandle> {
   const token = opts.token;
@@ -72,7 +76,7 @@ export async function startMcpServer(
         transport.onclose = () => {
           if (transport?.sessionId) transports.delete(transport.sessionId);
         };
-        await buildServer(api, opts.version).connect(transport);
+        await buildServer(ws, opts.version).connect(transport);
       } else {
         res.writeHead(400, { 'content-type': 'application/json' }).end(
           JSON.stringify({

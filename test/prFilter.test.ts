@@ -5,6 +5,7 @@ import {
   describePrFilter,
   formatPrFilter,
   isPrFilterEmpty,
+  matchesRepoToken,
   needsIdentity,
   parsePrFilter,
   teamsUnresolved,
@@ -203,4 +204,27 @@ test('describes single-dimension filters by name and combinations by tokens', ()
   );
   assert.equal(describePrFilter(parsePrFilter('author:@me is:draft')), 'author:@me is:draft');
   assert.equal(describePrFilter(parsePrFilter('')), '');
+});
+
+test('repo: parses, round-trips first in canonical order, and is named in the header', () => {
+  assert.deepEqual(parsePrFilter('repo:octo/api'), { repo: 'octo/api' });
+  assert.equal(formatPrFilter(parsePrFilter('is:draft repo:api')), 'repo:api is:draft');
+  assert.equal(describePrFilter(parsePrFilter('repo:api')), 'In api');
+  assert.equal(describePrFilter(parsePrFilter('repo:api author:@me')), 'repo:api author:@me');
+  assert.equal(isPrFilterEmpty(parsePrFilter('repo:api')), false);
+  assert.deepEqual(parsePrFilter('repo:'), { text: 'repo:' });
+});
+
+test('repo: matches the workspace name, owner/repo, or the remote name, ignoring case', () => {
+  const target = { name: 'api-checkout', owner: 'Octo', repo: 'Api' };
+  assert.equal(matchesRepoToken(parsePrFilter('repo:API-CHECKOUT'), target), true);
+  assert.equal(matchesRepoToken(parsePrFilter('repo:octo/api'), target), true);
+  assert.equal(matchesRepoToken(parsePrFilter('repo:api'), target), true);
+  assert.equal(matchesRepoToken(parsePrFilter('repo:octo'), target), false);
+  assert.equal(matchesRepoToken(parsePrFilter('author:x'), target), true);
+  assert.equal(matchesRepoToken(parsePrFilter('repo:api'), { name: 'api' }), true);
+});
+
+test('repo: alone leaves a list untouched, since it acts per list', () => {
+  assert.deepEqual(numbers(applyPrFilter(list, parsePrFilter('repo:elsewhere'))), [1, 2, 3, 12]);
 });

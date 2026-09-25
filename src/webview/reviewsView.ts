@@ -1,19 +1,29 @@
 import * as vscode from 'vscode';
-import type { ReviewController } from '../reviewController';
+import type { RepoSession } from '../repoSession';
+import type { WorkspaceReviews } from '../workspaceReviews';
 import type { Review } from '../model/Comment';
 import { prStateLabel } from '../protocol/messages';
 
 interface ReviewGroup {
+  repoRoot: string;
   groupKey: string; // the git branch, or a PR's synthetic `pr/<provider>/<number>` key
   variant: 'branch' | 'pr';
   archived: boolean; // branch no longer exists (branch groups only; PR groups are never archived)
   reviews: Review[];
 }
-/** Tree element: a group (branch or pull request) or a review under it. */
-export type ReviewNode = ReviewGroup | Review;
+interface RepoNode {
+  kind: 'repo';
+  repoRoot: string;
+}
+/** Tree element: a repository section, a group (branch or pull request) in it, or a review under that. */
+export type ReviewNode = RepoNode | ReviewGroup | Review;
 
 function isGroup(n: ReviewNode): n is ReviewGroup {
   return 'groupKey' in n;
+}
+
+function isRepo(n: ReviewNode): n is RepoNode {
+  return 'kind' in n && n.kind === 'repo';
 }
 
 function relativeTime(iso: string): string {
@@ -29,26 +39,37 @@ function relativeTime(iso: string): string {
 
 /**
  * Sidebar "Reviews" panel: reviews grouped by branch — the current branch first, then other branches,
- * then archived (branch no longer exists). The current review is marked; click switches, inline rename/delete,
- * context "move to current branch".
+ * then archived (branch no longer exists). With several repositories, each repository that has reviews gets
+ * a section. The current review is marked; click switches, inline rename/delete, context "move to current
+ * branch".
  */
 export class ReviewsView implements vscode.TreeDataProvider<ReviewNode> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-  constructor(private readonly controller: ReviewController) {
-    controller.onDidChange(() => this._onDidChangeTreeData.fire());
+  constructor(private readonly workspace: WorkspaceReviews) {
+    workspace.onDidChange(() => this._onDidChangeTreeData.fire());
   }
 
   getTreeItem(node: ReviewNode): vscode.TreeItem {
+    if (isRepo(node)) {
+      const session = this.workspace.session(node.repoRoot);
+      const item = new vscode.TreeItem(session?.repoName() ?? '', vscode.TreeItemCollapsibleState.Expanded);
+      item.id = `rrepo:${node.repoRoot}`;
+      item.iconPath = new vscode.ThemeIcon('repo');
+      item.tooltip = node.repoRoot;
+      item.contextValue = 'agenticReview.repo';
+      return item;
+    }
     if (isGroup(node)) return node.variant === 'pr' ? prGroupItem(node) : branchGroupItem(node);
     const review = node;
-    const isCurrent =
-      review.id === this.controller.currentReviewId() && review.branch === this.controller.currentBranch();
-    const onCurrentBranch = review.branch === this.controller.currentBranch();
+    const session = this.workspace.session(review.repoRoot);
+    const currentBranch = session?.currentBranch();
+    const isCurrent = review.id === session?.currentReviewId() && review.branch === currentBranch;
+    const onCurrentBranch = review.branch === currentBranch;
     const n = review.threads.length;
     const item = new vscode.TreeItem(review.name);
-    item.id = `review:${review.id}`;
+    item.id = `review:${review.repoRoot}:${review.id}`;
     item.description = `${n} comment${n === 1 ? '' : 's'} · ${relativeTime(review.updatedAt)}${isCurrent ? ' · current' : ''}`;
     item.tooltip = new vscode.MarkdownString(
       `**${review.name}** (\`${review.branch}\`)\n\n${n} comment${n === 1 ? '' : 's'} · updated ${relativeTime(review.updatedAt)}` +
@@ -61,34 +82,51 @@ export class ReviewsView implements vscode.TreeDataProvider<ReviewNode> {
   }
 
   getChildren(node?: ReviewNode): ReviewNode[] {
-    if (node) return isGroup(node) ? node.reviews : [];
-    const currentBranch = this.controller.currentBranch();
-    const existing = new Set(this.controller.existingBranches());
-    const byKey = new Map<string, Review[]>();
-    for (const r of this.controller.reviewsForRepo()) {
-      const arr = byKey.get(r.branch);
-      if (arr) arr.push(r);
-      else byKey.set(r.branch, [r]);
+    if (!node) {
+      const sole = this.workspace.sole();
+      if (sole) return groupsFor(sole);
+      // Only repositories with reviews get a section. With none anywhere, the welcome content shows.
+      return this.workspace
+        .list()
+        .filter((s) => s.reviewsForRepo().length > 0)
+        .map((s) => ({ kind: 'repo', repoRoot: s.repoRoot }));
     }
-    const groups: ReviewGroup[] = [...byKey.entries()].map(([key, reviews]) => {
-      const isPr = reviews.some((r) => r.kind === 'remote');
-      return {
-        groupKey: key,
-        variant: isPr ? 'pr' : 'branch',
-        archived: !isPr && key !== currentBranch && !existing.has(key),
-        reviews,
-      };
-    });
-    // Current group first, then pull requests, then other branches, then archived branches.
-    const rank = (g: ReviewGroup) => (g.groupKey === currentBranch ? 0 : g.variant === 'pr' ? 1 : g.archived ? 3 : 2);
-    return groups.sort((a, b) => rank(a) - rank(b) || a.groupKey.localeCompare(b.groupKey));
+    if (isRepo(node)) {
+      const session = this.workspace.session(node.repoRoot);
+      return session ? groupsFor(session) : [];
+    }
+    return isGroup(node) ? node.reviews : [];
   }
+}
+
+/** One repository's reviews by group: current first, then pull requests, then other branches, then archived. */
+function groupsFor(session: RepoSession): ReviewGroup[] {
+  const currentBranch = session.currentBranch();
+  const existing = new Set(session.existingBranches());
+  const byKey = new Map<string, Review[]>();
+  for (const r of session.reviewsForRepo()) {
+    const arr = byKey.get(r.branch);
+    if (arr) arr.push(r);
+    else byKey.set(r.branch, [r]);
+  }
+  const groups: ReviewGroup[] = [...byKey.entries()].map(([key, reviews]) => {
+    const isPr = reviews.some((r) => r.kind === 'remote');
+    return {
+      repoRoot: session.repoRoot,
+      groupKey: key,
+      variant: isPr ? 'pr' : 'branch',
+      archived: !isPr && key !== currentBranch && !existing.has(key),
+      reviews,
+    };
+  });
+  const rank = (g: ReviewGroup) => (g.groupKey === currentBranch ? 0 : g.variant === 'pr' ? 1 : g.archived ? 3 : 2);
+  return groups.sort((a, b) => rank(a) - rank(b) || a.groupKey.localeCompare(b.groupKey));
 }
 
 function branchGroupItem(group: ReviewGroup): vscode.TreeItem {
   const state = group.archived ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.Expanded;
   const item = new vscode.TreeItem(group.groupKey, state);
-  item.id = `branch:${group.groupKey}`;
+  item.id = `branch:${group.repoRoot}:${group.groupKey}`;
   item.iconPath = new vscode.ThemeIcon(group.archived ? 'archive' : 'git-branch');
   item.description = group.archived ? 'archived' : `${group.reviews.length}`;
   if (group.archived) item.tooltip = 'This branch no longer exists. Move a review to your current branch to reuse it.';
@@ -101,7 +139,7 @@ function prGroupItem(group: ReviewGroup): vscode.TreeItem {
   const remote = first?.kind === 'remote' ? first.remote : undefined;
   const title = remote?.title ?? group.groupKey;
   const item = new vscode.TreeItem(title, vscode.TreeItemCollapsibleState.Expanded);
-  item.id = `pr:${group.groupKey}`;
+  item.id = `pr:${group.repoRoot}:${group.groupKey}`;
   item.iconPath = new vscode.ThemeIcon('git-pull-request');
   const bits: string[] = [];
   if (remote?.number != null) bits.push(`#${remote.number}`);

@@ -1,6 +1,6 @@
 # Iteration 19: Multi-root workspaces
 
-> **Status: refinement.** Open for agreement before coding.
+> **Status: done.** Verified with F5 in single-folder and multi-root workspaces.
 
 ReviewMate reviews one repository at a time. A single `pref.repoRoot` drives the diff, the reviews, the Pull Requests list, the PR poll, and MCP. **Select Repository** switches it. VS Code has no such concept. In a multi-root workspace the built-in Source Control view and the GitHub Pull Requests extension show every repository at once, in one section each. A command takes its repository from the item it runs on, then from the focused editor, and asks only when that is still ambiguous.
 
@@ -48,11 +48,11 @@ This iteration adopts that model. There is no active repository. Every view span
 
 With one repository each view is flat, as today. With several, the top level is one node per repository. Its label is the repository name. Child ids are prefixed with the repository root so they never collide. Status that belongs to one repository moves to its node's description. Empty and error states become info rows under their repository, because a welcome view cannot be scoped to one section.
 
-| View           | Repository node description        | Inline actions on the repository node                                       |
-| -------------- | ---------------------------------- | --------------------------------------------------------------------------- |
-| Changes        | source label, files left to view   | select source, open panel, refresh                                          |
-| Current Review | comment count, or shown of total   | export, new review                                                          |
-| Saved Reviews  | none                               | new review                                                                  |
+| View           | Repository node description                            | Inline actions on the repository node                                                  |
+| -------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| Changes        | source label, files left to view                       | select source, open panel, refresh                                                     |
+| Current Review | comment count, or shown of total                       | export, new review                                                                     |
+| Saved Reviews  | none                                                   | new review                                                                             |
 | Pull Requests  | open count, or shown of total, and the PR under review | review a PR by number or URL, refresh, and submit, sync, and discard when a PR is open |
 
 Title bar actions that act on one repository show only when there is one repository. The Changes badge sums every repository.
@@ -71,7 +71,7 @@ There is one panel per repository. Opening it for a repository reveals that repo
 
 A command can narrow what is eligible. Reviewing a PR needs a GitHub remote. Submit, sync, and discard need an open PR. An item passed explicitly always wins, and the command then says what that repository is missing.
 
-Refresh with no item refreshes every repository. The review management commands always act on their item. Navigation commands act on the focused panel. The filter, group, and sort commands, the view toggles, and the MCP commands are global.
+Refresh with no item refreshes every repository. The panel's own Refresh button refreshes the panel's repository. The review management commands always act on their item. Navigation commands act on the focused panel. The filter, group, and sort commands, the view toggles, and the MCP commands are global.
 
 ### Prefs
 
@@ -99,26 +99,26 @@ Each session with an open PR runs its own poller with its own backoff. With seve
 
 ### MCP
 
-Every tool takes an optional `repo`: a name, a folder name, or a full path. `list_repos` returns each repository's name, path, source, and open PR, and marks the default. When `repo` is left out, the tool uses the only repository, else the most recently focused ReviewMate panel that is still open. If neither applies, it returns an error listing the repositories. With several repositories, output starts with the repository name.
+Every tool except `list_repos` takes an optional `repo`: a name, a folder name, or a full path. `list_repos` returns each repository's name, path, and source, and marks the default. When `repo` is left out, a read uses the only repository, else the most recently focused ReviewMate panel that is still open. If neither applies, it returns an error listing the repositories. With several repositories, a tool that changes the review requires `repo`, and output starts with the repository name.
 
-The MCP port stays keyed by the workspace storage location, so existing setups keep their port. The fallback key uses the workspace file, or the sorted folder paths, instead of the first folder. The export save dialog starts in the exported repository's root.
+The MCP port stays keyed by the workspace storage location, so existing setups keep their port. With no storage location the key is `default`, because then no folder is open. The export save dialog starts in the exported repository's root.
 
 ## Acceptance criteria
 
-- [ ] A single-folder workspace looks and behaves exactly as before.
-- [ ] With several repositories, Changes, Current Review, Saved Reviews, and Pull Requests each show one section per repository. Status for one repository is on its node, and empty or error states are rows under that repository.
-- [ ] Each repository keeps its own source, base ref, open PR, current review, and panel at the same time.
-- [ ] Each repository has its own panel, titled `ReviewMate: <name>` when there are several. Comments, submit, sync, and discard from a panel act on that panel's repository.
-- [ ] The Select Repository command is gone. Commands resolve their repository from the item, then the focused panel, then the active editor, then the only eligible repository, and ask only when it is still ambiguous. _(Resolution order unit-tested.)_
-- [ ] Refresh with no item refreshes every repository.
-- [ ] Pull Requests lists every GitHub repository's open PRs in sections. A load error, a sign-in prompt, or an empty list shows only under its own repository. Two folders on one remote share a single fetch.
-- [ ] `repo:<name>` narrows the PR sections, round-trips through the saved filter, is named in the header, and is offered in the filter picker. _(Unit-tested.)_
-- [ ] A pasted PR URL opens in the repository whose remote matches. It gives a clear error when that repository isn't open.
-- [ ] Only repositories with an open PR poll, each with its own backoff. With several repositories, notifications name the repository.
-- [ ] A file change refreshes only the repository that contains it. Changes outside every repository are ignored.
-- [ ] Adding or removing a workspace folder or git repository updates every view without a reload. A removed repository stops polling and its panel closes. Adding the folder back restores its source and PR.
-- [ ] Existing prefs migrate with no loss, and the old key is cleared. _(Unit-tested.)_
-- [ ] Every MCP tool accepts an optional `repo`, and `list_repos` exists. The default is the only repository, else the most recently focused open panel, else an error listing the repositories. With several repositories, output names the repository. _(Unit-tested.)_
-- [ ] The MCP port stays the same for existing setups. The export save dialog starts in the exported repository's root.
-- [ ] ADR-0012 records the decision. ADR-0007 exists as a superseded record. `docs/spec.md` has roadmap rows 19 and 20 and updated §6, §7, and §10. `docs/protocol.md` documents the payload, pref keys, and MCP changes. ADR-0004 has an addendum. `README.md` and the MCP section of `CLAUDE.md` are updated.
-- [ ] The gates pass: `format:check`, `lint`, `typecheck`, `test`, `build`, `package`.
+- [x] A single-folder workspace looks and behaves exactly as before.
+- [x] With several repositories, Changes, Current Review, Saved Reviews, and Pull Requests each show one section per repository. Status for one repository is on its node, and empty or error states are rows under that repository.
+- [x] Each repository keeps its own source, base ref, open PR, current review, and panel at the same time.
+- [x] Each repository has its own panel, titled `ReviewMate: <name>` when there are several. Comments, submit, sync, and discard from a panel act on that panel's repository.
+- [x] The Select Repository command is gone. Commands resolve their repository from the item, then the focused panel, then the active editor, then the only eligible repository, and ask only when it is still ambiguous. _(Resolution order unit-tested.)_
+- [x] Refresh with no item refreshes every repository.
+- [x] Pull Requests lists every GitHub repository's open PRs in sections. A load error, a sign-in prompt, or an empty list shows only under its own repository. Two folders on one remote share a single fetch.
+- [x] `repo:<name>` narrows the PR sections, round-trips through the saved filter, is named in the header, and is offered in the filter picker. _(Unit-tested.)_
+- [x] A pasted PR URL opens in the repository whose remote matches. It gives a clear error when that repository isn't open.
+- [x] Only repositories with an open PR poll, each with its own backoff. With several repositories, notifications name the repository.
+- [x] A file change refreshes only the repository that contains it. Changes outside every repository are ignored.
+- [x] Adding or removing a workspace folder or git repository updates every view without a reload. A removed repository stops polling and its panel closes. Adding the folder back restores its source and PR.
+- [x] Existing prefs migrate with no loss, and the old key is cleared. _(The split and the migration plan are unit-tested. The plan covers the old key, keys already stored, and a migration that already ran.)_
+- [x] Every MCP tool except `list_repos` accepts an optional `repo`, and `list_repos` exists. A read defaults to the only repository, else the most recently focused open panel, else an error listing the repositories. With several repositories, a tool that changes the review requires `repo`, and output names the repository. _(Unit-tested.)_
+- [x] The MCP port stays the same for existing setups. The export save dialog starts in the exported repository's root.
+- [x] ADR-0012 records the decision. ADR-0007 exists as a superseded record. `docs/spec.md` has roadmap rows 19 and 20 and updated §6, §7, and §10. `docs/protocol.md` documents the payload, pref keys, and MCP changes. ADR-0004 has an addendum. `README.md` and the MCP section of `CLAUDE.md` are updated.
+- [x] The gates pass: `format:check`, `lint`, `typecheck`, `test`, `build`, `package`.

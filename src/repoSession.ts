@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
-import { ReviewState, type Pref } from './reviewState';
+import type { ReviewState } from './reviewState';
+import type { RepoPref, ViewPrefs } from './review/prefs';
 import { ReviewStore } from './comments/ReviewStore';
 import { reanchor, reanchorOne, createAnchor, rangeText, type AnchorLocator } from './comments/anchoring';
 import {
-  getRepositories,
+  getRepoInfo,
   getDiff,
   getFileTexts,
   listBranches,
@@ -32,8 +33,20 @@ import { buildSubmitPlan, unsubmittedRemoteReview, type SubmitCounts, type Submi
 import { reconcile, type OrphanReport } from './review/reconcile';
 import type { McpReviewApi } from './mcp/tools';
 import type { Events, EventType, PrDisplay, ReviewStatePayload, SyncState } from './protocol/messages';
+import { PrPoller } from './prPoller';
 
 type PanelPost = <K extends EventType>(type: K, payload: Events[K]) => void;
+
+/** One repository's prefs as the session reads them: the workspace view prefs plus its own diff prefs. */
+type Pref = ViewPrefs & RepoPref;
+
+/** What a session needs from the workspace around it. */
+export interface SessionHost {
+  /** This repository's state changed; the views and the panel's siblings should repaint. */
+  changed(repoRoot: string): void;
+  /** Whether the workspace holds more than one repository, so labels can name this one. */
+  multiRepo(): boolean;
+}
 
 /** What the Submit flow needs to know before it asks: what is staged, and what the PR will accept. */
 export interface SubmitPreview {
@@ -45,20 +58,20 @@ export interface SubmitPreview {
 }
 
 /**
- * The single coordination hub between the sidebar trees and the editor panel. Comments autosave into
- * the current review for the current `(repoRoot, branch)`; both surfaces read/mutate through here.
+ * One repository's review: its diff, its current review, its pull request state, and its panel. The sidebar
+ * trees and that repository's editor panel read and mutate through here. Comments autosave into the current
+ * review for this repository's current branch. Every repository in the workspace has its own session, so each
+ * can show a different diff source or pull request at the same time.
  */
-export class ReviewController {
-  private repos: RepoInfo[] = [];
-  private branches: string[] = []; // local branches of the current repo (for archived-review detection)
+export class RepoSession implements vscode.Disposable {
+  private branches: string[] = []; // local branches of this repo (for archived-review detection)
   private current: DiffResult = { state: 'no-repo' };
   private remoteCache?: {
-    repoRoot: string;
     enterpriseUri?: string;
     value: { repo: RemoteRepoRef; provider: ReviewProvider } | undefined;
   };
-  private userName: string | undefined; // git config user.name of the current repo — attributes your comments
-  private userNameRepo: string | undefined; // repoRoot the cached userName belongs to
+  private userName: string | undefined; // git config user.name of this repo, used as the author of your comments
+  private userNameRead = false; // user.name has been read once; unset stays unset until a reload
   private viewerLogin: string | undefined; // signed-in GitHub login, when a session exists — the preferred author
   private headStale = false; // the open PR advanced upstream; surfaced as a Refresh banner, never auto-applied
   private prMutation?: Promise<void>; // held while a PR network mutation runs, so the poll cannot interleave
@@ -69,19 +82,73 @@ export class ReviewController {
   private panelRendered = false; // the webview has painted the current diff (threads are in the DOM)
   private pendingReveal?: { filePath: string; threadId?: string }; // a reveal held until the panel has painted
   private renderSettle?: ReturnType<typeof setTimeout>; // debounces the panel's paint burst before "ready"
-  private readonly _onDidChange = new vscode.EventEmitter<void>();
-  /** Fires when the trees should refresh. */
-  readonly onDidChange = this._onDidChange.event;
   private panelPost?: PanelPost;
+  private disposed = false; // the repository left the workspace; late work must not repaint anything
+  private readonly poller: PrPoller;
 
   constructor(
+    readonly repoRoot: string,
+    private info: RepoInfo,
     private readonly state: ReviewState,
     private readonly reviewStore: ReviewStore,
-  ) {}
+    private readonly host: SessionHost,
+  ) {
+    this.poller = new PrPoller(this);
+  }
+
+  /** The repository's name, HEAD, and branch as last read. */
+  get repo(): RepoInfo {
+    return this.info;
+  }
+
+  /** Take newer repository details from a workspace rediscovery. */
+  setInfo(info: RepoInfo): void {
+    this.info = info;
+  }
+
+  /** Stop polling and drop the panel binding. The stored reviews stay, so adding the folder back restores them. */
+  dispose(): void {
+    this.disposed = true;
+    this.poller.dispose();
+    this.panelPost = undefined;
+    this.pendingReveal = undefined;
+    if (this.renderSettle) {
+      clearTimeout(this.renderSettle);
+      this.renderSettle = undefined;
+    }
+  }
+
+  /** Whether the workspace holds several repositories, so messages about this one should name it. */
+  multiRepo(): boolean {
+    return this.host.multiRepo();
+  }
+
+  /** The number of the pull request under review here, or undefined on a local diff. */
+  reviewingPr(): number | undefined {
+    const pref = this.pref();
+    return pref.source === 'pr' ? pref.pr?.number : undefined;
+  }
+
+  /** Re-arm the poll after its interval setting changed. */
+  rearmPoll(): void {
+    this.poller.schedule();
+  }
+
+  private emit(): void {
+    if (!this.disposed) this.host.changed(this.repoRoot);
+  }
+
+  private pref(): Pref {
+    return { ...this.state.view(), ...this.state.repo(this.repoRoot) };
+  }
+
+  private async setRepoPref(patch: Partial<RepoPref>): Promise<void> {
+    await this.state.setRepo(this.repoRoot, patch);
+  }
 
   bindPanel(post: PanelPost): void {
     this.panelPost = post;
-    this._onDidChange.fire(); // a panel is opening but hasn't painted yet — refresh the sidebar's ready state
+    this.emit(); // a panel is opening but has not rendered yet, so refresh the sidebar's ready state
   }
   unbindPanel(): void {
     this.panelPost = undefined;
@@ -91,26 +158,20 @@ export class ReviewController {
       clearTimeout(this.renderSettle);
       this.renderSettle = undefined;
     }
-    this._onDidChange.fire();
+    this.emit();
   }
 
-  get repositories(): RepoInfo[] {
-    return this.repos;
-  }
-  get repoRoot(): string | undefined {
-    return this.state.getPref().repoRoot;
-  }
   get source(): DiffSource {
-    return this.state.getPref().source;
+    return this.pref().source;
   }
   get viewMode(): ViewMode {
-    return this.state.getPref().viewMode;
+    return this.pref().viewMode;
   }
   get whitespace(): boolean {
-    return this.state.getPref().whitespace;
+    return this.pref().whitespace;
   }
   get wrap(): boolean {
-    return this.state.getPref().wrap;
+    return this.pref().wrap;
   }
   /** Consecutive failed poll ticks. The caller that schedules the next tick spaces it out by this. */
   get pollFailures(): number {
@@ -120,23 +181,28 @@ export class ReviewController {
     return this.current.state === 'ok' && this.current.diff ? this.current.diff.files : [];
   }
   isViewed(filePath: string): boolean {
-    const p = this.state.getPref();
-    return p.repoRoot ? this.state.isViewed(p.repoRoot, this.viewedNs(p), filePath) : false;
+    return this.state.isViewed(this.repoRoot, this.viewedNs(this.pref()), filePath);
+  }
+
+  /** The kind of result the last refresh produced: a diff, an empty one, or why there is none. */
+  get resultState(): DiffResult['state'] {
+    return this.current.state;
   }
 
   buildState(): ReviewStatePayload {
-    const pref = this.state.getPref();
+    const pref = this.pref();
     const paths = this.files().map((f) => f.path);
     const largeFileThreshold = vscode.workspace
       .getConfiguration('agenticReview')
       .get<number>('largeFileThreshold', 1000);
     return {
       result: this.current,
-      repoRoot: pref.repoRoot,
+      repoRoot: this.repoRoot,
+      repo: this.info,
+      multiRepo: this.host.multiRepo(),
       source: pref.source,
       baseRef: pref.baseRef,
-      repos: this.repos,
-      viewed: pref.repoRoot ? this.state.viewedFor(pref.repoRoot, this.viewedNs(pref), paths) : {},
+      viewed: this.state.viewedFor(this.repoRoot, this.viewedNs(pref), paths),
       viewMode: pref.viewMode,
       whitespace: pref.whitespace,
       wrap: pref.wrap,
@@ -156,15 +222,15 @@ export class ReviewController {
 
   /** The staged, not-yet-submitted change count for the PR under review (undefined outside PR mode). */
   private pendingSummary(pref: Pref): PendingSummary | undefined {
-    if (pref.source !== 'pr' || !pref.repoRoot) return undefined;
-    const review = this.reviewStore.current(pref.repoRoot, this.branchKey(pref.repoRoot));
+    if (pref.source !== 'pr') return undefined;
+    const review = this.reviewStore.current(this.repoRoot, this.branchKey());
     return review?.kind === 'remote' ? pendingChangeSet(review) : undefined;
   }
 
   /** Display metadata for the PR under review, from the current remote review's stored request. */
   private prDisplay(pref: Pref): PrDisplay | undefined {
-    if (pref.source !== 'pr' || !pref.repoRoot) return undefined;
-    const review = this.reviewStore.current(pref.repoRoot, this.branchKey(pref.repoRoot));
+    if (pref.source !== 'pr') return undefined;
+    const review = this.reviewStore.current(this.repoRoot, this.branchKey());
     if (review?.kind !== 'remote') return undefined;
     const r = review.remote;
     return {
@@ -179,9 +245,8 @@ export class ReviewController {
   }
 
   /** The git branch a local review belongs to; `detached@<sha8>` when HEAD is detached. */
-  private localBranchKey(repoRoot: string): string {
-    const repo = this.repos.find((r) => r.repoRoot === repoRoot);
-    return repo?.branch ?? `detached@${(repo?.headSha ?? 'unknown').slice(0, 8)}`;
+  private localBranchKey(): string {
+    return this.info.branch ?? `detached@${(this.info.headSha ?? 'unknown').slice(0, 8)}`;
   }
 
   /**
@@ -189,16 +254,16 @@ export class ReviewController {
    * pull request is loaded, otherwise the git branch. This is the single hinge that routes threads,
    * autosave, the current-review pointer, and MCP reads to the right review.
    */
-  private branchKey(repoRoot: string): string {
-    const pref = this.state.getPref();
+  private branchKey(): string {
+    const pref = this.pref();
     if (pref.source === 'pr' && pref.pr) return prBranchKey(pref.pr);
-    return this.localBranchKey(repoRoot);
+    return this.localBranchKey();
   }
 
-  private headShaFor(repoRoot: string): string | null {
-    const pref = this.state.getPref();
+  private headSha(): string | null {
+    const pref = this.pref();
     if (pref.source === 'pr' && pref.pr) return pref.pr.headSha;
-    return this.repos.find((r) => r.repoRoot === repoRoot)?.headSha ?? null;
+    return this.info.headSha;
   }
 
   /** The viewed-flag namespace for the current source: per-PR when a PR is loaded, else the source itself. */
@@ -208,9 +273,8 @@ export class ReviewController {
 
   /** The current review's threads, re-anchored against the currently loaded diff. */
   private threads(): CommentThread[] {
-    const repoRoot = this.state.getPref().repoRoot;
-    if (!repoRoot) return [];
-    const stored = this.reviewStore.current(repoRoot, this.branchKey(repoRoot))?.threads ?? [];
+    const repoRoot = this.repoRoot;
+    const stored = this.reviewStore.current(repoRoot, this.branchKey())?.threads ?? [];
     const diff = this.currentDiff();
     return diff ? reanchor(stored, diff) : stored;
   }
@@ -226,7 +290,7 @@ export class ReviewController {
    * local diffs (and the case with no panel open) are ready immediately.
    */
   commentsReady(): boolean {
-    return this.state.getPref().source !== 'pr' || !this.panelPost || this.panelRendered;
+    return this.pref().source !== 'pr' || !this.panelPost || this.panelRendered;
   }
 
   /**
@@ -244,7 +308,7 @@ export class ReviewController {
     this.renderSettle = setTimeout(() => {
       this.renderSettle = undefined;
       this.panelRendered = true;
-      this._onDidChange.fire();
+      this.emit();
       this.flushPendingReveal();
     }, RENDER_SETTLE_MS);
   }
@@ -259,24 +323,15 @@ export class ReviewController {
 
   // --- Review sessions (branch-tied). The current review autosaves; these manage the set. ---
 
-  private repoRootOrThrow(): string {
-    const repoRoot = this.state.getPref().repoRoot;
-    if (!repoRoot) throw new Error('No repository selected.');
-    return repoRoot;
-  }
-
-  /** All reviews for the current repo (the sidebar groups them by branch). */
+  /** All reviews for this repo (the sidebar groups them by branch). */
   reviewsForRepo(): Review[] {
-    const repoRoot = this.state.getPref().repoRoot;
-    return repoRoot ? this.reviewStore.allForRepo(repoRoot) : [];
+    return this.reviewStore.allForRepo(this.repoRoot);
   }
-  currentBranch(): string | undefined {
-    const repoRoot = this.state.getPref().repoRoot;
-    return repoRoot ? this.branchKey(repoRoot) : undefined;
+  currentBranch(): string {
+    return this.branchKey();
   }
   currentReviewId(): string | undefined {
-    const repoRoot = this.state.getPref().repoRoot;
-    return repoRoot ? this.reviewStore.currentId(repoRoot, this.branchKey(repoRoot)) : undefined;
+    return this.reviewStore.currentId(this.repoRoot, this.branchKey());
   }
   /** Local branch names of the current repo — a review whose branch isn't here is "archived". */
   existingBranches(): string[] {
@@ -290,17 +345,17 @@ export class ReviewController {
    * Continuing an existing review is the default everywhere else; only this call ever forks one.
    */
   async newReview(): Promise<void> {
-    const repoRoot = this.repoRootOrThrow();
-    const branch = this.branchKey(repoRoot);
+    const repoRoot = this.repoRoot;
+    const branch = this.branchKey();
     const current = this.reviewStore.current(repoRoot, branch);
     if (current?.kind !== 'remote') {
-      await this.reviewStore.create(repoRoot, branch, this.headShaFor(repoRoot));
+      await this.reviewStore.create(repoRoot, branch, this.headSha());
       this.afterThreadChange();
       return;
     }
     const ref = current.remote;
     await this.withPrLock(async () => {
-      const review = await this.reviewStore.create(repoRoot, branch, this.headShaFor(repoRoot), ref);
+      const review = await this.reviewStore.create(repoRoot, branch, this.headSha(), ref);
       const remote = await this.currentRemote();
       // Signed out or no remote resolvable: the review is still a remote one, just empty until a sync.
       if (remote) await this.syncFromRemote(repoRoot, review.id, remote, ref.number ?? Number(ref.id));
@@ -314,18 +369,18 @@ export class ReviewController {
    * so the selection survives a reload.
    */
   async switchReview(id: string): Promise<void> {
-    const repoRoot = this.repoRootOrThrow();
+    const repoRoot = this.repoRoot;
     const review = this.reviewStore.get(repoRoot, id);
     if (!review) return;
     await this.reviewStore.setCurrent(repoRoot, review.branch, id);
     if (review.kind === 'remote' && review.remote.number != null) {
-      await this.state.setPref({ source: 'pr', pr: prRefOf(review.remote, review.remote.number) });
+      await this.setRepoPref({ source: 'pr', pr: prRefOf(review.remote, review.remote.number) });
       await this.refresh();
       return;
     }
-    if (this.state.getPref().source === 'pr') {
+    if (this.pref().source === 'pr') {
       // Leaving a PR for a local review: fall back to the default local diff source.
-      await this.state.setPref({ source: 'worktree-vs-head' });
+      await this.setRepoPref({ source: 'worktree-vs-head' });
       await this.refresh();
       return;
     }
@@ -333,40 +388,39 @@ export class ReviewController {
   }
 
   async renameReview(id: string, name: string): Promise<void> {
-    await this.reviewStore.rename(this.repoRootOrThrow(), id, name);
-    this._onDidChange.fire();
+    await this.reviewStore.rename(this.repoRoot, id, name);
+    this.emit();
   }
 
   async deleteReview(id: string): Promise<void> {
-    await this.reviewStore.remove(this.repoRootOrThrow(), id);
+    await this.reviewStore.remove(this.repoRoot, id);
     this.afterThreadChange();
   }
 
   /** Re-key a review onto the current branch (e.g. after branching off someone's PR). */
   async moveReviewToCurrentBranch(id: string): Promise<void> {
-    const repoRoot = this.repoRootOrThrow();
-    await this.reviewStore.moveToBranch(repoRoot, id, this.branchKey(repoRoot));
+    const repoRoot = this.repoRoot;
+    await this.reviewStore.moveToBranch(repoRoot, id, this.branchKey());
     this.afterThreadChange();
   }
 
   // --- Export ---
 
   get baseRef(): string | undefined {
-    return this.state.getPref().baseRef;
+    return this.pref().baseRef;
   }
 
   /** The review to export: the one named by id, else the current review for the branch. */
   reviewToExport(id?: string): Review | undefined {
-    const repoRoot = this.state.getPref().repoRoot;
-    if (!repoRoot) return undefined;
-    return id ? this.reviewStore.get(repoRoot, id) : this.reviewStore.current(repoRoot, this.branchKey(repoRoot));
+    const repoRoot = this.repoRoot;
+    return id ? this.reviewStore.get(repoRoot, id) : this.reviewStore.current(repoRoot, this.branchKey());
   }
 
   /** "Current positions" export is only meaningful for the current review with a diff loaded. */
   canExportLive(review: Review): boolean {
-    const repoRoot = this.state.getPref().repoRoot;
-    if (!repoRoot || !this.currentDiff()) return false;
-    const branch = this.branchKey(repoRoot);
+    const repoRoot = this.repoRoot;
+    if (!this.currentDiff()) return false;
+    const branch = this.branchKey();
     return review.branch === branch && review.id === this.reviewStore.currentId(repoRoot, branch);
   }
 
@@ -381,41 +435,38 @@ export class ReviewController {
   }
 
   repoName(): string {
-    const repoRoot = this.state.getPref().repoRoot;
-    return this.repos.find((r) => r.repoRoot === repoRoot)?.name ?? 'repo';
+    return this.info.name;
   }
 
   /** A short label for the current diff source — for the Changes-view source switcher. */
   sourceLabel(): string {
-    const pref = this.state.getPref();
+    const pref = this.pref();
     if (pref.source === 'pr' && pref.pr) return `Pull request #${pref.pr.number}`;
     if (pref.source === 'vs-base') return `Compared with ${pref.baseRef ?? 'base branch'}`;
     return SOURCE_LABELS[pref.source];
   }
 
   /**
-   * The review provider + repo for the current repo's `origin`, or undefined when there is no supported
-   * review host (no origin, or a host that is neither github.com nor the configured GHE). Cached per
-   * repo + enterprise setting so repeated reads (context key, the Pull Requests view) do not re-shell git.
+   * The review provider + repo for this repo's `origin`, or undefined when there is no supported review host
+   * (no origin, or a host that is neither github.com nor the configured GHE). Cached per enterprise setting so
+   * repeated reads (context key, the Pull Requests view) do not re-shell git.
    */
   async currentRemote(): Promise<{ repo: RemoteRepoRef; provider: ReviewProvider } | undefined> {
-    const repoRoot = this.state.getPref().repoRoot;
-    if (!repoRoot) return undefined;
     const enterpriseUri =
       vscode.workspace.getConfiguration('agenticReview').get<string>('github.enterpriseUri') || undefined;
     const cached = this.remoteCache;
-    if (cached && cached.repoRoot === repoRoot && cached.enterpriseUri === enterpriseUri) return cached.value;
-    const url = await getRemoteUrl(repoRoot);
+    if (cached && cached.enterpriseUri === enterpriseUri) return cached.value;
+    const url = await getRemoteUrl(this.repoRoot);
     const repo = url ? parseRemoteUrl(url) : undefined;
     const provider = repo ? resolveProvider(repo, enterpriseUri) : undefined;
     const value = repo && provider ? { repo, provider } : undefined;
-    this.remoteCache = { repoRoot, enterpriseUri, value };
+    this.remoteCache = { enterpriseUri, value };
     return value;
   }
 
   /** The provider to resolve the signed-in identity against: the loaded PR's host, else the configured default. */
   private authProviderId(): GithubProviderId {
-    const pref = this.state.getPref();
+    const pref = this.pref();
     if (pref.source === 'pr' && pref.pr) return pref.pr.provider as GithubProviderId;
     const ent = vscode.workspace.getConfiguration('agenticReview').get<string>('github.enterpriseUri');
     return ent ? 'github-enterprise' : 'github';
@@ -432,9 +483,9 @@ export class ReviewController {
 
   /** The login stored on the open PR review when it was opened, if any. */
   private cachedViewer(): string | undefined {
-    const pref = this.state.getPref();
-    if (pref.source !== 'pr' || !pref.repoRoot) return undefined;
-    const review = this.reviewStore.current(pref.repoRoot, this.branchKey(pref.repoRoot));
+    const pref = this.pref();
+    if (pref.source !== 'pr') return undefined;
+    const review = this.reviewStore.current(this.repoRoot, this.branchKey());
     return review?.kind === 'remote' ? review.remote.viewer : undefined;
   }
 
@@ -494,60 +545,49 @@ export class ReviewController {
       clearTimeout(this.renderSettle);
       this.renderSettle = undefined;
     }
-    this.repos = await getRepositories();
-    const pref = this.state.getPref();
-    let repoRoot = pref.repoRoot;
-    if (!repoRoot || !this.repos.some((r) => r.repoRoot === repoRoot)) {
-      repoRoot = this.repos[0]?.repoRoot;
-      await this.state.setPref({ repoRoot });
+    this.info = (await getRepoInfo(this.repoRoot)) ?? this.info;
+    const pref = this.pref();
+    const repoRoot = this.repoRoot;
+    this.branches = await listBranches(repoRoot);
+    if (!this.userNameRead) {
+      this.userName = await getUserName(repoRoot);
+      this.userNameRead = true;
     }
-    if (!repoRoot) {
-      this.branches = [];
-      this.current = { state: 'no-repo' };
+    // Prefer the signed-in GitHub login as the comment author. The lookup is silent (no prompt or API call), so
+    // re-resolve the login on each refresh to stay current with sign-in and sign-out.
+    this.viewerLogin = await getViewerLogin(this.authProviderId());
+    // Legacy active threads always migrate onto the real git branch, never a loaded PR.
+    await this.reviewStore.migrateLegacy(repoRoot, this.localBranchKey(), this.info.headSha);
+    if (pref.source === 'pr') {
+      // A PR restored from a previous session has never been fetched in this one: re-pin refs a gc may
+      // have collected before diffing, and pull the posted set once the diff is up.
+      if (pref.pr && this.restoredPr !== prRestoreKey(pref.pr)) {
+        this.restoredPr = prRestoreKey(pref.pr);
+        await this.ensurePrRefs(repoRoot, pref.pr);
+        restoreThreads = true;
+      }
+      // Diff the PR refs fetched earlier. The session fetches from the network when it loads the PR.
+      this.current = await getDiff({ repoRoot, source: 'pr', pr: pref.pr, whitespace: pref.whitespace });
     } else {
-      this.branches = await listBranches(repoRoot);
-      if (repoRoot !== this.userNameRepo) {
-        this.userName = await getUserName(repoRoot);
-        this.userNameRepo = repoRoot;
-      }
-      // Prefer the signed-in GitHub login as the comment author; silent (no prompt/API call), so re-resolve
-      // each refresh to stay current with sign-in/out.
-      this.viewerLogin = await getViewerLogin(this.authProviderId());
-      // Legacy active threads always migrate onto the real git branch, never a loaded PR.
-      const localHead = this.repos.find((r) => r.repoRoot === repoRoot)?.headSha ?? null;
-      await this.reviewStore.migrateLegacy(repoRoot, this.localBranchKey(repoRoot), localHead);
-      if (pref.source === 'pr') {
-        // A PR restored from a previous session has never been fetched in this one: re-pin refs a gc may
-        // have collected before diffing, and pull the posted set once the diff is up.
-        if (pref.pr && this.restoredPr !== prRestoreKey(pref.pr)) {
-          this.restoredPr = prRestoreKey(pref.pr);
-          await this.ensurePrRefs(repoRoot, pref.pr);
-          restoreThreads = true;
-        }
-        // Diff the already-fetched PR refs; the network fetch happens when the PR is loaded, not on every refresh.
-        this.current = await getDiff({ repoRoot, source: 'pr', pr: pref.pr, whitespace: pref.whitespace });
-      } else {
-        const includeUntracked = vscode.workspace
-          .getConfiguration('agenticReview')
-          .get<boolean>('includeUntracked', true);
-        this.current = await getDiff({
-          repoRoot,
-          source: pref.source,
-          baseRef: pref.baseRef,
-          includeUntracked,
-          whitespace: pref.whitespace,
-        });
-      }
-      if (this.current.state === 'ok' && this.current.diff) {
-        this.current.diff.files = orderByTree(this.current.diff.files);
-        // Stamped last, once the file list is settled, so the view can tell a re-diff that found nothing new
-        // from one that did and skip rebuilding for the former.
-        this.current.diff.contentId = diffContentId(this.current.diff);
-      }
+      const includeUntracked = vscode.workspace
+        .getConfiguration('agenticReview')
+        .get<boolean>('includeUntracked', true);
+      this.current = await getDiff({
+        repoRoot,
+        source: pref.source,
+        baseRef: pref.baseRef,
+        includeUntracked,
+        whitespace: pref.whitespace,
+      });
     }
-    void vscode.commands.executeCommand('setContext', 'agenticReview.emptyReason', this.current.state);
-    void vscode.commands.executeCommand('setContext', 'agenticReview.source', this.state.getPref().source);
-    this._onDidChange.fire();
+    if (this.current.state === 'ok' && this.current.diff) {
+      this.current.diff.files = orderByTree(this.current.diff.files);
+      // Stamped last, once the file list is settled, so the view can tell a re-diff that found nothing new
+      // from one that did and skip rebuilding for the former.
+      this.current.diff.contentId = diffContentId(this.current.diff);
+    }
+    if (this.disposed) return;
+    this.emit();
     this.panelPost?.('stateChanged', this.buildState());
     // Not awaited: the diff is already on screen, and the upstream threads land a moment later.
     if (restoreThreads) void this.syncPullRequest().catch(() => undefined);
@@ -575,7 +615,7 @@ export class ReviewController {
   }
 
   async setSource(source: DiffSource, baseRef?: string): Promise<void> {
-    await this.state.setPref({ source, baseRef });
+    await this.setRepoPref({ source, baseRef });
     await this.refresh();
   }
 
@@ -591,7 +631,7 @@ export class ReviewController {
     remote: string;
   }): Promise<void> {
     return this.withPrLock(async () => {
-      const repoRoot = this.repoRootOrThrow();
+      const repoRoot = this.repoRoot;
       const detail = await req.provider.getRequest(req.repo, req.number);
       await fetchPr({
         repoRoot,
@@ -632,7 +672,7 @@ export class ReviewController {
       this.headStale = false; // a freshly (re)fetched head is current by definition
       this.resetSyncSignals();
       this.restoredPr = prRestoreKey(pr); // just fetched and imported here — the restore path must not repeat it
-      await this.state.setPref({ source: 'pr', pr });
+      await this.setRepoPref({ source: 'pr', pr });
       const branch = prBranchKey(pr);
       const review = await this.reviewStore.ensureCurrent(repoRoot, branch, detail.headSha, remote);
       await this.refresh(); // computes the PR diff into this.current
@@ -662,10 +702,10 @@ export class ReviewController {
    */
   async syncPullRequest(): Promise<OrphanReport> {
     return this.withPrLock(async () => {
-      const pref = this.state.getPref();
-      if (pref.source !== 'pr' || !pref.repoRoot) return { localOnly: 0, deletes: 0 };
-      const repoRoot = pref.repoRoot;
-      const review = this.reviewStore.current(repoRoot, this.branchKey(repoRoot));
+      const pref = this.pref();
+      if (pref.source !== 'pr') return { localOnly: 0, deletes: 0 };
+      const repoRoot = this.repoRoot;
+      const review = this.reviewStore.current(repoRoot, this.branchKey());
       if (review?.kind !== 'remote') return { localOnly: 0, deletes: 0 };
       const remote = await this.currentRemote();
       if (!remote) return { localOnly: 0, deletes: 0 };
@@ -685,7 +725,7 @@ export class ReviewController {
         /* the comments did sync; the next poll retries the head */
       }
       this.resetSyncSignals();
-      this._onDidChange.fire();
+      this.emit();
       this.panelPost?.('stateChanged', this.buildState());
       return orphans;
     });
@@ -693,9 +733,9 @@ export class ReviewController {
 
   /** The staged-change counts for the open PR (for the event picker / confirmation), or undefined outside PR mode. */
   submitPreview(): SubmitPreview | undefined {
-    const pref = this.state.getPref();
-    if (pref.source !== 'pr' || !pref.repoRoot) return undefined;
-    const review = this.reviewStore.current(pref.repoRoot, this.branchKey(pref.repoRoot));
+    const pref = this.pref();
+    if (pref.source !== 'pr') return undefined;
+    const review = this.reviewStore.current(this.repoRoot, this.branchKey());
     if (review?.kind !== 'remote') return undefined;
     const { counts } = buildSubmitPlan(review, 'comment');
     return {
@@ -722,10 +762,10 @@ export class ReviewController {
    */
   async submitPullRequest(event: SubmitEvent, body?: string): Promise<{ counts: SubmitCounts; orphans: OrphanReport }> {
     return this.withPrLock(async () => {
-      const pref = this.state.getPref();
-      if (pref.source !== 'pr' || !pref.repoRoot) throw new Error('No pull request is open.');
-      const repoRoot = pref.repoRoot;
-      const branch = this.branchKey(repoRoot);
+      const pref = this.pref();
+      if (pref.source !== 'pr') throw new Error('No pull request is open.');
+      const repoRoot = this.repoRoot;
+      const branch = this.branchKey();
       let review = this.reviewStore.current(repoRoot, branch);
       if (review?.kind !== 'remote') throw new Error('No pull request review to submit.');
       const reviewId = review.id;
@@ -769,7 +809,7 @@ export class ReviewController {
           // Offline right after posting. Pending state stays as the apply-as-you-go steps left it, and the
           // next sync reconciles the rest; a retry is still safe because drafts adopt on re-import.
         }
-        this._onDidChange.fire();
+        this.emit();
         this.panelPost?.('stateChanged', this.buildState());
       }
       return { counts, orphans };
@@ -810,16 +850,16 @@ export class ReviewController {
    */
   async discardPendingReview(): Promise<void> {
     return this.withPrLock(async () => {
-      const pref = this.state.getPref();
-      if (pref.source !== 'pr' || !pref.repoRoot) throw new Error('No pull request is open.');
-      const repoRoot = pref.repoRoot;
-      const review = this.reviewStore.current(repoRoot, this.branchKey(repoRoot));
+      const pref = this.pref();
+      if (pref.source !== 'pr') throw new Error('No pull request is open.');
+      const repoRoot = this.repoRoot;
+      const review = this.reviewStore.current(repoRoot, this.branchKey());
       if (review?.kind !== 'remote') throw new Error('No pull request review to discard.');
       const remote = await this.currentRemote();
       if (!remote) throw new Error("This repository's origin is not a supported review host.");
       const number = review.remote.number ?? Number(review.remote.id);
       await this.syncFromRemote(repoRoot, review.id, remote, number, { discardPending: true });
-      this._onDidChange.fire();
+      this.emit();
       this.panelPost?.('stateChanged', this.buildState());
     });
   }
@@ -837,11 +877,11 @@ export class ReviewController {
    * or losing a race to a mutation neither backs the poll off nor clears a real failure run.
    */
   async pollPullRequest(): Promise<{ orphans?: OrphanReport; headChanged?: boolean; incoming?: number }> {
-    const pref = this.state.getPref();
-    if (pref.source !== 'pr' || !pref.repoRoot) return {};
+    const pref = this.pref();
+    if (pref.source !== 'pr') return {};
     if (this.prMutation) return {}; // a submit/refresh/open owns the review right now
-    const repoRoot = pref.repoRoot;
-    const review = this.reviewStore.current(repoRoot, this.branchKey(repoRoot));
+    const repoRoot = this.repoRoot;
+    const review = this.reviewStore.current(repoRoot, this.branchKey());
     if (review?.kind !== 'remote') return {};
     const diff = this.currentDiff();
     if (!diff) return {};
@@ -897,7 +937,7 @@ export class ReviewController {
     this.failedPolls = nextFailureCount(this.failedPolls, failed);
     if (threadsChanged) this.afterThreadChange();
     if (headChanged || metaChanged || incoming || failed) {
-      this._onDidChange.fire();
+      this.emit();
       this.panelPost?.('stateChanged', this.buildState());
     }
     return { orphans, headChanged, incoming: incoming || undefined };
@@ -910,46 +950,47 @@ export class ReviewController {
    */
   recordPollFailure(): void {
     this.failedPolls = nextFailureCount(this.failedPolls, true);
-    this._onDidChange.fire();
+    this.emit();
     this.panelPost?.('stateChanged', this.buildState());
   }
 
   /** Apply the upstream head change the banner announced: re-fetch the new head, re-diff, re-import. */
   async reloadPullRequest(): Promise<void> {
-    const pref = this.state.getPref();
-    if (pref.source !== 'pr' || !pref.repoRoot) return;
+    const pref = this.pref();
+    if (pref.source !== 'pr') return;
     const remote = await this.currentRemote();
     if (!remote) return;
-    const review = this.reviewStore.current(pref.repoRoot, this.branchKey(pref.repoRoot));
+    const review = this.reviewStore.current(this.repoRoot, this.branchKey());
     const number = review?.kind === 'remote' ? (review.remote.number ?? Number(review.remote.id)) : pref.pr?.number;
     if (number == null) return;
     await this.openPullRequest({ provider: remote.provider, repo: remote.repo, number, remote: 'origin' });
   }
 
-  async setRepo(repoRoot: string): Promise<void> {
-    await this.state.setPref({ repoRoot });
-    await this.refresh();
+  /**
+   * The workspace view prefs changed. Hiding whitespace changes the diff itself, so the session re-diffs. The other
+   * prefs change how the panel draws the diff, so the panel repaints.
+   */
+  async viewPrefsChanged(whitespaceChanged: boolean): Promise<void> {
+    if (whitespaceChanged) {
+      await this.refresh();
+      return;
+    }
+    this.emit();
+    this.panelPost?.('stateChanged', this.buildState());
   }
 
-  async setViewPref(patch: { viewMode?: ViewMode; whitespace?: boolean; wrap?: boolean }): Promise<void> {
-    const before = this.state.getPref();
-    await this.state.setPref(patch);
-    if (patch.whitespace !== undefined && patch.whitespace !== before.whitespace) {
-      await this.refresh(); // whitespace changes the diff itself → re-fetch
-    } else {
-      this._onDidChange.fire();
-      this.panelPost?.('stateChanged', this.buildState()); // view mode is render-only
-    }
+  /** The workspace gained or lost a repository, so the panel's labels may need to name this one. */
+  workspaceChanged(): void {
+    this.panelPost?.('stateChanged', this.buildState());
   }
 
   async setViewed(filePath: string, viewed: boolean): Promise<void> {
-    const pref = this.state.getPref();
-    if (!pref.repoRoot) return;
+    const pref = this.pref();
     const ns = this.viewedNs(pref);
-    await this.state.setViewed(pref.repoRoot, ns, filePath, viewed);
-    this._onDidChange.fire();
+    await this.state.setViewed(this.repoRoot, ns, filePath, viewed);
+    this.emit();
     const paths = this.files().map((f) => f.path);
-    this.panelPost?.('viewedUpdated', { viewed: this.state.viewedFor(pref.repoRoot, ns, paths) });
+    this.panelPost?.('viewedUpdated', { viewed: this.state.viewedFor(this.repoRoot, ns, paths) });
   }
 
   reveal(filePath: string, threadId?: string): void {
@@ -967,17 +1008,17 @@ export class ReviewController {
   // --- Comment mutations (autosave into the current review). Each returns the canonical thread. ---
 
   private ctx(): { repoRoot: string; branch: string; diff: ReviewDiff; headSha: string | null } {
-    const repoRoot = this.state.getPref().repoRoot;
+    const repoRoot = this.repoRoot;
     const diff = this.currentDiff();
-    if (!repoRoot || !diff) throw new Error('No active diff to comment on.');
-    return { repoRoot, branch: this.branchKey(repoRoot), diff, headSha: this.headShaFor(repoRoot) };
+    if (!diff) throw new Error('No active diff to comment on.');
+    return { repoRoot, branch: this.branchKey(), diff, headSha: this.headSha() };
   }
 
   private afterThreadChange(): void {
-    this._onDidChange.fire();
+    this.emit();
     // Carry the recomputed pending summary so the PR's pending count + Submit button stay live after a
     // comment mutation, without re-sending the whole diff (that is the heavier stateChanged path).
-    this.panelPost?.('threadsUpdated', { threads: this.threads(), pending: this.pendingSummary(this.state.getPref()) });
+    this.panelPost?.('threadsUpdated', { threads: this.threads(), pending: this.pendingSummary(this.pref()) });
   }
 
   /** Build a suggestion for a thread's current (re-anchored) range, capturing the original from the diff. */
@@ -1116,10 +1157,9 @@ export class ReviewController {
   async getFileTexts(
     files: { path: string; oldPath?: string }[],
   ): Promise<{ texts: Record<string, { old: string; new: string }> }> {
-    const pref = this.state.getPref();
-    if (!pref.repoRoot) return { texts: {} };
+    const pref = this.pref();
     const texts = await getFileTexts({
-      repoRoot: pref.repoRoot,
+      repoRoot: this.repoRoot,
       source: pref.source,
       baseRef: pref.baseRef,
       pr: pref.pr,
@@ -1145,10 +1185,10 @@ export class ReviewController {
       // The request behind the diff, so a reader has the intent along with the lines and never has to go
       // digging for it. The commits come from the refs the fetch already pinned, so this stays local.
       getPrContext: async () => {
-        const pref = this.state.getPref();
-        if (pref.source !== 'pr' || !pref.pr || !pref.repoRoot) return undefined;
+        const pref = this.pref();
+        if (pref.source !== 'pr' || !pref.pr) return undefined;
         const display = this.prDisplay(pref);
-        const { commits, total } = await prCommits(pref.repoRoot, pref.pr.baseSha, pref.pr.headSha);
+        const { commits, total } = await prCommits(this.repoRoot, pref.pr.baseSha, pref.pr.headSha);
         return {
           number: pref.pr.number,
           title: display?.title,
@@ -1166,9 +1206,8 @@ export class ReviewController {
         };
       },
       listReviews: () => {
-        const repoRoot = this.state.getPref().repoRoot;
-        if (!repoRoot) return [];
-        const curId = this.reviewStore.currentId(repoRoot, this.branchKey(repoRoot));
+        const repoRoot = this.repoRoot;
+        const curId = this.reviewStore.currentId(repoRoot, this.branchKey());
         return this.reviewStore.allForRepo(repoRoot).map((r) => ({
           id: r.id,
           name: r.name,
@@ -1179,11 +1218,8 @@ export class ReviewController {
         }));
       },
       getReview: (id) => {
-        const repoRoot = this.state.getPref().repoRoot;
-        if (!repoRoot) return undefined;
-        const review = id
-          ? this.reviewStore.get(repoRoot, id)
-          : this.reviewStore.current(repoRoot, this.branchKey(repoRoot));
+        const repoRoot = this.repoRoot;
+        const review = id ? this.reviewStore.get(repoRoot, id) : this.reviewStore.current(repoRoot, this.branchKey());
         if (!review) return undefined;
         const diff = this.currentDiff();
         return diff ? { ...review, threads: reanchor(review.threads, diff) } : review;

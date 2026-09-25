@@ -109,7 +109,6 @@ function App() {
           setState({
             result: { state: 'error', message: e instanceof Error ? e.message : String(e) },
             source: 'worktree-vs-head',
-            repos: [],
             viewed: {},
             viewMode: 'unified',
             whitespace: false,

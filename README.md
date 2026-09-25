@@ -27,13 +27,13 @@ Install the extension (see [Install](#install)), then open **ReviewMate** from t
 
 **Review your own changes.** Your uncommitted diff opens in a full-width tab. Hover a line and click **+**, or drag to select a range, to comment. Use the comment button on a file header to comment on the whole file. Reply and resolve as you go.
 
-**Review a GitHub pull request.** If the repo's `origin` is a GitHub remote, a **Pull Requests** section lists the open PRs. Click one. Review it exactly like a local diff, then press **Submit review** to post everything back. See [Review a GitHub pull request](#review-a-github-pull-request).
+**Review a GitHub pull request.** If a repo's `origin` is a GitHub remote, a **Pull Requests** section lists the open PRs. Click one. Review it exactly like a local diff, then press **Submit review** to post everything back. See [Review a GitHub pull request](#review-a-github-pull-request).
 
 **Bring in your coding agent.** Run **Set up MCP** and connect it, and the agent reviews alongside you in the same threads. Or run **Export Review** for a Markdown work list to paste in, or JSON for your own tooling. See [Agent integration](#agent-integration-mcp).
 
 ## Review a GitHub pull request
 
-When the current repo's `origin` is a GitHub remote, a **Pull Requests** section appears in the ReviewMate sidebar listing the open PRs, most recently updated first, up to 200. Click one to review it. You can also run **ReviewMate: Review Pull Request** (or pick it from **Select Diff Source**), which signs you in with VS Code's built-in GitHub sign-in the first time, lists the open PRs, and also accepts a PR URL or number. Either way it:
+When a repo's `origin` is a GitHub remote, a **Pull Requests** section appears in the ReviewMate sidebar listing the open PRs, most recently updated first, up to 200. In a workspace with several repositories, each gets its own section, and `repo:<name>` in the filter narrows the list to one. Click one to review it. You can also run **ReviewMate: Review Pull Request** (or pick it from **Select Diff Source**), which signs you in with VS Code's built-in GitHub sign-in the first time, lists the open PRs, and also accepts a PR URL or number. Either way it:
 
 - fetches the PR head and base **in place** (into hidden refs under `refs/agentic-review/`), so your working tree, index, and current branch are never touched.
 - renders `base...head` in the usual diff UI, with a header pill showing the source and target branches and a card with the PR title, state, and description.
@@ -95,7 +95,7 @@ ReviewMate runs a standard, local MCP server (bound to `127.0.0.1`, token-guarde
 2. It generates an mcp.json (URL, token, and ready-to-run connect commands: Claude Code, plus a generic `mcpServers` config for other clients) and opens it. Reopen it anytime with **Open MCP Config**. It lives in the extension's per-workspace storage, not in your repo.
 3. Connect your client. Use **Start MCP Server** / **Stop MCP Server** to control it anytime.
 
-Tools the agent gets: `get_diff`, `get_active_review`, `get_review`, `list_reviews`, `post_comment`, `reply`, `resolve`, `edit_comment`, `delete_comment`, `react`. `post_comment` without a line makes a file-level comment. `react` works on any comment, like the reaction button in the panel. On a pull request, `get_diff` hands over the request as well as its lines: number, title, state, base and head, the description, and the commits, all read locally. It can revise and withdraw comments under the same rule you get, measured against the same identity: on a pull request its own comments and yours, so someone else's is never touchable, and on a local review any comment, because the only authors there are you and it. It never writes to your files: it posts comments and makes the changes by editing code itself. The server is loopback-only and has no GitHub access of its own.
+Tools the agent gets: `list_repos`, `get_diff`, `get_active_review`, `get_review`, `list_reviews`, `post_comment`, `reply`, `resolve`, `edit_comment`, `delete_comment`, `react`. Every tool except `list_repos` takes an optional `repo` (a name or path from `list_repos`). With several repositories open, a tool that changes the review requires it, so a comment never goes to the wrong repository when you switch panels. A read without it acts on the only repository, or else the one whose review panel you focused last. `post_comment` without a line makes a file-level comment. `react` works on any comment, like the reaction button in the panel. On a pull request, `get_diff` returns the request as well as its lines: number, title, state, base and head, the description, and the commits, all read locally. The agent can revise and withdraw comments under the same rule you get, measured against the same identity: on a pull request its own comments and yours, never someone else's, and on a local review any comment, because the only authors there are you and the agent. The agent never writes to your files through ReviewMate: it posts comments and makes changes by editing code itself. The server is loopback-only and has no GitHub access of its own.
 
 ### Or export a work list
 
@@ -182,9 +182,13 @@ Development setup, the build and watch loop, and the release process are in [CON
 
 ## FAQ
 
+### Does ReviewMate work in a multi-root workspace?
+
+Yes. Every view lists all the git repositories in the workspace, one section each, the way Source Control does. Each repository keeps its own diff source, open pull request, current review, and panel, so you can review a pull request in one while another shows your local changes. A command acts on the repository you ran it from, the panel you have focused, or the file you have open, and prompts you to pick one only when none of those identifies a repository. With one repository the views look the same as before.
+
 ### I work across several repositories. Do I register the MCP server for each one?
 
-Each VS Code window runs its own MCP server, on its own port with its own token, for the repository open in that window. That is why the connect details are per workspace.
+Each VS Code window runs its own MCP server, on its own port with its own token, for the repositories open in that window. In a multi-root window one server serves all of those repositories, and tools take a `repo` argument. The connect details are therefore per workspace.
 
 You do not keep one global list of servers. The `claude mcp add` command we generate uses Claude Code's default **local scope**, which is tied to the current project directory: run it once inside a repo and only that repo's Claude Code sees the server, with no name collision across repos. Cursor and VS Code's own MCP support have the same per-project scoping. The exception is clients with a single global config and no project scope (for example Claude Desktop), where you give each server a distinct name. In every case you only wire up the repositories you actually want the agent to review.
 

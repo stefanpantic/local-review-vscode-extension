@@ -45,10 +45,11 @@ export interface SyncState {
 
 export interface ReviewStatePayload {
   result: DiffResult;
-  repoRoot?: string;
+  repoRoot?: string; // the repository this panel reviews; absent only when the host could not be reached
+  repo?: RepoInfo; // its name, HEAD, and branch
+  multiRepo?: boolean; // the workspace holds several repositories, so labels name this one
   source: DiffSource;
   baseRef?: string;
-  repos: RepoInfo[];
   viewed: Record<string, boolean>; // filePath -> viewed, for the current repo+source
   viewMode: ViewMode;
   whitespace: boolean; // hide whitespace

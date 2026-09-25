@@ -20,6 +20,7 @@ export interface Viewer {
  * filter matches everything, which is how "All open" is expressed.
  */
 export interface PrFilter {
+  repo?: string; // a repository name or `owner/repo`. Narrows which repositories' lists show, not the PRs in them.
   text?: string; // bare words, matched against the number, title, and author
   author?: string; // a login, or ME
   reviewRequested?: string; // a login, or ME. Includes that person's teams when they are known.
@@ -29,7 +30,7 @@ export interface PrFilter {
 }
 
 /**
- * Parse a filter string. Recognized tokens are `author:<login>`, `review-requested:<login>`,
+ * Parse a filter string. Recognized tokens are `repo:<name>`, `author:<login>`, `review-requested:<login>`,
  * `user-review-requested:<login>`, `team-review-requested:<slug>`, `is:draft`, and `is:ready`. The three
  * review qualifiers carry GitHub's own meanings, so what is learned in its search box works here. Anything
  * unrecognized is bare text, so a typo narrows the list instead of failing: a stray `authr:me` simply finds
@@ -42,7 +43,8 @@ export function parsePrFilter(input: string): PrFilter {
     const colon = token.indexOf(':');
     const key = colon < 0 ? '' : token.slice(0, colon).toLowerCase();
     const value = colon < 0 ? '' : token.slice(colon + 1);
-    if (key === 'author' && value) filter.author = value;
+    if (key === 'repo' && value) filter.repo = value;
+    else if (key === 'author' && value) filter.author = value;
     else if (key === 'review-requested' && value) filter.reviewRequested = value;
     else if (key === 'user-review-requested' && value) filter.userReviewRequested = value;
     else if (key === 'team-review-requested' && value) filter.teamReviewRequested = value;
@@ -57,6 +59,7 @@ export function parsePrFilter(input: string): PrFilter {
 /** The canonical token string for a filter. Round-trips through `parsePrFilter`, and is what persists. */
 export function formatPrFilter(filter: PrFilter): string {
   const parts: string[] = [];
+  if (filter.repo) parts.push(`repo:${filter.repo}`);
   if (filter.author) parts.push(`author:${filter.author}`);
   if (filter.reviewRequested) parts.push(`review-requested:${filter.reviewRequested}`);
   if (filter.userReviewRequested) parts.push(`user-review-requested:${filter.userReviewRequested}`);
@@ -79,6 +82,7 @@ export function describePrFilter(filter: PrFilter): string {
   if (isPrFilterEmpty(filter)) return '';
   // Only a single-dimension filter gets a friendly name; a combination is clearest as its own tokens.
   const set = [
+    filter.repo,
     filter.author,
     filter.reviewRequested,
     filter.userReviewRequested,
@@ -87,6 +91,7 @@ export function describePrFilter(filter: PrFilter): string {
     filter.text,
   ].filter((v) => v !== undefined);
   if (set.length === 1) {
+    if (filter.repo) return `In ${filter.repo}`;
     if (filter.author === ME) return 'Created by me';
     if (filter.reviewRequested === ME) return 'Review requested';
     if (filter.userReviewRequested === ME) return 'Review requested from me directly';
@@ -98,6 +103,25 @@ export function describePrFilter(filter: PrFilter): string {
     if (filter.draft === 'exclude') return 'Ready for review';
   }
   return formatPrFilter(filter);
+}
+
+/** What a `repo:` token is matched against: the workspace repository's name, and its remote's owner and name. */
+export interface RepoTokenTarget {
+  name: string;
+  owner?: string;
+  repo?: string;
+}
+
+/**
+ * Whether a repository passes the filter's `repo:` token. The token matches the repository's name in the
+ * workspace, the remote's `owner/repo`, or the remote's name alone, ignoring case. Without a `repo:` token,
+ * every repository passes.
+ */
+export function matchesRepoToken(filter: PrFilter, target: RepoTokenTarget): boolean {
+  if (!filter.repo) return true;
+  const want = filter.repo.toLowerCase();
+  const names = [target.name, target.repo, target.owner && target.repo ? `${target.owner}/${target.repo}` : undefined];
+  return names.some((n) => n?.toLowerCase() === want);
 }
 
 /** Whether the filter leans on ME, so a caller can tell the difference between "no matches" and "no identity". */
@@ -140,7 +164,9 @@ function matchesText(pr: PullRequestSummary, text: string): boolean {
 }
 
 /**
- * Apply a filter to a list of summaries. `viewer` supplies what ME resolves to; without a login a ME filter
+ * Apply a filter to one repository's list of summaries. This function skips the `repo:` token because a
+ * summary has no repository field: the caller checks `matchesRepoToken` per list. `viewer` supplies what ME
+ * resolves to; without a login a ME filter
  * matches nothing, which is why `needsIdentity` exists to explain that case rather than show an unexplained
  * empty list.
  *
