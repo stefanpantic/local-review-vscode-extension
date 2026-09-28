@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { PrCommit, ReviewDiff, Side } from '../model/ReviewDiff';
 import type { Comment, CommentThread, ReactionEmoji, Review } from '../model/Comment';
 import { AGENT_AUTHOR, canEditComment, REACTION_EMOJIS } from '../model/Comment';
+import { endLine, startLine, threadPath } from '../comments/position';
 
 // Re-exported for existing importers; the definition now lives in the shared model.
 export { AGENT_AUTHOR };
@@ -87,11 +88,12 @@ export interface McpWorkspaceApi {
 
 function threadLoc(t: CommentThread): string {
   const { anchor } = t;
-  if (anchor.kind === 'file') return `${anchor.filePath} (file)`;
-  const start = t.resolvedLine ?? anchor.lineNumber;
-  const end = t.resolvedEndLine ?? anchor.endLineNumber ?? start;
+  const path = threadPath(t);
+  if (anchor.kind === 'file') return `${path} (file)`;
+  const start = startLine(t);
+  const end = endLine(t);
   const range = end > start ? `${start}-${end}` : `${start}`;
-  return `${anchor.filePath}:${range} (${anchor.side})`;
+  return `${path}:${range} (${anchor.side})`;
 }
 
 function indent(text: string, spaces: number): string {

@@ -95,6 +95,7 @@ function pendingTitle(p?: PendingSummary): string {
   add(p.edits, 'edit', 'edits');
   add(p.deletes, 'deletion', 'deletions');
   add(p.resolvedToggles, 'resolve change', 'resolve changes');
+  add(p.reactions, 'reaction change', 'reaction changes');
   return `Not yet submitted to GitHub: ${parts.join(', ')}`;
 }
 
