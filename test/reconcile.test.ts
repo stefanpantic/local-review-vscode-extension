@@ -278,6 +278,80 @@ test("adoption keeps the draft's un-posted replies pending on the adopted thread
   assert.equal(threads[0].comments[1].remoteId, undefined); // still pending -> posts as a reply on retry
 });
 
+// A line anchor like `thread()`'s, on another line.
+const at = (lineNumber: number) => ({ ...thread().anchor, lineNumber }) as CommentThread['anchor'];
+
+test('drafts with the same text on different lines each adopt the copy on their own line', () => {
+  const agentDraft = thread({
+    id: 'agent',
+    anchor: at(5),
+    comments: [comment({ id: 'a1', body: 'same here', author: AGENT_AUTHOR })],
+  });
+  const myDraft = thread({
+    id: 'mine',
+    anchor: at(9),
+    comments: [comment({ id: 'm1', body: 'same here', author: 'me' })],
+  });
+  // Both came back under my login, and GitHub lists line 9 before line 5.
+  const posted = (id: string, lineNumber: number) =>
+    imported(id, 'same here', {
+      anchor: at(lineNumber),
+      comments: [comment({ id: `${id}c`, remoteId: `${id}c`, body: 'same here', remoteBody: 'same here' })],
+    });
+  const { threads, adopted } = reconcile([agentDraft, myDraft], [], [posted('T9', 9), posted('T5', 5)], {
+    viewer: 'me',
+  });
+  assert.equal(adopted, 2);
+  const onLine = (n: number) => threads.find((t) => t.anchor.kind === 'line' && t.anchor.lineNumber === n)!;
+  assert.equal(onLine(5).remoteThreadId, 'T5');
+  assert.equal(onLine(5).comments[0].author, AGENT_AUTHOR);
+  assert.equal(onLine(9).remoteThreadId, 'T9');
+  assert.equal(onLine(9).comments[0].author, 'me');
+});
+
+test('a draft whose line moved upstream still adopts its copy by text', () => {
+  const draft = thread({ id: 'draft', comments: [comment({ id: 'n1', body: 'looks wrong', author: 'me' })] });
+  const fresh = [
+    imported('T9', 'looks wrong', {
+      anchor: at(4),
+      comments: [comment({ id: 'T9c', remoteId: 'T9c', body: 'looks wrong', remoteBody: 'looks wrong' })],
+    }),
+  ];
+  const { adopted } = reconcile([draft], [], fresh, { viewer: 'me' });
+  assert.equal(adopted, 1);
+});
+
+test('a draft adopts its copy when the import trimmed the text', () => {
+  const draft = thread({
+    id: 'draft',
+    comments: [
+      comment({
+        id: 'n1',
+        body: 'use this\r\n',
+        author: AGENT_AUTHOR,
+        suggestion: { original: 'x', replacement: 'y\n' },
+      }),
+    ],
+  });
+  const fresh = [
+    imported('T9', 'use this', {
+      comments: [
+        comment({
+          id: 'T9c',
+          remoteId: 'T9c',
+          body: 'use this',
+          remoteBody: 'use this',
+          suggestion: { original: 'x', replacement: 'y' },
+        }),
+      ],
+    }),
+  ];
+  const { threads, adopted } = reconcile([draft], [], fresh, { viewer: 'me' });
+  assert.equal(adopted, 1);
+  assert.equal(threads.length, 1, 'no pending copy left beside the posted one');
+  assert.equal(threads[0].comments[0].author, AGENT_AUTHOR);
+});
+
 test("someone else's identical comment is never adopted as your draft (#3)", () => {
   const draft = thread({ id: 'draft', comments: [comment({ id: 'n1', body: 'same text', author: 'me' })] });
   const fresh = [
