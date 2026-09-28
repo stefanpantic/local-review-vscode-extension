@@ -9,6 +9,9 @@ import { apiBaseUrls, type GithubProviderId } from './remote';
 
 const ThrottledOctokit = Octokit.plugin(throttling);
 
+/** How many times a request refused by GitHub's secondary rate limit is resent after the wait it asks for. */
+const SECONDARY_RATE_LIMIT_RETRIES = 3;
+
 /** The read operations the provider needs. Fakeable, so the provider is testable without the network. */
 export interface GithubReadClient {
   viewer(): Promise<string>;
@@ -403,8 +406,10 @@ export function createGithubClient(opts: {
       onRateLimit: (_retryAfter, _options, _octokit, retryCount) => {
         if (retryCount === 0) return true; // retry once after waiting
       },
+      // The secondary limit throttles bursts of writes, which a large Submit sends one after another. A
+      // refused request was never applied, so waiting it out and resending cannot post anything twice.
       onSecondaryRateLimit: (_retryAfter, _options, _octokit, retryCount) => {
-        if (retryCount === 0) return true;
+        if (retryCount < SECONDARY_RATE_LIMIT_RETRIES) return true;
       },
     },
   });

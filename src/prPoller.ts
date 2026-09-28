@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { log } from './log';
+import { notify } from './notify';
 import { nextPollDelay } from './poll';
 import type { OrphanReport } from './review/reconcile';
 import type { RepoSession } from './repoSession';
@@ -50,12 +51,10 @@ export class PrPoller implements vscode.Disposable {
       const { orphans, incoming } = await this.session.pollPullRequest();
       const where = this.session.multiRepo() ? ` in ${this.session.repoName()}` : '';
       if (orphans) {
-        void vscode.window.showInformationMessage(`ReviewMate: synced upstream changes${where}.${orphanNote(orphans)}`);
+        notify(`ReviewMate: synced upstream changes${where}.${orphanNote(orphans)}`);
       }
       if (incoming) {
-        void vscode.window.showInformationMessage(
-          `ReviewMate: ${incoming} new comment${incoming === 1 ? '' : 's'} on the pull request${where}.`,
-        );
+        notify(`ReviewMate: ${incoming} new comment${incoming === 1 ? '' : 's'} on the pull request${where}.`);
       }
     } catch {
       this.session.recordPollFailure();
