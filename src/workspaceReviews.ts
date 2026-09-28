@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { ReviewState } from './reviewState';
 import type { ReviewStore } from './comments/ReviewStore';
 import { getRepositories } from './git/git';
+import { notify } from './notify';
 import { RepoSession, type SessionHost } from './repoSession';
 import { ReviewPanel } from './webview/ReviewPanel';
 import { repoForPath, resolveRepo } from './review/repoResolve';
@@ -169,7 +170,7 @@ export class WorkspaceReviews implements vscode.Disposable {
     });
     if (resolution.kind === 'repo') return this.sessions.get(resolution.repoRoot);
     if (resolution.kind === 'none') {
-      if (opts.none) void vscode.window.showInformationMessage(`ReviewMate: ${opts.none}`);
+      if (opts.none) notify(`ReviewMate: ${opts.none}`);
       return undefined;
     }
     const picked = await vscode.window.showQuickPick(

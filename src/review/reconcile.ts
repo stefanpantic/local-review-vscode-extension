@@ -57,11 +57,6 @@ function keepAgentAuthor(fetched: Comment, local: Comment | undefined): Comment 
   return { ...fetched, author: AGENT_AUTHOR };
 }
 
-/**
- * Identity of a comment by its content and position, used to spot a local draft that is already posted.
- * The suggestion is part of it because the same prose with a different proposed replacement is a different
- * comment (the fenced block is stripped back out on import, so the prose alone is not enough).
- */
 function mergeReactions(local: Comment, fetched: Comment): Partial<Pick<Comment, 'reactions' | 'remoteReactions'>> {
   if (!hasReactionDiff(local)) return {};
   return {
@@ -70,14 +65,43 @@ function mergeReactions(local: Comment, fetched: Comment): Partial<Pick<Comment,
   };
 }
 
-function contentKey(filePath: string, side: string, c: Comment): string {
-  return [filePath, side, c.body, c.suggestion?.replacement ?? ''].join('\u0000');
+/**
+ * Text as it survives a round trip through GitHub: line endings unified and outer whitespace dropped. The
+ * import trims a body it strips a suggestion out of and loses a replacement's trailing newline, so comparing
+ * raw text would miss a comment that did post.
+ */
+const normalized = (text: string | undefined): string => (text ?? '').replace(/\r\n?/g, '\n').trim();
+
+/** Whether two comments carry the same prose and the same proposed replacement. */
+function sameContent(a: Comment, b: Comment): boolean {
+  return (
+    normalized(a.body) === normalized(b.body) &&
+    normalized(a.suggestion?.replacement) === normalized(b.suggestion?.replacement)
+  );
+}
+
+/**
+ * Identity of a comment by its file, side, and content, used to spot a local draft that is already posted.
+ * The suggestion is part of it because the same prose with a different proposed replacement is a different
+ * comment (the fenced block is stripped back out on import, so the prose alone is not enough).
+ */
+function contentKey(t: CommentThread): string {
+  const root = t.comments[0];
+  const side = t.anchor.kind === 'line' ? t.anchor.side : '';
+  return [t.anchor.filePath, side, normalized(root.body), normalized(root.suggestion?.replacement)].join('\u0000');
+}
+
+/** The content key narrowed to the lines the comment sits on, so equal text on different lines stays apart. */
+function positionKey(t: CommentThread): string {
+  if (t.anchor.kind !== 'line') return contentKey(t);
+  const { lineNumber, endLineNumber } = t.anchor;
+  return [contentKey(t), lineNumber, endLineNumber ?? lineNumber].join('\u0000');
 }
 
 /**
  * Link local drafts that are already on the remote to their posted thread instead of leaving them staged.
  * A submit that failed partway can leave a draft whose comment did land, and re-sending it would double-post.
- * The match is exact on file, side, body, and suggestion, restricted to your own content and to fetched
+ * The match is on file, side, body, and suggestion, and on lines where they agree, restricted to your own content and to fetched
  * threads no local thread already mirrors. The draft's un-posted follow-up replies stay pending on the
  * adopted thread, so one retry finishes exactly the work that is left.
  */
@@ -89,24 +113,40 @@ function adoptPostedDrafts(
   const claimed = new Set<string>();
   for (const t of local) if (t.remoteThreadId) claimed.add(t.remoteThreadId);
 
-  const candidates = new Map<string, CommentThread[]>();
+  const candidates: CommentThread[] = [];
   for (const ft of fresh) {
     const root = ft.comments[0];
     if (!ft.remoteThreadId || !root?.remoteId || claimed.has(ft.remoteThreadId) || !isMine(root.author)) continue;
-    const key = contentKey(ft.anchor.filePath, ft.anchor.kind === 'line' ? ft.anchor.side : '', root);
-    const list = candidates.get(key) ?? [];
-    list.push(ft);
-    candidates.set(key, list);
+    candidates.push(ft);
   }
-  if (candidates.size === 0) return { threads: local, adopted: 0 };
+  if (candidates.length === 0) return { threads: local, adopted: 0 };
+
+  const drafts = local.filter((t) => {
+    const root = t.comments[0];
+    return !t.remoteThreadId && root && !root.remoteId && isMine(root.author);
+  });
+  // Every posted copy comes back under your login, so the agent's comments and yours are told apart only by
+  // which draft claims which copy. Pair on the exact position first: two comments with the same text on
+  // different lines must each claim their own copy, or the agent's authorship lands on yours. Only a draft
+  // left without a positional match (GitHub moved the line) falls back to the same text anywhere in the file.
+  const matches = new Map<CommentThread, CommentThread>();
+  const taken = new Set<CommentThread>();
+  for (const key of [positionKey, contentKey]) {
+    for (const t of drafts) {
+      if (matches.has(t)) continue;
+      const k = key(t);
+      const match = candidates.find((ft) => !taken.has(ft) && key(ft) === k);
+      if (!match) continue;
+      matches.set(t, match);
+      taken.add(match);
+    }
+  }
+  if (matches.size === 0) return { threads: local, adopted: 0 };
 
   let adopted = 0;
   const threads = local.map((t) => {
     const root = t.comments[0];
-    if (t.remoteThreadId || !root || root.remoteId || !isMine(root.author)) return t;
-    const match = candidates
-      .get(contentKey(t.anchor.filePath, t.anchor.kind === 'line' ? t.anchor.side : '', root))
-      ?.shift();
+    const match = matches.get(t);
     if (!match) return t;
     adopted++;
     // Take the posted root (it carries the remote ids and the imported baselines), keeping the agent's
@@ -243,12 +283,7 @@ export function reconcile(
     // them). Same adoption rule as a draft root: match your own content, and consume each fetched comment
     // once so two identical replies cannot both claim it.
     for (const r of repliesByThread.get(ft.remoteThreadId) ?? []) {
-      const i = unseen.findIndex(
-        (u) =>
-          mine(u.comment.author) &&
-          u.comment.body === r.body &&
-          (u.comment.suggestion?.replacement ?? '') === (r.suggestion?.replacement ?? ''),
-      );
+      const i = unseen.findIndex((u) => mine(u.comment.author) && sameContent(u.comment, r));
       if (i >= 0) {
         // Already on the remote: the fetched copy stands and the pending one is retired, so the fetched copy
         // is where the agent's authorship and any reaction staged on the pending copy have to land.

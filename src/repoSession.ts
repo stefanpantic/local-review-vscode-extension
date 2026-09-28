@@ -48,6 +48,16 @@ export interface SessionHost {
   multiRepo(): boolean;
 }
 
+/**
+ * What a Submit posted. `unsent` is set when the review itself went out but later changes in the batch did
+ * not: they stay staged for the next Submit, and `error` says why they failed.
+ */
+export interface SubmitResult {
+  counts: SubmitCounts;
+  orphans: OrphanReport;
+  unsent?: { count: number; error: unknown };
+}
+
 /** What the Submit flow needs to know before it asks: what is staged, and what the PR will accept. */
 export interface SubmitPreview {
   counts: SubmitCounts;
@@ -754,13 +764,14 @@ export class RepoSession implements vscode.Disposable {
    * reply whose target vanished can't 404 (it becomes a new top-level comment) and a stale delete is dropped.
    *
    * The batch applies as it goes. Every id-addressable step (edit, delete, resolve) is retired from the
-   * pending set the instant it lands, and whatever the outcome, a reconcile from a fresh fetch runs in the
-   * `finally`. Created content has no local id to stamp, so it is retired by that reconcile instead: a draft
+   * pending set the instant it lands, and whatever the outcome, a reconcile from a fresh fetch runs after
+   * it. Created content has no local id to stamp, so it is retired by that reconcile instead: a draft
    * whose comment already posted is adopted rather than re-sent. Between the two, a submit that dies partway
    * leaves only genuinely unsent work staged, so a retry finishes the job without posting anything twice.
-   * Returns the counts plus any orphaned targets handled.
+   * Returns the counts plus any orphaned targets handled, and what was left unsent when the review posted
+   * but a later step failed.
    */
-  async submitPullRequest(event: SubmitEvent, body?: string): Promise<{ counts: SubmitCounts; orphans: OrphanReport }> {
+  async submitPullRequest(event: SubmitEvent, body?: string): Promise<SubmitResult> {
     return this.withPrLock(async () => {
       const pref = this.pref();
       if (pref.source !== 'pr') throw new Error('No pull request is open.');
@@ -793,25 +804,37 @@ export class RepoSession implements vscode.Disposable {
         );
       }
 
+      let failure: { error: unknown } | undefined;
       try {
         await remote.provider.submitReview(remote.repo, number, input, (step) =>
           this.reviewStore.retireApplied(repoRoot, reviewId, step),
         );
-      } finally {
-        // Success or failure, current upstream decides what is still pending. On success this stamps every
-        // new comment's remote id; on failure it retires exactly what did land. Its own failure must not
-        // replace the error being thrown (that error is what the user needs to see), and it must not turn a
-        // successful submit into a failed one — the work is already posted either way.
-        try {
-          const after = await this.syncFromRemote(repoRoot, reviewId, remote, number);
-          orphans = { localOnly: orphans.localOnly + after.localOnly, deletes: orphans.deletes + after.deletes };
-        } catch {
-          // Offline right after posting. Pending state stays as the apply-as-you-go steps left it, and the
-          // next sync reconciles the rest; a retry is still safe because drafts adopt on re-import.
-        }
-        this.emit();
-        this.panelPost?.('stateChanged', this.buildState());
+      } catch (error) {
+        failure = { error };
       }
+      // Success or failure, current upstream decides what is still pending. On success this stamps every
+      // new comment's remote id; on failure it retires exactly what did land. Its own failure must not
+      // replace the submit's error (that error is what the user needs to see), and it must not turn a
+      // successful submit into a failed one — the work is already posted either way.
+      try {
+        const after = await this.syncFromRemote(repoRoot, reviewId, remote, number);
+        orphans = { localOnly: orphans.localOnly + after.localOnly, deletes: orphans.deletes + after.deletes };
+      } catch {
+        // Offline right after posting. Pending state stays as the apply-as-you-go steps left it, and the
+        // next sync reconciles the rest; a retry is still safe because drafts adopt on re-import.
+      }
+      this.emit();
+      this.panelPost?.('stateChanged', this.buildState());
+      if (!failure) return { counts, orphans };
+
+      // The review itself went out when every new comment it carried now comes back linked to its posted
+      // copy. A failure after that (a follow-up reply or reaction refused by a rate limit, or a server error
+      // returned for a review GitHub created anyway) leaves the rest staged: report it as unfinished work,
+      // not as a submit that did not happen.
+      const left = this.reviewStore.get(repoRoot, reviewId);
+      const remaining = left?.kind === 'remote' ? buildSubmitPlan(left, event).counts : undefined;
+      if (counts.newComments === 0 || !remaining || remaining.newComments > 0) throw failure.error;
+      return { counts, orphans, unsent: { count: remaining.total, error: failure.error } };
       return { counts, orphans };
     });
   }
