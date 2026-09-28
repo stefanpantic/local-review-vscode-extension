@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.2](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.10.1...agentic-review-v0.10.2) (2026-09-28)
+
+
+### Bug Fixes
+
+* keep comment authorship right after a large Submit, and close notifications on their own ([#107](https://github.com/stefanpantic/local-review-vscode-extension/issues/107)) ([afd1f6f](https://github.com/stefanpantic/local-review-vscode-extension/commit/afd1f6feb03eb40709f747eba1d691e342cf501f))
+* show a renamed file's current path over MCP, and list reactions in the pending tooltip ([#105](https://github.com/stefanpantic/local-review-vscode-extension/issues/105)) ([b4b0e8a](https://github.com/stefanpantic/local-review-vscode-extension/commit/b4b0e8a42a2c92100f974b4ee83be71f412457a0))
+
 ## [0.10.1](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.10.0...agentic-review-v0.10.1) (2026-09-25)
 
 
