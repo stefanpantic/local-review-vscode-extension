@@ -4,7 +4,6 @@ import { ReviewStore } from './comments/ReviewStore';
 import type { RepoSession, SubmitPreview } from './repoSession';
 import { WorkspaceReviews, repoRootOf } from './workspaceReviews';
 import { orphanNote } from './prPoller';
-import { notify } from './notify';
 import { FilesView } from './webview/filesView';
 import { CommentsView } from './webview/commentsView';
 import { ReviewsView } from './webview/reviewsView';
@@ -177,7 +176,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     mcpDesired = true;
     await syncMcp();
     if (!mcpHandle) {
-      notify('ReviewMate: could not start the MCP server.');
+      void vscode.window.showErrorMessage('ReviewMate: could not start the MCP server.');
       return;
     }
     const { url, token } = mcpHandle;
@@ -213,7 +212,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const stopMcp = async (): Promise<void> => {
     mcpDesired = false;
     await syncMcp();
-    notify('ReviewMate MCP server stopped.');
+    void vscode.window.showInformationMessage('ReviewMate MCP server stopped.');
   };
   // Open the connect file (regenerating it with the live url + token). Starts the server first if needed.
   const openMcpConfig = async (): Promise<void> => {
@@ -227,7 +226,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
     const jsonUri = await writeMcpArtifacts(context, mcpHandle.url, mcpHandle.token);
     if (jsonUri) await vscode.window.showTextDocument(jsonUri);
-    else notify('ReviewMate: no workspace storage available to write the MCP config.');
+    else void vscode.window.showErrorMessage('ReviewMate: no workspace storage available to write the MCP config.');
   };
 
   tree.onDidChangeCheckboxState(
@@ -552,7 +551,7 @@ async function pickSource(session: RepoSession): Promise<void> {
   } else if (picked.source === 'vs-base') {
     const branches = await listBranches(session.repoRoot);
     if (branches.length === 0) {
-      notify('ReviewMate: no local branches to compare against.');
+      void vscode.window.showWarningMessage('ReviewMate: no local branches to compare against.');
       return;
     }
     const base = await vscode.window.showQuickPick(branches, { placeHolder: 'Select the base branch' });
@@ -580,7 +579,7 @@ async function reviewPullRequest(
   if (!session) return; // the picker was dismissed
   const remote = await session.currentRemote();
   if (!remote) {
-    notify(
+    void vscode.window.showWarningMessage(
       'ReviewMate: this repo\'s origin isn\'t a supported review host. Use github.com, or set "agenticReview.github.enterpriseUri" for GitHub Enterprise.',
     );
     return;
@@ -588,7 +587,7 @@ async function reviewPullRequest(
   // Sign in once (interactive); later reads reuse the session silently.
   const token = await githubTokenSource(remote.provider.id as GithubProviderId)(true);
   if (!token) {
-    notify('ReviewMate: sign in to GitHub to review a pull request.');
+    void vscode.window.showInformationMessage('ReviewMate: sign in to GitHub to review a pull request.');
     return;
   }
   const picked = await pickPullRequest(remote.provider, remote.repo);
@@ -625,7 +624,9 @@ async function sessionForRemote(
     );
     return picked?.session;
   }
-  notify(`ReviewMate: that pull request belongs to ${ref.owner}/${ref.repo}, which isn't open in this workspace.`);
+  void vscode.window.showWarningMessage(
+    `ReviewMate: that pull request belongs to ${ref.owner}/${ref.repo}, which isn't open in this workspace.`,
+  );
   return undefined;
 }
 
@@ -643,7 +644,7 @@ async function openPr(
       () => session.openPullRequest({ provider, repo, number, remote: 'origin' }),
     );
   } catch (err) {
-    notify(`ReviewMate: could not open PR #${number}. ${errorText(err)}`);
+    void vscode.window.showErrorMessage(`ReviewMate: could not open PR #${number}. ${errorText(err)}`);
     return;
   }
   show(session);
@@ -656,11 +657,13 @@ async function openPr(
 async function submitPullRequest(session: RepoSession): Promise<void> {
   const preview = session.submitPreview();
   if (!preview) {
-    notify('ReviewMate: open a pull request to submit a review.');
+    void vscode.window.showInformationMessage('ReviewMate: open a pull request to submit a review.');
     return;
   }
   if (preview.counts.total === 0) {
-    notify('ReviewMate: nothing to submit yet. Add a comment, reply, resolve, or edit first.');
+    void vscode.window.showInformationMessage(
+      'ReviewMate: nothing to submit yet. Add a comment, reply, resolve, or edit first.',
+    );
     return;
   }
   const event = await pickReviewEvent(preview);
@@ -676,14 +679,14 @@ async function submitPullRequest(session: RepoSession): Promise<void> {
     const note = orphanNote(orphans);
     if (unsent) {
       const n = unsent.count;
-      notify(
+      void vscode.window.showWarningMessage(
         `ReviewMate: the review was posted, but ${n} ${n === 1 ? 'change' : 'changes'} could not be sent and ${n === 1 ? 'stays' : 'stay'} staged. Submit again to finish. ${errorText(unsent.error)}${note}`,
       );
       return;
     }
-    notify(`ReviewMate: submitted ${summarizeCounts(counts)}.${note}`);
+    void vscode.window.showInformationMessage(`ReviewMate: submitted ${summarizeCounts(counts)}.${note}`);
   } catch (err) {
-    notify(`ReviewMate: could not submit the review. ${errorText(err)}`);
+    void vscode.window.showErrorMessage(`ReviewMate: could not submit the review. ${errorText(err)}`);
   }
 }
 
@@ -752,7 +755,7 @@ async function newReview(session: RepoSession): Promise<void> {
       () => session.newReview(),
     );
   } catch (err) {
-    notify(`ReviewMate: could not start the review. ${errorText(err)}`);
+    void vscode.window.showErrorMessage(`ReviewMate: could not start the review. ${errorText(err)}`);
   }
 }
 
@@ -769,7 +772,7 @@ async function refreshOpenPullRequest(session: RepoSession): Promise<void> {
       () => session.reloadPullRequest(),
     );
   } catch (err) {
-    notify(`ReviewMate: could not refresh the pull request. ${errorText(err)}`);
+    void vscode.window.showErrorMessage(`ReviewMate: could not refresh the pull request. ${errorText(err)}`);
   }
 }
 
@@ -780,9 +783,9 @@ async function syncOpenPullRequest(session: RepoSession): Promise<void> {
       { location: vscode.ProgressLocation.Notification, title: 'Syncing pull request comments…' },
       () => session.syncPullRequest(),
     );
-    notify(`ReviewMate: comments are up to date.${orphanNote(orphans)}`);
+    void vscode.window.showInformationMessage(`ReviewMate: comments are up to date.${orphanNote(orphans)}`);
   } catch (err) {
-    notify(`ReviewMate: could not sync the pull request. ${errorText(err)}`);
+    void vscode.window.showErrorMessage(`ReviewMate: could not sync the pull request. ${errorText(err)}`);
   }
 }
 
@@ -793,11 +796,11 @@ async function syncOpenPullRequest(session: RepoSession): Promise<void> {
 async function discardPendingReview(session: RepoSession): Promise<void> {
   const preview = session.submitPreview();
   if (!preview) {
-    notify('ReviewMate: open a pull request first.');
+    void vscode.window.showInformationMessage('ReviewMate: open a pull request first.');
     return;
   }
   if (preview.counts.total === 0) {
-    notify('ReviewMate: nothing is staged, so there is nothing to discard.');
+    void vscode.window.showInformationMessage('ReviewMate: nothing is staged, so there is nothing to discard.');
     return;
   }
   const choice = await vscode.window.showWarningMessage(
@@ -814,9 +817,9 @@ async function discardPendingReview(session: RepoSession): Promise<void> {
       { location: vscode.ProgressLocation.Notification, title: 'Discarding pending changes…' },
       () => session.discardPendingReview(),
     );
-    notify('ReviewMate: pending review changes discarded.');
+    void vscode.window.showInformationMessage('ReviewMate: pending review changes discarded.');
   } catch (err) {
-    notify(`ReviewMate: could not discard the pending changes. ${errorText(err)}`);
+    void vscode.window.showErrorMessage(`ReviewMate: could not discard the pending changes. ${errorText(err)}`);
   }
 }
 
@@ -1176,7 +1179,7 @@ const EXPORT_FORMATS: ExportFormat[] = [
 async function exportReview(session: RepoSession, arg?: Review): Promise<void> {
   const review = arg ?? session.reviewToExport();
   if (!review) {
-    notify('ReviewMate: no review to export.');
+    void vscode.window.showInformationMessage('ReviewMate: no review to export.');
     return;
   }
 
@@ -1197,7 +1200,7 @@ async function exportReview(session: RepoSession, arg?: Review): Promise<void> {
   if (scopePick.scope === 'file') {
     const files = [...new Set(review.threads.map((t) => t.anchor.filePath))].sort();
     if (files.length === 0) {
-      notify('ReviewMate: this review has no comments.');
+      void vscode.window.showInformationMessage('ReviewMate: this review has no comments.');
       return;
     }
     const file = await vscode.window.showQuickPick(files, { placeHolder: 'File to export' });
@@ -1232,7 +1235,7 @@ async function exportReview(session: RepoSession, arg?: Review): Promise<void> {
   };
   const text = format.render(meta, threads, opts);
   if (!text) {
-    notify('ReviewMate: no comments match that scope.');
+    void vscode.window.showInformationMessage('ReviewMate: no comments match that scope.');
     return;
   }
 
@@ -1262,7 +1265,7 @@ async function deliverExport(
 ): Promise<void> {
   if (action === 'clipboard') {
     await vscode.env.clipboard.writeText(text);
-    notify('ReviewMate: export copied to clipboard.');
+    void vscode.window.showInformationMessage('ReviewMate: export copied to clipboard.');
   } else if (action === 'editor') {
     const doc = await vscode.workspace.openTextDocument({ content: text, language: format.language });
     await vscode.window.showTextDocument(doc);
