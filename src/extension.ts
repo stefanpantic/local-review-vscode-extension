@@ -17,6 +17,8 @@ import { exportReviewJson } from './export/exportJson';
 import type { ExportMeta, ExportOpts } from './export/common';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import { WindowClaims } from './windowClaims';
 import type { DiffSource } from './model/ReviewDiff';
 import type { CommentThread, Review } from './model/Comment';
 import { AGENT_AUTHOR } from './model/Comment';
@@ -42,7 +44,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const state = new ReviewState(context);
   await state.migrate();
   const reviewStore = new ReviewStore(context.workspaceState);
-  const workspace = new WorkspaceReviews(state, reviewStore);
+  const claims = new WindowClaims(
+    path.join(context.globalStorageUri.fsPath, 'open-repos'),
+    vscode.workspace.name ?? 'Untitled',
+  );
+  const workspace = new WorkspaceReviews(state, reviewStore, claims);
+  // Another window claiming or releasing a repository changes which ones are open twice. The folder has to
+  // exist before it can be watched.
+  await fs.mkdir(claims.dir, { recursive: true }).catch(() => undefined);
+  const claimWatcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(vscode.Uri.file(claims.dir), '*.json'),
+  );
+  let claimTimer: ReturnType<typeof setTimeout> | undefined;
+  const recheckClaims = (): void => {
+    if (claimTimer) clearTimeout(claimTimer);
+    claimTimer = setTimeout(() => void workspace.checkOtherWindows(), 500);
+  };
+  context.subscriptions.push(
+    claimWatcher,
+    claimWatcher.onDidCreate(recheckClaims),
+    claimWatcher.onDidDelete(recheckClaims),
+    {
+      dispose: () => {
+        if (claimTimer) clearTimeout(claimTimer);
+      },
+    },
+  );
   const filesView = new FilesView(workspace);
   const tree = vscode.window.createTreeView('agenticReview.files', {
     treeDataProvider: filesView,

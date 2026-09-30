@@ -74,12 +74,13 @@ export interface RepoListing {
   repoRoot: string;
   source: string; // the diff source label, e.g. "Uncommitted changes" or "Pull request #12"
   isDefault: boolean; // what a tool call without `repo` would act on
+  alsoOpenIn?: string[]; // the other VS Code windows that have this repository open
 }
 
 /** The workspace around the per-repository surfaces: which repositories there are, and how to reach one. */
 export interface McpWorkspaceApi {
   /** The repository a call targets: the named one, else the default. Throws, listing the choices, when neither applies. */
-  target(repo?: string): { api: McpReviewApi; name: string };
+  target(repo?: string): { api: McpReviewApi; name: string; alsoOpenIn?: string[] };
   listRepos(): RepoListing[];
   multiRepo(): boolean;
 }
@@ -270,7 +271,7 @@ export const TOOLS: ToolDef[] = [
     name: 'get_active_review',
     title: 'Get the active review',
     description:
-      'Get the review currently being worked on, with each thread and comment id, position, status, and text. Takes no arguments. Use the ids it returns to reply, resolve, edit, or delete.',
+      'Get the review currently being worked on, with each thread and comment id, position, status, and text. Each repository has its own active review. With several repositories, pass `repo` to pick one; without it, the review panel focused last is used. Use the ids it returns to reply, resolve, edit, or delete.',
     inputShape: {},
     handler: async (api) => {
       const review = api.getReview();
@@ -459,9 +460,15 @@ export async function runTool(ws: McpWorkspaceApi, tool: ToolDef, args: Record<s
       `This workspace has several repositories, so ${tool.name} needs \`repo\`. Call list_repos for the names.`,
     );
   }
-  const { api, name } = ws.target(repo);
-  const text = await tool.handler(api, args);
+  const { api, name, alsoOpenIn } = ws.target(repo);
+  let text = await tool.handler(api, args);
+  if (alsoOpenIn?.length) text = `${otherWindowsNote(alsoOpenIn)}\n\n${text}`;
   return ws.multiRepo() ? `Repository: ${name}\n\n${text}` : text;
+}
+
+/** Why the answer may not match what the reviewer sees: the repository is also open in another window. */
+function otherWindowsNote(windows: string[]): string {
+  return `Warning: this repository is also open in another VS Code window (${windows.join(', ')}). Each window keeps its own reviews, and this server belongs to only one of them. If the reviewer does not see your comments, they are looking at the other window.`;
 }
 
 /** The workspace-level tool: which repositories a call can target, and which one it defaults to. */
@@ -476,7 +483,10 @@ export const LIST_REPOS = {
 export function formatRepos(repos: RepoListing[]): string {
   if (repos.length === 0) return 'No git repository is open in this workspace.';
   const hasDefault = repos.some((r) => r.isDefault);
-  const lines = repos.map((r) => `${r.isDefault ? '*' : ' '} ${r.name} (${r.repoRoot}) · ${r.source}`);
+  const lines = repos.map(
+    (r) =>
+      `${r.isDefault ? '*' : ' '} ${r.name} (${r.repoRoot}) · ${r.source}${r.alsoOpenIn?.length ? ` · also open in another VS Code window (${r.alsoOpenIn.join(', ')})` : ''}`,
+  );
   if (!hasDefault) lines.push('', 'No default: pass `repo` to choose one.');
   return lines.join('\n');
 }
