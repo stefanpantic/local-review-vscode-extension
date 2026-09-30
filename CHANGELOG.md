@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.11.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.10.2...agentic-review-v0.11.0) (2026-09-30)
+
+
+### Features
+
+* warn when a repository is open in another window, and name it in every panel tab ([#111](https://github.com/stefanpantic/local-review-vscode-extension/issues/111)) ([e336211](https://github.com/stefanpantic/local-review-vscode-extension/commit/e336211298eecc2a07190a70b07b4b8995118039))
+
+
+### Bug Fixes
+
+* stop showing finished operations as notifications still in progress ([#109](https://github.com/stefanpantic/local-review-vscode-extension/issues/109)) ([b3d7841](https://github.com/stefanpantic/local-review-vscode-extension/commit/b3d784164e4173aa26dd9ad6e877ef88cdf2faac))
+
 ## [0.10.2](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.10.1...agentic-review-v0.10.2) (2026-09-28)
 
 
