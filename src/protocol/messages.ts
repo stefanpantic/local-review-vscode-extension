@@ -116,5 +116,14 @@ export interface Events {
   revealFile: { filePath: string; threadId?: string }; // scroll the panel to a file, or to a specific comment thread
   navigate: { target: 'file' | 'comment'; dir: 'next' | 'prev' }; // scroll to next/prev change or comment
   showError: { message: string };
+  // A Submit is running: what it is doing and how many of its requests have been sent. null once it ends.
+  submitProgress: SubmitProgressEvent | null;
+}
+
+/** The panel's view of a running Submit. */
+export interface SubmitProgressEvent {
+  label: string; // the batch now running, e.g. "Posting replies"
+  done: number; // requests sent so far
+  total: number; // requests the Submit sends
 }
 export type EventType = keyof Events;

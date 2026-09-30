@@ -269,3 +269,172 @@ export function buildSubmitPlan(
   };
   return { input, counts };
 }
+
+/**
+ * The named groups a Submit's requests run in, in the order they run. The two syncs wrap the provider's
+ * own work: one reconciles against current upstream before anything is sent, one reads the result back.
+ */
+export type SubmitBatchKind =
+  'sync-before' | 'edits' | 'deletes' | 'replies' | 'resolves' | 'reactions' | 'review' | 'follow-ups' | 'sync-after';
+
+/** One batch of a Submit and how many requests it sends. */
+export interface SubmitBatch {
+  kind: SubmitBatchKind;
+  label: string; // what the batch is doing, for progress text ("Posting replies")
+  total: number; // requests it sends
+}
+
+const BATCH_LABELS: Record<SubmitBatchKind, string> = {
+  'sync-before': 'Syncing with GitHub',
+  edits: 'Editing comments',
+  deletes: 'Deleting comments',
+  replies: 'Posting replies',
+  resolves: 'Resolving threads',
+  reactions: 'Updating reactions',
+  review: 'Posting the review',
+  'follow-ups': 'Posting replies and reactions on new comments',
+  'sync-after': 'Reading the result back',
+};
+
+const batch = (kind: SubmitBatchKind, total: number): SubmitBatch => ({ kind, label: BATCH_LABELS[kind], total });
+
+/** Whether a Submit posts a review at all. A bare Comment with no new comments and no summary does not. */
+export function postsReview(input: SubmitReviewInput): boolean {
+  return input.newThreads.length > 0 || input.event !== 'comment' || input.body !== '';
+}
+
+/**
+ * The provider's batches for a submit input, in the order it sends them, with empty ones left out. Counts
+ * are requests: a reply staged with a reaction is two, and the follow-ups on new comments start with one
+ * read of the comments the review created.
+ */
+export function submitBatches(input: SubmitReviewInput): SubmitBatch[] {
+  const reactionsOn = (r: { reactions?: string[] }): number => r.reactions?.length ?? 0;
+  const followUps = input.newThreads.reduce(
+    (n, t) => n + reactionsOn(t.root) + t.replies.reduce((m, r) => m + 1 + reactionsOn(r), 0),
+    0,
+  );
+  const all = [
+    batch('edits', input.edits.length),
+    batch('deletes', input.deletes.length),
+    batch(
+      'replies',
+      input.replies.reduce((n, r) => n + 1 + reactionsOn(r), 0),
+    ),
+    batch('resolves', input.resolves.length),
+    batch('reactions', input.reactions.length),
+    batch('review', postsReview(input) ? 1 : 0),
+    batch('follow-ups', followUps > 0 ? followUps + 1 : 0),
+  ];
+  return all.filter((b) => b.total > 0);
+}
+
+/** Every batch of a Submit, the two syncs included. */
+export function allSubmitBatches(input: SubmitReviewInput): SubmitBatch[] {
+  return [batch('sync-before', 1), ...submitBatches(input), batch('sync-after', 1)];
+}
+
+/** How long GitHub asked a request to wait before it is sent again, and which retry that is. */
+export interface SubmitWait {
+  seconds: number;
+  attempt: number; // 1-based
+  maxAttempts: number;
+}
+
+/** What a submit reports while it runs. Each batch is started, then its requests land, then it ends. */
+export type SubmitStep =
+  | { kind: 'batch-start'; batch: SubmitBatchKind }
+  | { kind: 'request-done'; batch: SubmitBatchKind }
+  | { kind: 'batch-end'; batch: SubmitBatchKind }
+  | { kind: 'wait'; wait: SubmitWait };
+
+export type OnSubmitStep = (step: SubmitStep) => void;
+
+/** A snapshot of a running Submit, for a progress notification or the panel. */
+export interface SubmitProgress {
+  batch: SubmitBatch;
+  batchIndex: number; // 0-based
+  batchCount: number;
+  done: number; // requests landed in this batch
+  doneOverall: number;
+  totalOverall: number;
+  wait?: SubmitWait; // set while GitHub makes a request wait
+  finished?: boolean; // this update ended the batch
+}
+
+/** A batch that has ended, with how many of its requests landed. */
+export interface FinishedBatch {
+  batch: SubmitBatch;
+  done: number;
+}
+
+/**
+ * Turns the steps a submit reports into progress snapshots. The batch list can be replaced once it is
+ * known more exactly (after the first sync reconciles the plan); work already counted is kept.
+ */
+export class SubmitProgressTracker {
+  private batches: SubmitBatch[];
+  private readonly done = new Map<SubmitBatchKind, number>();
+  private readonly ended: FinishedBatch[] = [];
+  private current: SubmitBatchKind | undefined;
+
+  constructor(
+    batches: SubmitBatch[],
+    private readonly emit: (p: SubmitProgress) => void,
+  ) {
+    this.batches = batches;
+  }
+
+  setBatches(batches: SubmitBatch[]): void {
+    this.batches = batches;
+  }
+
+  /** The batches that have ended so far, in order. */
+  finished(): FinishedBatch[] {
+    return [...this.ended];
+  }
+
+  handle(step: SubmitStep): void {
+    if (step.kind === 'wait') {
+      if (this.current) this.emit({ ...this.snapshot(this.current), wait: step.wait });
+      return;
+    }
+    if (step.kind === 'batch-start') {
+      this.current = step.batch;
+      this.done.set(step.batch, 0);
+      this.emit(this.snapshot(step.batch));
+      return;
+    }
+    if (step.kind === 'request-done') {
+      this.done.set(step.batch, (this.done.get(step.batch) ?? 0) + 1);
+      this.emit(this.snapshot(step.batch));
+      return;
+    }
+    const b = this.find(step.batch);
+    this.ended.push({ batch: b, done: this.done.get(step.batch) ?? 0 });
+    // A request the provider skipped (a new comment it could not match back) will not be sent, so an ended
+    // batch counts as complete for the overall total.
+    this.done.set(step.batch, b.total);
+    this.emit({ ...this.snapshot(step.batch), finished: true });
+    if (this.current === step.batch) this.current = undefined;
+  }
+
+  private find(kind: SubmitBatchKind): SubmitBatch {
+    return this.batches.find((b) => b.kind === kind) ?? batch(kind, 0);
+  }
+
+  private snapshot(kind: SubmitBatchKind): SubmitProgress {
+    const b = this.find(kind);
+    const index = this.batches.findIndex((x) => x.kind === kind);
+    let doneOverall = 0;
+    for (const x of this.batches) doneOverall += Math.min(this.done.get(x.kind) ?? 0, x.total);
+    return {
+      batch: b,
+      batchIndex: index < 0 ? 0 : index,
+      batchCount: this.batches.length,
+      done: Math.min(this.done.get(kind) ?? 0, b.total),
+      doneOverall,
+      totalOverall: this.batches.reduce((n, x) => n + x.total, 0),
+    };
+  }
+}

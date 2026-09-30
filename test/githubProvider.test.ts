@@ -1,9 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GithubReviewProvider, createGithubProvider } from '../src/github/provider';
-import type { GhNewComment, GhPostedComment, GhViewerTeam, GithubWriteClient } from '../src/github/client';
+import type {
+  GhNewComment,
+  GhPostedComment,
+  GhViewerTeam,
+  GithubWriteClient,
+  ThrottleListener,
+} from '../src/github/client';
 import type { PullRequestDetail, PullRequestSummary } from '../src/review/provider';
-import type { SubmitReviewInput } from '../src/review/submit';
+import type { SubmitReviewInput, SubmitStep } from '../src/review/submit';
 import type { GhReviewThread } from '../src/github/types';
 import type { DiffRow, FileDiff, Hunk, ReviewDiff } from '../src/model/ReviewDiff';
 import type { LineAnchor } from '../src/model/Comment';
@@ -102,6 +108,11 @@ class FakeClient implements GithubWriteClient {
   }
   async getReviewThreads(): Promise<GhReviewThread[]> {
     return this.threads;
+  }
+  throttleListener?: ThrottleListener;
+  onThrottle(listener: ThrottleListener): () => void {
+    this.throttleListener = listener;
+    return () => (this.throttleListener = undefined);
   }
 }
 
@@ -386,3 +397,78 @@ test('createGithubProvider rebuilds the client when the token changes', async ()
   await provider.viewer(); // token changes here
   assert.equal(builds, 2);
 });
+
+// --- progress by batch ---
+
+test('submitReview reports each batch in order, with every request that lands', async () => {
+  const client = new FakeClient();
+  const p = new GithubReviewProvider('github', async () => client);
+  const steps: SubmitStep[] = [];
+  await p.submitReview(
+    repo,
+    7,
+    {
+      event: 'comment',
+      commitId: 'H',
+      body: '',
+      newThreads: [{ root: { path: 'a.ts', side: 'new', line: 4, body: 'first' }, replies: [{ body: 'second' }] }],
+      replies: [{ rootId: '1', body: 'r', reactions: ['HEART'] }],
+      edits: [{ commentId: '2', body: 'e' }],
+      deletes: [],
+      resolves: [],
+      reactions: [],
+    },
+    undefined,
+    (s) => steps.push(s),
+  );
+  const text = steps.map((s) => (s.kind === 'wait' ? 'wait' : `${s.kind}:${s.batch}`));
+  assert.deepEqual(text, [
+    'batch-start:edits',
+    'request-done:edits',
+    'batch-end:edits',
+    'batch-start:replies',
+    'request-done:replies',
+    'request-done:replies', // the reaction on the reply
+    'batch-end:replies',
+    'batch-start:review',
+    'request-done:review',
+    'batch-end:review',
+    'batch-start:follow-ups',
+    'request-done:follow-ups', // reading back the created comments
+    'request-done:follow-ups', // the follow-up reply
+    'batch-end:follow-ups',
+  ]);
+});
+
+test('submitReview passes rate-limit waits on while it runs, and stops listening after', async () => {
+  const client = new FakeClient();
+  const steps: SubmitStep[] = [];
+  const origEdit = client.editComment.bind(client);
+  client.editComment = async (r, input) => {
+    client.throttleListener?.({ seconds: 60, attempt: 1, maxAttempts: 3 });
+    await origEdit(r, input);
+  };
+  const p = new GithubReviewProvider('github', async () => client);
+  await p.submitReview(repo, 7, { ...emptyInput(), edits: [{ commentId: '2', body: 'e' }] }, undefined, (s) =>
+    steps.push(s),
+  );
+  assert.deepEqual(
+    steps.filter((s) => s.kind === 'wait'),
+    [{ kind: 'wait', wait: { seconds: 60, attempt: 1, maxAttempts: 3 } }],
+  );
+  assert.equal(client.throttleListener, undefined);
+});
+
+function emptyInput(): SubmitReviewInput {
+  return {
+    event: 'comment',
+    commitId: 'H',
+    body: '',
+    newThreads: [],
+    replies: [],
+    edits: [],
+    deletes: [],
+    resolves: [],
+    reactions: [],
+  };
+}

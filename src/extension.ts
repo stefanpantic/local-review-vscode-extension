@@ -25,7 +25,7 @@ import { AGENT_AUTHOR } from './model/Comment';
 import { parsePrReference, type GithubProviderId } from './github/remote';
 import { githubTokenSource } from './github/auth';
 import { githubErrorText } from './github/errors';
-import type { SubmitEvent, SubmitCounts } from './review/submit';
+import type { FinishedBatch, SubmitBatchKind, SubmitCounts, SubmitEvent, SubmitProgress } from './review/submit';
 import { PullRequestsView } from './webview/pullRequestsView';
 import type { ReviewProvider, RemoteRepoRef, PullRequestSummary } from './review/provider';
 import type { ThreadSet } from './webview/commentsView';
@@ -698,23 +698,72 @@ async function submitPullRequest(session: RepoSession): Promise<void> {
   const body = await askReviewSummary();
   if (body === undefined) return; // dismissed the summary box: treat as cancelling the whole submit
   if (!(await confirmSubmit(preview, event))) return;
+  const finished: FinishedBatch[] = [];
   try {
     const { counts, orphans, unsent } = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: 'Submitting review to GitHub…' },
-      () => session.submitPullRequest(event, body),
+      { location: vscode.ProgressLocation.Notification, title: 'Submitting review to GitHub' },
+      (progress) => {
+        let reported = 0; // percent of the bar already filled
+        return session.submitPullRequest(event, body, (p) => {
+          const percent = p.totalOverall > 0 ? (p.doneOverall / p.totalOverall) * 100 : 0;
+          progress.report({ message: submitProgressText(p), increment: Math.max(0, percent - reported) });
+          reported = Math.max(reported, percent);
+          if (p.finished) {
+            finished.push({ batch: p.batch, done: p.done });
+            const doneText = BATCH_DONE_TEXT[p.batch.kind];
+            if (doneText) {
+              void vscode.window.showInformationMessage(
+                `ReviewMate: batch ${p.batchIndex + 1} of ${p.batchCount} done. ${doneText(p.done)}.`,
+              );
+            }
+          }
+        });
+      },
     );
     const note = orphanNote(orphans);
     if (unsent) {
       const n = unsent.count;
       void vscode.window.showWarningMessage(
-        `ReviewMate: the review was posted, but ${n} ${n === 1 ? 'change' : 'changes'} could not be sent and ${n === 1 ? 'stays' : 'stay'} staged. Submit again to finish. ${errorText(unsent.error)}${note}`,
+        `ReviewMate: the review was posted, but ${n} ${n === 1 ? 'change' : 'changes'} could not be sent and ${n === 1 ? 'stays' : 'stay'} staged. Submit again to finish. ${errorText(unsent.error)}${finishedNote(finished)}${note}`,
       );
       return;
     }
     void vscode.window.showInformationMessage(`ReviewMate: submitted ${summarizeCounts(counts)}.${note}`);
   } catch (err) {
-    void vscode.window.showErrorMessage(`ReviewMate: could not submit the review. ${errorText(err)}`);
+    void vscode.window.showErrorMessage(
+      `ReviewMate: could not submit the review. ${errorText(err)}${finishedNote(finished)}`,
+    );
   }
+}
+
+/** The progress line for a running Submit, naming the batch, its step, and any wait GitHub imposed. */
+function submitProgressText(p: SubmitProgress): string {
+  const step = `Batch ${p.batchIndex + 1} of ${p.batchCount}: ${p.batch.label} (${p.done} of ${p.batch.total})`;
+  if (!p.wait) return step;
+  const { seconds, attempt, maxAttempts } = p.wait;
+  return `GitHub rate limit: waiting ${seconds} s before retry ${attempt} of ${maxAttempts}. ${step}`;
+}
+
+/** What a finished batch sent, for its notification. The two syncs send nothing, so they raise none. */
+const BATCH_DONE_TEXT: Partial<Record<SubmitBatchKind, (n: number) => string>> = {
+  edits: (n) => `${n} ${n === 1 ? 'comment' : 'comments'} edited`,
+  deletes: (n) => `${n} ${n === 1 ? 'comment' : 'comments'} deleted`,
+  replies: (n) => `Replies posted (${requests(n)})`,
+  resolves: (n) => `${n} ${n === 1 ? 'thread' : 'threads'} resolved or reopened`,
+  reactions: (n) => `${n} ${n === 1 ? 'reaction' : 'reactions'} updated`,
+  review: () => 'Review posted',
+  'follow-ups': (n) => `Replies and reactions on new comments posted (${requests(n)})`,
+};
+
+const requests = (n: number): string => `${n} ${n === 1 ? 'request' : 'requests'}`;
+
+/** Which batches of a failed Submit finished, so the error says what did go out. */
+function finishedNote(finished: FinishedBatch[]): string {
+  const sent = finished.flatMap((f) => {
+    const text = BATCH_DONE_TEXT[f.batch.kind];
+    return text ? [text(f.done)] : [];
+  });
+  return sent.length ? ` Finished before that: ${sent.join(', ')}.` : '';
 }
 
 /**

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { HighlighterCore } from 'shiki/core';
-import type { ReviewStatePayload } from '../../src/protocol/messages';
+import type { ReviewStatePayload, SubmitProgressEvent } from '../../src/protocol/messages';
 import type { FileDiff, DiffRow, DiffSource, Hunk, ReviewDiff, Side, ViewMode } from '../../src/model/ReviewDiff';
 import type { Anchor, CommentThread } from '../../src/model/Comment';
 import { request, dlog } from '../rpcClient';
@@ -68,10 +68,12 @@ function findRowFor(diff: ReviewDiff, anchor: Anchor, line: number): DiffRow | u
 
 export function DiffView({
   state,
+  submitProgress,
   setViewed,
   setViewPref,
 }: {
   state: ReviewStatePayload | null;
+  submitProgress: SubmitProgressEvent | null;
   setViewed: (filePath: string, viewed: boolean) => void;
   setViewPref: (patch: { viewMode?: ViewMode; whitespace?: boolean; wrap?: boolean }) => void;
 }) {
@@ -487,6 +489,7 @@ export function DiffView({
           <PrActionBar
             pending={state.pending}
             sync={state.sync}
+            submitting={submitProgress}
             onSync={() => void request('syncPullRequest', {})}
             onSubmit={() => mutate(request('submitReview', {}))}
             onDiscard={() => mutate(request('discardPendingReview', {}))}

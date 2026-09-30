@@ -4,7 +4,7 @@
 import type { CommentThread } from '../model/Comment';
 import type { ReviewDiff } from '../model/ReviewDiff';
 import type { RemoteRepoRef } from '../github/remote';
-import type { OnApplied, SubmitReviewInput } from './submit';
+import type { OnApplied, OnSubmitStep, SubmitReviewInput } from './submit';
 
 export type { RemoteRepoRef };
 
@@ -57,6 +57,13 @@ export interface ReviewProvider {
    * Post a staged change set as one review (the single write egress; triggered only by a human Submit).
    * `onApplied` is invoked after each id-addressable step lands, so a caller can retire that item from its
    * pending set before the next call runs and a failure partway through cannot make a retry re-send it.
+   * `onStep` reports the batches as they run, each request that lands, and each rate-limit wait.
    */
-  submitReview(repo: RemoteRepoRef, number: number, input: SubmitReviewInput, onApplied?: OnApplied): Promise<void>;
+  submitReview(
+    repo: RemoteRepoRef,
+    number: number,
+    input: SubmitReviewInput,
+    onApplied?: OnApplied,
+    onStep?: OnSubmitStep,
+  ): Promise<void>;
 }
