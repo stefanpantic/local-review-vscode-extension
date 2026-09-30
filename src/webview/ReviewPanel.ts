@@ -60,11 +60,6 @@ export class ReviewPanel {
     ReviewPanel.panels.get(repoRoot)?.panel.dispose();
   }
 
-  /** Re-title every open panel, when the workspace changes between one repository and several. */
-  static retitle(title: (repoRoot: string) => string): void {
-    for (const [repoRoot, p] of ReviewPanel.panels) p.panel.title = title(repoRoot);
-  }
-
   private constructor(
     panel: vscode.WebviewPanel,
     extensionUri: vscode.Uri,

@@ -385,6 +385,22 @@ test('with one repository the output is unchanged', async () => {
   assert.equal(out, await tool('get_diff').handler(api, {}));
 });
 
+test('a repository open in another window is flagged on every answer and in the repository list', async () => {
+  const api = new FakeApi(DIFF);
+  const base = workspace([{ name: 'api', api }], 'api');
+  const ws: McpWorkspaceApi = {
+    ...base,
+    target: (repo) => ({ ...base.target(repo), alsoOpenIn: ['other-window'] }),
+    listRepos: () => base.listRepos().map((r) => ({ ...r, alsoOpenIn: ['other-window'] })),
+  };
+  const out = await runTool(ws, tool('get_diff'), {});
+  assert.match(out, /^Warning: this repository is also open in another VS Code window \(other-window\)/);
+  assert.match(
+    formatRepos(ws.listRepos()),
+    /api \(\/w\/api\) · Uncommitted changes · also open in another VS Code window \(other-window\)/,
+  );
+});
+
 test('a repository that cannot be resolved surfaces the error', async () => {
   const ws = workspace([
     { name: 'api', api: new FakeApi(DIFF) },

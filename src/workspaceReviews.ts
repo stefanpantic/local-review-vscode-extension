@@ -8,6 +8,7 @@ import { repoForPath, resolveRepo } from './review/repoResolve';
 import { resolveMcpRepo } from './mcp/repoArg';
 import type { McpWorkspaceApi } from './mcp/tools';
 import type { ViewPrefs } from './review/prefs';
+import type { WindowClaims } from './windowClaims';
 
 /** What changed: one repository's state, or (no `repoRoot`) the set of repositories itself. */
 export interface WorkspaceChange {
@@ -37,6 +38,8 @@ export class WorkspaceReviews implements vscode.Disposable {
   private discovering: Promise<void> = Promise.resolve();
   private discovered = false; // the first discovery has run, so the context keys have been published once
   private rediscoverTimer?: ReturnType<typeof setTimeout>;
+  private alsoOpen = new Map<string, string[]>(); // repository -> the other VS Code windows that have it open
+  private checking: Promise<void> = Promise.resolve();
   private readonly _onDidChange = new vscode.EventEmitter<WorkspaceChange>();
   /** Fires when views should repaint: one repository's section, or everything when the set changed. */
   readonly onDidChange = this._onDidChange.event;
@@ -48,6 +51,7 @@ export class WorkspaceReviews implements vscode.Disposable {
   constructor(
     private readonly state: ReviewState,
     private readonly reviewStore: ReviewStore,
+    private readonly claims?: WindowClaims,
   ) {}
 
   list(): RepoSession[] {
@@ -123,16 +127,49 @@ export class WorkspaceReviews implements vscode.Disposable {
     for (const s of removed) {
       ReviewPanel.close(s.repoRoot);
       s.dispose();
+      void this.claims?.release(s.repoRoot).catch(() => undefined);
     }
     this.sessions = next;
     this.folderRoots = folderRoots;
     if (this.lastFocused && !next.has(this.lastFocused)) this.lastFocused = undefined;
     // Diff the new repositories before announcing them, so their sections arrive filled in.
     await Promise.all(added.map((s) => s.refresh()));
+    if (added.length > 0 || removed.length > 0) {
+      await Promise.all(added.map((s) => this.claims?.claim(s.repoRoot).catch(() => undefined)));
+      await this.checkOtherWindows();
+    }
     if (!structural) return;
-    ReviewPanel.retitle((repoRoot) => this.panelTitle(repoRoot));
     for (const s of this.list()) s.workspaceChanged();
     this.fire({});
+  }
+
+  /**
+   * Find the repositories that another VS Code window also has open, and warn once when one appears. Each
+   * window keeps its own reviews and runs its own MCP server, so an agent can end up talking to the other
+   * window without anyone noticing. Checks run one at a time.
+   */
+  checkOtherWindows(): Promise<void> {
+    this.checking = this.checking.then(
+      () => this.doCheckOtherWindows(),
+      () => this.doCheckOtherWindows(),
+    );
+    return this.checking;
+  }
+
+  private async doCheckOtherWindows(): Promise<void> {
+    if (!this.claims) return;
+    const next = new Map<string, string[]>();
+    for (const s of this.list()) {
+      const windows = await this.claims.others(s.repoRoot);
+      if (windows.length === 0) continue;
+      next.set(s.repoRoot, windows);
+      if (!this.alsoOpen.has(s.repoRoot)) {
+        void vscode.window.showWarningMessage(
+          `ReviewMate: ${s.repoName()} is also open in another VS Code window (${windows.join(', ')}). Each window keeps its own reviews and runs its own MCP server, so an agent connected to one window does not see the comments made in the other.`,
+        );
+      }
+    }
+    this.alsoOpen = next;
   }
 
   async refreshAll(): Promise<void> {
@@ -189,7 +226,7 @@ export class WorkspaceReviews implements vscode.Disposable {
 
   panelTitle(repoRoot: string): string {
     const session = this.sessions.get(repoRoot);
-    return this.multiRepo && session ? `ReviewMate: ${session.repoName()}` : 'ReviewMate';
+    return session ? `ReviewMate - ${session.repoName()}` : 'ReviewMate';
   }
 
   /** Reveal or create a repository's review panel. */
@@ -218,7 +255,11 @@ export class WorkspaceReviews implements vscode.Disposable {
         const picked = resolveMcpRepo(repo, candidates(), lastPanel());
         const session = this.sessions.get(picked.repoRoot);
         if (!session) throw new Error(`Repository ${picked.repoRoot} is no longer open.`);
-        return { api: session.mcpApi(), name: session.repoName() };
+        return {
+          api: session.mcpApi(),
+          name: session.repoName(),
+          alsoOpenIn: this.alsoOpen.get(session.repoRoot),
+        };
       },
       listRepos: () => {
         const fallback = defaultRoot();
@@ -227,6 +268,7 @@ export class WorkspaceReviews implements vscode.Disposable {
           repoRoot: s.repoRoot,
           source: s.sourceLabel(),
           isDefault: s.repoRoot === fallback,
+          alsoOpenIn: this.alsoOpen.get(s.repoRoot),
         }));
       },
       multiRepo: () => this.multiRepo,
@@ -237,6 +279,7 @@ export class WorkspaceReviews implements vscode.Disposable {
     if (this.rediscoverTimer) clearTimeout(this.rediscoverTimer);
     for (const s of this.list()) s.dispose();
     this.sessions.clear();
+    this.claims?.releaseAll();
     this._onDidChange.dispose();
   }
 
