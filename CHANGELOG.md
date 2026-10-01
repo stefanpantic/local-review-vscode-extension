@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.11.2...agentic-review-v0.12.0) (2026-10-01)
+
+
+### Features
+
+* name the GitHub rate limit that was hit, and show what is left in the status bar ([#118](https://github.com/stefanpantic/local-review-vscode-extension/issues/118)) ([66578d5](https://github.com/stefanpantic/local-review-vscode-extension/commit/66578d52aafe2c4acdb725d52049542286115db6))
+
 ## [0.11.2](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.11.1...agentic-review-v0.11.2) (2026-10-01)
 
 
