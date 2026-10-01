@@ -16,7 +16,8 @@ import {
 import type { TokenSource } from './auth';
 import { createGithubClient, type GhNewComment, type GhPostedComment, type GithubWriteClient } from './client';
 import { mapThreads } from './mapThreads';
-import type { GithubProviderId } from './remote';
+import type { RateLimitTracker } from './rateLimit';
+import { enterpriseHost, type GithubProviderId } from './remote';
 
 const ghSide = (side: Side): 'LEFT' | 'RIGHT' => (side === 'old' ? 'LEFT' : 'RIGHT');
 
@@ -236,8 +237,12 @@ export function createGithubProvider(opts: {
   getToken: TokenSource;
   buildClient?: typeof createGithubClient;
   trace?: (message: string) => void;
+  /** Where the budgets each response reports are kept, by host. */
+  rateLimits?: RateLimitTracker;
 }): ReviewProvider {
   const build = opts.buildClient ?? createGithubClient;
+  const host =
+    opts.providerId === 'github' ? 'github.com' : (enterpriseHost(opts.enterpriseUri) ?? 'GitHub Enterprise');
   let cachedToken: string | undefined;
   let cachedClient: GithubWriteClient | undefined;
   const clientFor: ClientFactory = async (interactive: boolean) => {
@@ -249,6 +254,7 @@ export function createGithubProvider(opts: {
       providerId: opts.providerId,
       enterpriseUri: opts.enterpriseUri,
       trace: opts.trace,
+      onRateLimit: (snapshot) => opts.rateLimits?.record(host, snapshot),
     });
     cachedToken = token;
     return cachedClient;

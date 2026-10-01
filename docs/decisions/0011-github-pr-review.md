@@ -101,3 +101,8 @@ network capability.
   successful tick or explicit sync returns to the configured interval. The poll swallows its own errors, so
   the count of them lives with the poll rather than with the code that schedules the next tick. Splitting that
   count in two is what kept the backoff from ever starting (#91).
+- **Rate-limit visibility.** Every GitHub response's `x-ratelimit-*` headers feed one tracker per host,
+  kept apart for GraphQL and REST. A status bar item shows what is left of each for the host used last, warns
+  below 10%, and shows the reset time once one runs out. It reads only the answers to requests ReviewMate
+  already makes, so it adds no egress. A rate-limit error or a Submit wait names the limit it hit (GraphQL,
+  REST, or the secondary limit) and when it resets.

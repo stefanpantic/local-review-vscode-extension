@@ -1,6 +1,7 @@
 // Turn a GitHub API failure into something a reviewer can act on. A raw "HttpError: Forbidden" says nothing
 // about what went wrong or what to do next; "you do not have write access to this repository" does.
 // Pure and dependency-free, so it is unit-tested without a client.
+import { formatReset, rateLimitOf, resourceLabel, type RateLimitHit } from './rateLimit';
 
 /** The HTTP status an Octokit request error carries, when the failure came from the API at all. */
 function statusOf(err: unknown): number | undefined {
@@ -23,7 +24,9 @@ function messageOf(err: unknown): string {
  * than the raw message. GitHub answers a write you lack permission for with either 403 or, to avoid
  * confirming a private resource exists, 404 — both mean the same thing to the person clicking Submit.
  */
-export function githubErrorText(err: unknown): string | undefined {
+export function githubErrorText(err: unknown, now?: Date): string | undefined {
+  const limited = rateLimitOf(err);
+  if (limited) return rateLimitText(limited, now ?? new Date());
   const status = statusOf(err);
   if (status === undefined) return undefined;
   const message = messageOf(err);
@@ -31,9 +34,7 @@ export function githubErrorText(err: unknown): string | undefined {
     case 401:
       return 'Your GitHub sign-in is no longer valid. Sign in again, then retry.';
     case 403:
-      return /rate limit/i.test(message)
-        ? 'GitHub rate limit reached. Wait a few minutes, then retry.'
-        : "You don't have write access to this repository, so the review could not be posted.";
+      return "You don't have write access to this repository, so the review could not be posted.";
     case 404:
       return "That pull request could not be found, or you don't have access to it.";
     case 422:
@@ -42,4 +43,16 @@ export function githubErrorText(err: unknown): string | undefined {
     default:
       return status >= 500 ? 'GitHub is having trouble right now. Retry in a moment.' : undefined;
   }
+}
+
+/** Which limit a refused request ran into, and when it can be tried again. */
+function rateLimitText(hit: RateLimitHit, now: Date): string {
+  const name = resourceLabel(hit.resource);
+  if (hit.secondary) {
+    const wait =
+      hit.retryAfterSeconds !== undefined ? `Retry after ${hit.retryAfterSeconds} s.` : 'Wait a minute, then retry.';
+    return `GitHub secondary rate limit reached on ${name} requests (too many requests in a short time). ${wait}`;
+  }
+  const when = hit.resetAt ? `It resets at ${formatReset(hit.resetAt, now)}.` : 'Wait a few minutes, then retry.';
+  return `GitHub ${name} rate limit reached. ${when}`;
 }

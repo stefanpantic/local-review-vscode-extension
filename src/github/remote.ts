@@ -67,7 +67,7 @@ export function parsePrReference(input: string): PrReference | undefined {
 }
 
 /** The host of a configured GitHub Enterprise base URL (e.g. `https://ghe.example.com`), lowercased. */
-function enterpriseHost(enterpriseUri?: string): string | undefined {
+export function enterpriseHost(enterpriseUri?: string): string | undefined {
   if (!enterpriseUri?.trim()) return undefined;
   try {
     return new URL(enterpriseUri).host.toLowerCase();

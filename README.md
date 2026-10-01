@@ -79,6 +79,8 @@ Approve and Request changes are unavailable on a pull request you opened yoursel
 
 If a submit fails partway, retry it. Whatever already posted is not sent again.
 
+GitHub limits how many requests you can make per hour, with separate budgets for GraphQL and REST. After ReviewMate's first GitHub request, the status bar shows the share of each that is left, for example `ReviewMate: GraphQL 96% · REST 99%`. The limits belong to your GitHub account, so other apps signed in as you use them too. Hover it for the exact counts and when each resets. It turns yellow below 10% and red at zero. If a request hits a limit, the message says which one and when it resets.
+
 A PR also polls GitHub while its review panel is open and the VS Code window has focus, so other people's new, edited, and resolved comments appear on their own. Closing the panel or switching away from the window pauses the poll. Coming back runs one poll right away. Set the interval with `agenticReview.github.pollInterval`. Use `0` to turn polling off. **The poll only adds and updates. It never removes a comment.** Deletions made on GitHub appear when you press **Sync**, or reopen the PR. This is deliberate: a background refresh should not delete a thread you are in the middle of replying to.
 
 New commits on the PR raise a **Load new commits** banner. Loading them changes which diff you are reviewing, so it stays a separate, deliberate action rather than something Sync does to you. Your review stays on the commit you loaded until then, and a review left open is restored with its diff and comments after a restart.
