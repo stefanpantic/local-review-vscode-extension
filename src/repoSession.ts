@@ -167,6 +167,12 @@ export class RepoSession implements vscode.Disposable {
   bindPanel(post: PanelPost): void {
     this.panelPost = post;
     this.emit(); // a panel is opening but has not rendered yet, so refresh the sidebar's ready state
+    this.poller.wake(); // the poll pauses while no panel is open
+  }
+
+  /** Whether this repository's review panel is open. */
+  hasPanel(): boolean {
+    return this.panelPost != null;
   }
   unbindPanel(): void {
     this.panelPost = undefined;

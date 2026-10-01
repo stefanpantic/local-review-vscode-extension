@@ -5,7 +5,7 @@ import { Octokit } from '@octokit/rest';
 import { throttling } from '@octokit/plugin-throttling';
 import type { PullRequestDetail, PullRequestSummary, RemoteRepoRef } from '../review/provider';
 import type { SubmitWait } from '../review/submit';
-import type { GhReviewThread } from './types';
+import type { GhReviewComment, GhReviewThread } from './types';
 import { apiBaseUrls, type GithubProviderId } from './remote';
 
 const ThrottledOctokit = Octokit.plugin(throttling);
@@ -81,6 +81,10 @@ export interface GithubWriteClient extends GithubReadClient {
   onThrottle?(listener: ThrottleListener): () => void;
 }
 
+// GitHub prices a query by the most nodes its `first:` limits could return, so a connection nested under
+// threads and comments is charged for every comment that could exist. Reactions would make that 10,000
+// requests (about 100 points) on any pull request, so they come from a second query over the comment ids
+// that actually came back.
 const THREADS_QUERY = `
 query ($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
@@ -90,7 +94,7 @@ query ($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
         nodes {
           id isResolved isOutdated path diffSide line startLine originalLine originalStartLine subjectType
           comments(first: 100) {
-            nodes { id databaseId author { login } body createdAt updatedAt url diffHunk state reactions(first: 10) { pageInfo { hasNextPage endCursor } nodes { content user { login } } } }
+            nodes { id databaseId author { login } body createdAt updatedAt url diffHunk state }
           }
         }
       }
@@ -125,10 +129,6 @@ interface ThreadsResponse {
               url: string;
               diffHunk: string;
               state: 'PENDING' | 'SUBMITTED';
-              reactions: {
-                pageInfo: { hasNextPage: boolean; endCursor: string | null };
-                nodes: Array<{ content: string; user: { login: string } | null }>;
-              };
             }>;
           };
         }>;
@@ -141,6 +141,33 @@ interface ThreadsResponse {
 const RESOLVE_MUTATION = `mutation ($threadId: ID!) { resolveReviewThread(input: { threadId: $threadId }) { thread { id } } }`;
 const UNRESOLVE_MUTATION = `mutation ($threadId: ID!) { unresolveReviewThread(input: { threadId: $threadId }) { thread { id } } }`;
 
+/** The most comment ids one reactions query asks for. GitHub caps `nodes(ids:)` at 100. */
+const REACTIONS_BATCH = 100;
+
+// Charged by the comments asked for: about one point per 100 comments.
+const COMMENT_REACTIONS_QUERY = `
+query ($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    ... on PullRequestReviewComment {
+      id
+      reactions(first: 100) {
+        pageInfo { hasNextPage endCursor }
+        nodes { content user { login } }
+      }
+    }
+  }
+}`;
+
+type ReactionPage = {
+  pageInfo: { hasNextPage: boolean; endCursor: string | null };
+  nodes: Array<{ content: string; user: { login: string } | null }>;
+};
+
+interface CommentReactionsResponse {
+  nodes: Array<{ id?: string; reactions?: ReactionPage } | null>;
+}
+
+// The rest of one comment's reactions, past the first page.
 const REACTIONS_QUERY = `
 query ($id: ID!, $cursor: String) {
   node(id: $id) {
@@ -154,18 +181,13 @@ query ($id: ID!, $cursor: String) {
 }`;
 
 interface ReactionsResponse {
-  node: {
-    reactions: {
-      pageInfo: { hasNextPage: boolean; endCursor: string | null };
-      nodes: Array<{ content: string; user: { login: string } | null }>;
-    };
-  };
+  node: { reactions: ReactionPage };
 }
 
 const ADD_REACTION_MUTATION = `mutation ($subjectId: ID!, $content: ReactionContent!) { addReaction(input: { subjectId: $subjectId, content: $content }) { reaction { id } } }`;
 const REMOVE_REACTION_MUTATION = `mutation ($subjectId: ID!, $content: ReactionContent!) { removeReaction(input: { subjectId: $subjectId, content: $content }) { reaction { id } } }`;
 
-type GraphqlFn = <T>(query: string, params: Record<string, unknown>) => Promise<T>;
+export type GraphqlFn = <T>(query: string, params: Record<string, unknown>) => Promise<T>;
 
 // Who a review is requested from. Both the list and detail responses carry the requested people and teams,
 // so matching either against the viewer costs no extra call on the pull requests themselves.
@@ -253,72 +275,8 @@ class OctokitClient implements GithubWriteClient {
     };
   }
 
-  async getReviewThreads(repo: RemoteRepoRef, number: number): Promise<GhReviewThread[]> {
-    const out: GhReviewThread[] = [];
-    const needMoreReactions: { comment: GhReviewThread['comments'][number]; cursor: string }[] = [];
-    let cursor: string | null = null;
-    do {
-      const data: ThreadsResponse = await this.gql<ThreadsResponse>(THREADS_QUERY, {
-        owner: repo.owner,
-        repo: repo.repo,
-        number,
-        cursor,
-      });
-      const threads = data.repository.pullRequest.reviewThreads;
-      for (const n of threads.nodes) {
-        const comments = n.comments.nodes.map((c) => {
-          const reactions = c.reactions.nodes.flatMap((r) =>
-            r.user ? [{ content: r.content, login: r.user.login }] : [],
-          );
-          const mapped = {
-            id: c.id,
-            databaseId: c.databaseId,
-            author: c.author?.login ?? null,
-            body: c.body,
-            createdAt: c.createdAt,
-            updatedAt: c.updatedAt,
-            url: c.url,
-            diffHunk: c.diffHunk,
-            isPending: c.state === 'PENDING',
-            reactions,
-          };
-          if (c.reactions.pageInfo.hasNextPage && c.reactions.pageInfo.endCursor)
-            needMoreReactions.push({ comment: mapped, cursor: c.reactions.pageInfo.endCursor });
-          return mapped;
-        });
-        out.push({
-          id: n.id,
-          isResolved: n.isResolved,
-          isOutdated: n.isOutdated,
-          path: n.path,
-          diffSide: n.diffSide,
-          line: n.line,
-          startLine: n.startLine,
-          originalLine: n.originalLine,
-          originalStartLine: n.originalStartLine,
-          subjectType: n.subjectType ?? undefined,
-          comments,
-        });
-      }
-      cursor = threads.pageInfo.hasNextPage ? threads.pageInfo.endCursor : null;
-    } while (cursor);
-
-    for (const entry of needMoreReactions) {
-      let rxCursor: string | null = entry.cursor;
-      do {
-        const data: ReactionsResponse = await this.gql<ReactionsResponse>(REACTIONS_QUERY, {
-          id: entry.comment.id,
-          cursor: rxCursor,
-        });
-        const rx: ReactionsResponse['node']['reactions'] = data.node.reactions;
-        for (const r of rx.nodes) {
-          if (r.user) entry.comment.reactions.push({ content: r.content, login: r.user.login });
-        }
-        rxCursor = rx.pageInfo.hasNextPage ? rx.pageInfo.endCursor : null;
-      } while (rxCursor);
-    }
-
-    return out;
+  getReviewThreads(repo: RemoteRepoRef, number: number): Promise<GhReviewThread[]> {
+    return fetchReviewThreads(this.gql, repo, number);
   }
 
   async createReview(
@@ -406,6 +364,86 @@ class OctokitClient implements GithubWriteClient {
 
   async removeReaction(subjectId: string, content: string): Promise<void> {
     await this.gql(REMOVE_REACTION_MUTATION, { subjectId, content });
+  }
+}
+
+/** A pull request's review threads with their comments and every comment's reactions. */
+export async function fetchReviewThreads(
+  gql: GraphqlFn,
+  repo: RemoteRepoRef,
+  number: number,
+): Promise<GhReviewThread[]> {
+  const out: GhReviewThread[] = [];
+  let cursor: string | null = null;
+  do {
+    const data: ThreadsResponse = await gql<ThreadsResponse>(THREADS_QUERY, {
+      owner: repo.owner,
+      repo: repo.repo,
+      number,
+      cursor,
+    });
+    const threads = data.repository.pullRequest.reviewThreads;
+    for (const n of threads.nodes) {
+      out.push({
+        id: n.id,
+        isResolved: n.isResolved,
+        isOutdated: n.isOutdated,
+        path: n.path,
+        diffSide: n.diffSide,
+        line: n.line,
+        startLine: n.startLine,
+        originalLine: n.originalLine,
+        originalStartLine: n.originalStartLine,
+        subjectType: n.subjectType ?? undefined,
+        comments: n.comments.nodes.map((c) => ({
+          id: c.id,
+          databaseId: c.databaseId,
+          author: c.author?.login ?? null,
+          body: c.body,
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt,
+          url: c.url,
+          diffHunk: c.diffHunk,
+          isPending: c.state === 'PENDING',
+          reactions: [],
+        })),
+      });
+    }
+    cursor = threads.pageInfo.hasNextPage ? threads.pageInfo.endCursor : null;
+  } while (cursor);
+
+  await fillReactions(
+    gql,
+    out.flatMap((t) => t.comments),
+  );
+  return out;
+}
+
+const reactionsOf = (page: ReactionPage): GhReviewComment['reactions'] =>
+  page.nodes.flatMap((r) => (r.user ? [{ content: r.content, login: r.user.login }] : []));
+
+async function fillReactions(gql: GraphqlFn, comments: GhReviewComment[]): Promise<void> {
+  const byId = new Map(comments.map((c) => [c.id, c]));
+  const needMore: { comment: GhReviewComment; cursor: string }[] = [];
+  for (let i = 0; i < comments.length; i += REACTIONS_BATCH) {
+    const ids = comments.slice(i, i + REACTIONS_BATCH).map((c) => c.id);
+    const data = await gql<CommentReactionsResponse>(COMMENT_REACTIONS_QUERY, { ids });
+    for (const node of data.nodes) {
+      const comment = node?.id ? byId.get(node.id) : undefined;
+      if (!comment || !node?.reactions) continue;
+      comment.reactions.push(...reactionsOf(node.reactions));
+      const { hasNextPage, endCursor } = node.reactions.pageInfo;
+      if (hasNextPage && endCursor) needMore.push({ comment, cursor: endCursor });
+    }
+  }
+
+  for (const entry of needMore) {
+    let cursor: string | null = entry.cursor;
+    do {
+      const data: ReactionsResponse = await gql<ReactionsResponse>(REACTIONS_QUERY, { id: entry.comment.id, cursor });
+      entry.comment.reactions.push(...reactionsOf(data.node.reactions));
+      cursor = data.node.reactions.pageInfo.hasNextPage ? data.node.reactions.pageInfo.endCursor : null;
+    } while (cursor);
   }
 }
 
