@@ -7,7 +7,7 @@
 
 A pull-request review surface inside VS Code, for three things: your own uncommitted changes, a real GitHub pull request, and a coding agent reviewing alongside you.
 
-> **Local-first.** Reviewing your git diff happens entirely on your machine. The only network traffic is GitHub pull request review: listing open PRs in the sidebar when the repo has a GitHub remote and VS Code is signed in to GitHub, fetching and polling a PR while you have it open, and posting your review when you press **Submit**. Nothing else leaves your box. No account. No telemetry.
+> **Local-first.** Reviewing your git diff happens entirely on your machine. The only network traffic is GitHub pull request review: listing open PRs in the sidebar when the repo has a GitHub remote and VS Code is signed in to GitHub, fetching a PR you open and polling it while its review panel is open and the window has focus, and posting your review when you press **Submit**. Nothing else leaves your box. No account. No telemetry.
 
 ![ReviewMate: a local git diff reviewed like a pull request in VS Code, with an inline comment and a suggested change, and a sidebar of changed files, active comments, and saved reviews. You and your coding agent comment in the same review over MCP.](docs/images/review-panel.png)
 
@@ -79,7 +79,7 @@ Approve and Request changes are unavailable on a pull request you opened yoursel
 
 If a submit fails partway, retry it. Whatever already posted is not sent again.
 
-A PR also polls GitHub while it is open, so other people's new, edited, and resolved comments appear on their own. Set the interval with `agenticReview.github.pollInterval`. Use `0` to turn polling off. **The poll only adds and updates. It never removes a comment.** Deletions made on GitHub appear when you press **Sync**, or reopen the PR. This is deliberate: a background refresh should not delete a thread you are in the middle of replying to.
+A PR also polls GitHub while its review panel is open and the VS Code window has focus, so other people's new, edited, and resolved comments appear on their own. Closing the panel or switching away from the window pauses the poll. Coming back runs one poll right away. Set the interval with `agenticReview.github.pollInterval`. Use `0` to turn polling off. **The poll only adds and updates. It never removes a comment.** Deletions made on GitHub appear when you press **Sync**, or reopen the PR. This is deliberate: a background refresh should not delete a thread you are in the middle of replying to.
 
 New commits on the PR raise a **Load new commits** banner. Loading them changes which diff you are reviewing, so it stays a separate, deliberate action rather than something Sync does to you. Your review stays on the commit you loaded until then, and a review left open is restored with its diff and comments after a restart.
 
@@ -164,19 +164,19 @@ Prefer a packaged `.vsix`? Download `agentic-review-<version>.vsix` from [Releas
 
 ## Settings
 
-| Setting                               | Default            | Description                                                                 |
-| ------------------------------------- | ------------------ | --------------------------------------------------------------------------- |
-| `agenticReview.defaultSource`         | `worktree-vs-head` | Diff source when a review is first opened.                                  |
-| `agenticReview.defaultViewMode`       | `unified`          | Default rendering mode (`unified` or `split`).                              |
-| `agenticReview.defaultHideWhitespace` | `false`            | Hide whitespace-only changes by default.                                    |
-| `agenticReview.defaultWrap`           | `false`            | Wrap long lines instead of scrolling horizontally.                          |
-| `agenticReview.includeUntracked`      | `true`             | Include untracked files (ignores `.gitignore`d files).                      |
-| `agenticReview.largeFileThreshold`    | `1000`             | Files with more changed lines than this start collapsed.                    |
-| `agenticReview.github.enterpriseUri`  | `""`               | GitHub Enterprise Server base URL. Empty uses github.com.                   |
-| `agenticReview.github.pollInterval`   | `60`               | Seconds between polls of an open PR for upstream changes. `0` turns it off. |
-| `agenticReview.mcp.autoStart`         | `false`            | Start the MCP server when VS Code launches.                                 |
-| `agenticReview.mcp.port`              | `0`                | MCP server port (`0` picks a free port and reuses it).                      |
-| `agenticReview.log`                   | `false`            | Write diagnostic logs to the "ReviewMate" output channel.                   |
+| Setting                               | Default            | Description                                                                                             |
+| ------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------- |
+| `agenticReview.defaultSource`         | `worktree-vs-head` | Diff source when a review is first opened.                                                              |
+| `agenticReview.defaultViewMode`       | `unified`          | Default rendering mode (`unified` or `split`).                                                          |
+| `agenticReview.defaultHideWhitespace` | `false`            | Hide whitespace-only changes by default.                                                                |
+| `agenticReview.defaultWrap`           | `false`            | Wrap long lines instead of scrolling horizontally.                                                      |
+| `agenticReview.includeUntracked`      | `true`             | Include untracked files (ignores `.gitignore`d files).                                                  |
+| `agenticReview.largeFileThreshold`    | `1000`             | Files with more changed lines than this start collapsed.                                                |
+| `agenticReview.github.enterpriseUri`  | `""`               | GitHub Enterprise Server base URL. Empty uses github.com.                                               |
+| `agenticReview.github.pollInterval`   | `60`               | Seconds between polls of an open PR while its panel is open and the window has focus. `0` turns it off. |
+| `agenticReview.mcp.autoStart`         | `false`            | Start the MCP server when VS Code launches.                                                             |
+| `agenticReview.mcp.port`              | `0`                | MCP server port (`0` picks a free port and reuses it).                                                  |
+| `agenticReview.log`                   | `false`            | Write diagnostic logs to the "ReviewMate" output channel.                                               |
 
 ## Contributing
 

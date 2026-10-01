@@ -655,7 +655,7 @@
           "type": "number",
           "default": 60,
           "minimum": 0,
-          "markdownDescription": "How often (in seconds) to poll an open pull request for upstream changes. New, edited, and resolved comments update live; a new head commit surfaces a Refresh banner (never applied automatically). Polling runs only while a pull request is open. Set to `0` to disable it."
+          "markdownDescription": "How often (in seconds) to poll an open pull request for upstream changes. New, edited, and resolved comments update live; a new head commit surfaces a Refresh banner (never applied automatically). Polling runs only while the pull request's review panel is open and the VS Code window has focus. Set to `0` to disable it."
         }
       }
     }
