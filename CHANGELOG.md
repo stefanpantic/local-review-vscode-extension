@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.11.1...agentic-review-v0.11.2) (2026-10-01)
+
+
+### Bug Fixes
+
+* report every Submit batch by name, and keep one GitHub request from stalling the rest ([#116](https://github.com/stefanpantic/local-review-vscode-extension/issues/116)) ([3df10a7](https://github.com/stefanpantic/local-review-vscode-extension/commit/3df10a774f046eba9c2bff64822f6811baa76d49))
+
 ## [0.11.1](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.11.0...agentic-review-v0.11.1) (2026-10-01)
 
 
