@@ -1,6 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSubmitPlan, unsubmittedRemoteReview } from '../src/review/submit';
+import {
+  allSubmitBatches,
+  buildSubmitPlan,
+  submitBatches,
+  SubmitProgressTracker,
+  unsubmittedRemoteReview,
+  type SubmitProgress,
+  type SubmitReviewInput,
+} from '../src/review/submit';
 import { AGENT_AUTHOR } from '../src/model/Comment';
 import type { CommentThread, Comment, LocalReview, RemoteReview } from '../src/model/Comment';
 
@@ -289,4 +297,107 @@ test('a draft with no reactions carries no reactions field', () => {
   const { input, counts } = buildSubmitPlan(remoteReview([draft]), 'comment');
   assert.equal('reactions' in input.newThreads[0].root, false);
   assert.equal(counts.reactions, 0);
+});
+
+// --- batches and progress ---
+
+function input(over: Partial<SubmitReviewInput> = {}): SubmitReviewInput {
+  return {
+    event: 'comment',
+    commitId: 'H',
+    body: '',
+    newThreads: [],
+    replies: [],
+    edits: [],
+    deletes: [],
+    resolves: [],
+    reactions: [],
+    ...over,
+  };
+}
+
+test('submitBatches lists the non-empty batches in send order, counting requests', () => {
+  const batches = submitBatches(
+    input({
+      edits: [{ commentId: '1', body: 'e' }],
+      replies: [{ rootId: '2', body: 'r', reactions: ['HEART', 'ROCKET'] }],
+      reactions: [{ commentNodeId: 'n', content: 'HEART', add: true }],
+      newThreads: [
+        { root: { path: 'a.ts', side: 'new', line: 1, body: 'x', reactions: ['EYES'] }, replies: [{ body: 'y' }] },
+        { root: { path: 'b.ts', side: 'new', line: 1, body: 'z' }, replies: [] },
+      ],
+    }),
+  );
+  assert.deepEqual(
+    batches.map((b) => [b.kind, b.total]),
+    [
+      ['edits', 1],
+      ['replies', 3], // the reply and its two reactions
+      ['reactions', 1],
+      ['review', 1], // every new comment goes in the one review
+      ['follow-ups', 3], // the read-back, the root's reaction, and the follow-up reply
+    ],
+  );
+});
+
+test('submitBatches has only the review for new comments with nothing else staged', () => {
+  const threads = Array.from({ length: 38 }, (_, i) => ({
+    root: { path: 'a.ts', side: 'new' as const, line: i + 1, body: `c${i}` },
+    replies: [],
+  }));
+  assert.deepEqual(
+    allSubmitBatches(input({ newThreads: threads })).map((b) => b.kind),
+    ['sync-before', 'review', 'sync-after'],
+  );
+});
+
+test('submitBatches leaves out the review for a bare Comment with nothing to say', () => {
+  const kinds = submitBatches(input({ resolves: [{ threadId: 'T', resolved: true }] })).map((b) => b.kind);
+  assert.deepEqual(kinds, ['resolves']);
+});
+
+test('the progress tracker counts each batch and the whole Submit, and marks a batch finished', () => {
+  const seen: SubmitProgress[] = [];
+  const tracker = new SubmitProgressTracker(
+    allSubmitBatches(
+      input({
+        edits: [
+          { commentId: '1', body: 'e' },
+          { commentId: '2', body: 'f' },
+        ],
+      }),
+    ),
+    (p) => seen.push(p),
+  );
+  for (const batch of ['sync-before', 'edits'] as const) {
+    tracker.handle({ kind: 'batch-start', batch });
+    tracker.handle({ kind: 'request-done', batch });
+  }
+  tracker.handle({ kind: 'wait', wait: { seconds: 30, attempt: 1, maxAttempts: 3 } });
+  tracker.handle({ kind: 'request-done', batch: 'edits' });
+  tracker.handle({ kind: 'batch-end', batch: 'edits' });
+
+  const last = seen.at(-1)!;
+  assert.equal(last.batch.kind, 'edits');
+  assert.equal(last.batchIndex, 1);
+  assert.equal(last.batchCount, 3);
+  assert.equal(last.done, 2);
+  assert.equal(last.doneOverall, 3); // the first sync counts once it starts and lands
+  assert.equal(last.totalOverall, 4);
+  assert.equal(last.finished, true);
+  assert.deepEqual(seen.find((p) => p.wait)?.wait, { seconds: 30, attempt: 1, maxAttempts: 3 });
+  assert.deepEqual(
+    tracker.finished().map((f) => [f.batch.kind, f.done]),
+    [['edits', 2]],
+  );
+});
+
+test('an ended batch counts as complete even when the provider skipped some of its requests', () => {
+  const seen: SubmitProgress[] = [];
+  const tracker = new SubmitProgressTracker([{ kind: 'follow-ups', label: 'x', total: 3 }], (p) => seen.push(p));
+  tracker.handle({ kind: 'batch-start', batch: 'follow-ups' });
+  tracker.handle({ kind: 'request-done', batch: 'follow-ups' });
+  tracker.handle({ kind: 'batch-end', batch: 'follow-ups' });
+  assert.equal(seen.at(-1)!.doneOverall, 3);
+  assert.equal(tracker.finished()[0].done, 1);
 });

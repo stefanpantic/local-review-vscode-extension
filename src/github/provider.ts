@@ -5,7 +5,14 @@
 import type { CommentThread } from '../model/Comment';
 import type { ReviewDiff, Side } from '../model/ReviewDiff';
 import type { PullRequestDetail, PullRequestSummary, RemoteRepoRef, ReviewProvider } from '../review/provider';
-import type { NewInlineComment, OnApplied, SubmitReviewInput } from '../review/submit';
+import {
+  submitBatches,
+  type NewInlineComment,
+  type OnApplied,
+  type OnSubmitStep,
+  type SubmitBatchKind,
+  type SubmitReviewInput,
+} from '../review/submit';
 import type { TokenSource } from './auth';
 import { createGithubClient, type GhNewComment, type GhPostedComment, type GithubWriteClient } from './client';
 import { mapThreads } from './mapThreads';
@@ -87,80 +94,134 @@ class GithubReviewProvider implements ReviewProvider {
    * batch we read back the created comments, match each root, and post its follow-ups — all in this one
    * call. Uses an interactive token: a write is a deliberate human action, so a sign-in prompt fits here.
    * Each id-addressable step is reported through `onApplied` the moment it lands, so a failure later in the
-   * sequence leaves the earlier work retired rather than staged for a second send.
+   * sequence leaves the earlier work retired rather than staged for a second send. `onStep` hears each batch
+   * start and end, each request that lands, and each wait GitHub's rate limits impose.
    */
   async submitReview(
     repo: RemoteRepoRef,
     number: number,
     input: SubmitReviewInput,
     onApplied?: OnApplied,
+    onStep?: OnSubmitStep,
   ): Promise<void> {
     const client = await this.clientFor(true);
-    for (const e of input.edits) {
-      await client.editComment(repo, { commentId: Number(e.commentId), body: e.body });
-      await onApplied?.({ kind: 'edit', commentId: e.commentId });
+    const stopListening = client.onThrottle?.((wait) => onStep?.({ kind: 'wait', wait }));
+    try {
+      await this.sendBatches(client, repo, number, input, onApplied, onStep ?? (() => {}));
+    } finally {
+      stopListening?.();
     }
-    for (const id of input.deletes) {
-      await client.deleteComment(repo, { commentId: Number(id) });
-      await onApplied?.({ kind: 'delete', commentId: id });
-    }
-    // A reaction staged on a reply that has never been posted can only be applied once the reply exists.
-    for (const r of input.replies) {
-      const created = await client.reply(repo, number, { inReplyTo: Number(r.rootId), body: r.body });
-      await addReactions(client, created.nodeId, r.reactions);
-    }
-    for (const rs of input.resolves) {
-      await client.resolveThread({ threadId: rs.threadId, resolved: rs.resolved });
-      await onApplied?.({ kind: 'resolve', threadId: rs.threadId, resolved: rs.resolved });
-    }
+  }
 
-    const reactionsByComment = new Map<string, typeof input.reactions>();
-    for (const r of input.reactions) {
-      if (!reactionsByComment.has(r.commentNodeId)) reactionsByComment.set(r.commentNodeId, []);
-      reactionsByComment.get(r.commentNodeId)!.push(r);
-    }
-    for (const [commentNodeId, ops] of reactionsByComment) {
-      for (const r of ops) {
-        if (r.add) await client.addReaction(r.commentNodeId, r.content);
-        else await client.removeReaction(r.commentNodeId, r.content);
+  private async sendBatches(
+    client: GithubWriteClient,
+    repo: RemoteRepoRef,
+    number: number,
+    input: SubmitReviewInput,
+    onApplied: OnApplied | undefined,
+    onStep: OnSubmitStep,
+  ): Promise<void> {
+    const planned = new Set(submitBatches(input).map((b) => b.kind));
+    // Runs a batch only when it has work, bracketed by its start and end.
+    const run = async (kind: SubmitBatchKind, work: (landed: () => void) => Promise<void>): Promise<void> => {
+      if (!planned.has(kind)) return;
+      onStep({ kind: 'batch-start', batch: kind });
+      await work(() => onStep({ kind: 'request-done', batch: kind }));
+      onStep({ kind: 'batch-end', batch: kind });
+    };
+
+    await run('edits', async (landed) => {
+      for (const e of input.edits) {
+        await client.editComment(repo, { commentId: Number(e.commentId), body: e.body });
+        landed();
+        await onApplied?.({ kind: 'edit', commentId: e.commentId });
       }
-      await onApplied?.({ kind: 'reaction', commentId: commentNodeId });
-    }
+    });
+    await run('deletes', async (landed) => {
+      for (const id of input.deletes) {
+        await client.deleteComment(repo, { commentId: Number(id) });
+        landed();
+        await onApplied?.({ kind: 'delete', commentId: id });
+      }
+    });
+    // A reaction staged on a reply that has never been posted can only be applied once the reply exists.
+    await run('replies', async (landed) => {
+      for (const r of input.replies) {
+        const created = await client.reply(repo, number, { inReplyTo: Number(r.rootId), body: r.body });
+        landed();
+        await addReactions(client, created.nodeId, r.reactions, landed);
+      }
+    });
+    await run('resolves', async (landed) => {
+      for (const rs of input.resolves) {
+        await client.resolveThread({ threadId: rs.threadId, resolved: rs.resolved });
+        landed();
+        await onApplied?.({ kind: 'resolve', threadId: rs.threadId, resolved: rs.resolved });
+      }
+    });
+    await run('reactions', async (landed) => {
+      const reactionsByComment = new Map<string, typeof input.reactions>();
+      for (const r of input.reactions) {
+        if (!reactionsByComment.has(r.commentNodeId)) reactionsByComment.set(r.commentNodeId, []);
+        reactionsByComment.get(r.commentNodeId)!.push(r);
+      }
+      for (const [commentNodeId, ops] of reactionsByComment) {
+        for (const r of ops) {
+          if (r.add) await client.addReaction(r.commentNodeId, r.content);
+          else await client.removeReaction(r.commentNodeId, r.content);
+          landed();
+        }
+        await onApplied?.({ kind: 'reaction', commentId: commentNodeId });
+      }
+    });
 
-    const event =
-      input.event === 'approve' ? 'APPROVE' : input.event === 'request-changes' ? 'REQUEST_CHANGES' : 'COMMENT';
-    // A bare COMMENT with no new roots and no body is not a valid review; skip the batch when there is
-    // nothing to say. Approve / request-changes always post, even with no inline comments.
-    if (input.newThreads.length === 0 && input.event === 'comment' && input.body === '') return;
-
-    const review = await client.createReview(repo, number, {
-      commitId: input.commitId,
-      event,
-      body: input.body,
-      comments: input.newThreads.map((t) => ghComment(t.root)),
+    // A bare COMMENT with no new roots and no body is not a valid review, so that batch is not planned when
+    // there is nothing to say. Approve / request-changes always post, even with no inline comments.
+    let reviewId: number | undefined;
+    await run('review', async (landed) => {
+      const event =
+        input.event === 'approve' ? 'APPROVE' : input.event === 'request-changes' ? 'REQUEST_CHANGES' : 'COMMENT';
+      const review = await client.createReview(repo, number, {
+        commitId: input.commitId,
+        event,
+        body: input.body,
+        comments: input.newThreads.map((t) => ghComment(t.root)),
+      });
+      reviewId = review.id;
+      landed();
     });
 
     // The created roots have to be read back for anything that needs their ids: threading a follow-up reply
     // to its root, and applying the reactions staged on a root or on one of those replies.
-    const needsPostedIds = input.newThreads.some((t) => t.replies.length > 0 || (t.root.reactions?.length ?? 0) > 0);
-    if (needsPostedIds) {
-      const posted = await client.listReviewComments(repo, number, review.id);
+    await run('follow-ups', async (landed) => {
+      if (reviewId === undefined) return;
+      const posted = await client.listReviewComments(repo, number, reviewId);
+      landed();
       for (const t of input.newThreads) {
         const root = matchPosted(posted, t.root);
         if (!root) continue; // exact match; a miss leaves the reply and the reactions for the next Submit
-        await addReactions(client, root.nodeId, t.root.reactions);
+        await addReactions(client, root.nodeId, t.root.reactions, landed);
         for (const r of t.replies) {
           const created = await client.reply(repo, number, { inReplyTo: root.id, body: r.body });
-          await addReactions(client, created.nodeId, r.reactions);
+          landed();
+          await addReactions(client, created.nodeId, r.reactions, landed);
         }
       }
-    }
+    });
   }
 }
 
 /** Apply the reactions a newly created comment carried, now that posting it has given it a node id. */
-async function addReactions(client: GithubWriteClient, nodeId: string, contents: string[] | undefined): Promise<void> {
-  for (const content of contents ?? []) await client.addReaction(nodeId, content);
+async function addReactions(
+  client: GithubWriteClient,
+  nodeId: string,
+  contents: string[] | undefined,
+  landed: () => void,
+): Promise<void> {
+  for (const content of contents ?? []) {
+    await client.addReaction(nodeId, content);
+    landed();
+  }
 }
 
 /**

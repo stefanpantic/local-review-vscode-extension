@@ -29,7 +29,15 @@ import { resolveProvider } from './review/resolveProvider';
 import { nextFailureCount } from './poll';
 import { pendingChangeSet, type PendingSummary } from './review/pending';
 import { mergeRequestMeta } from './review/requestMeta';
-import { buildSubmitPlan, unsubmittedRemoteReview, type SubmitCounts, type SubmitEvent } from './review/submit';
+import {
+  allSubmitBatches,
+  buildSubmitPlan,
+  SubmitProgressTracker,
+  unsubmittedRemoteReview,
+  type SubmitCounts,
+  type SubmitEvent,
+  type SubmitProgress,
+} from './review/submit';
 import { reconcile, type OrphanReport } from './review/reconcile';
 import type { McpReviewApi } from './mcp/tools';
 import type { Events, EventType, PrDisplay, ReviewStatePayload, SyncState } from './protocol/messages';
@@ -769,9 +777,26 @@ export class RepoSession implements vscode.Disposable {
    * whose comment already posted is adopted rather than re-sent. Between the two, a submit that dies partway
    * leaves only genuinely unsent work staged, so a retry finishes the job without posting anything twice.
    * Returns the counts plus any orphaned targets handled, and what was left unsent when the review posted
-   * but a later step failed.
+   * but a later step failed. `onProgress` hears each batch and request as it runs, and the panel is told the
+   * same until the Submit ends, however it ends.
    */
-  async submitPullRequest(event: SubmitEvent, body?: string): Promise<SubmitResult> {
+  async submitPullRequest(
+    event: SubmitEvent,
+    body?: string,
+    onProgress?: (p: SubmitProgress) => void,
+  ): Promise<SubmitResult> {
+    try {
+      return await this.submitWithProgress(event, body, onProgress);
+    } finally {
+      this.panelPost?.('submitProgress', null);
+    }
+  }
+
+  private async submitWithProgress(
+    event: SubmitEvent,
+    body: string | undefined,
+    onProgress: ((p: SubmitProgress) => void) | undefined,
+  ): Promise<SubmitResult> {
     return this.withPrLock(async () => {
       const pref = this.pref();
       if (pref.source !== 'pr') throw new Error('No pull request is open.');
@@ -784,13 +809,28 @@ export class RepoSession implements vscode.Disposable {
       if (!remote) throw new Error("This repository's origin is not a supported review host.");
       const number = review.remote.number ?? Number(review.remote.id);
 
+      // The batches are first estimated from the staged work, then replaced once the sync below has
+      // reconciled it, so the totals match what is actually sent.
+      const tracker = new SubmitProgressTracker(allSubmitBatches(buildSubmitPlan(review, event, body).input), (p) => {
+        onProgress?.(p);
+        this.panelPost?.('submitProgress', { label: p.batch.label, done: p.doneOverall, total: p.totalOverall });
+      });
+      const syncBatch = async <T>(kind: 'sync-before' | 'sync-after', work: () => Promise<T>): Promise<T> => {
+        tracker.handle({ kind: 'batch-start', batch: kind });
+        const out = await work();
+        tracker.handle({ kind: 'request-done', batch: kind });
+        tracker.handle({ kind: 'batch-end', batch: kind });
+        return out;
+      };
+
       // Pre-submit re-fetch: reconcile against current upstream, then rebuild the plan from the reconciled
       // review so the batch never targets a comment/thread that is gone.
-      let orphans = await this.syncFromRemote(repoRoot, reviewId, remote, number);
+      let orphans = await syncBatch('sync-before', () => this.syncFromRemote(repoRoot, reviewId, remote, number));
       const refreshed = this.reviewStore.current(repoRoot, branch);
       if (refreshed?.kind === 'remote') review = refreshed;
 
       const { input, counts } = buildSubmitPlan(review, event, body);
+      tracker.setBatches(allSubmitBatches(input));
       if (counts.total === 0) {
         this.afterThreadChange();
         return { counts, orphans };
@@ -806,8 +846,12 @@ export class RepoSession implements vscode.Disposable {
 
       let failure: { error: unknown } | undefined;
       try {
-        await remote.provider.submitReview(remote.repo, number, input, (step) =>
-          this.reviewStore.retireApplied(repoRoot, reviewId, step),
+        await remote.provider.submitReview(
+          remote.repo,
+          number,
+          input,
+          (step) => this.reviewStore.retireApplied(repoRoot, reviewId, step),
+          (step) => tracker.handle(step),
         );
       } catch (error) {
         failure = { error };
@@ -817,7 +861,7 @@ export class RepoSession implements vscode.Disposable {
       // replace the submit's error (that error is what the user needs to see), and it must not turn a
       // successful submit into a failed one — the work is already posted either way.
       try {
-        const after = await this.syncFromRemote(repoRoot, reviewId, remote, number);
+        const after = await syncBatch('sync-after', () => this.syncFromRemote(repoRoot, reviewId, remote, number));
         orphans = { localOnly: orphans.localOnly + after.localOnly, deletes: orphans.deletes + after.deletes };
       } catch {
         // Offline right after posting. Pending state stays as the apply-as-you-go steps left it, and the

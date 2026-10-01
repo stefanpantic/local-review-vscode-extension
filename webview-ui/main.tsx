@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import '@vscode/codicons/dist/codicon.css';
 import './styles/diff.css';
 import { request, on } from './rpcClient';
-import type { ReviewStatePayload } from '../src/protocol/messages';
+import type { ReviewStatePayload, SubmitProgressEvent } from '../src/protocol/messages';
 import type { ViewMode } from '../src/model/ReviewDiff';
 import { DiffView } from './render/DiffView';
 import { carryDiff } from './carryDiff';
@@ -97,6 +97,7 @@ function navigateTo(target: 'file' | 'comment', dir: 'next' | 'prev'): void {
 
 function App() {
   const [state, setState] = useState<ReviewStatePayload | null>(null);
+  const [submitProgress, setSubmitProgress] = useState<SubmitProgressEvent | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,6 +127,7 @@ function App() {
     );
     const offReveal = on('revealFile', ({ filePath, threadId }) => revealFile(filePath, threadId));
     const offNav = on('navigate', ({ target, dir }) => navigateTo(target, dir));
+    const offSubmit = on('submitProgress', setSubmitProgress);
     return () => {
       cancelled = true;
       offState();
@@ -133,6 +135,7 @@ function App() {
       offThreads();
       offReveal();
       offNav();
+      offSubmit();
     };
   }, []);
 
@@ -157,7 +160,7 @@ function App() {
     void request('setViewPref', patch);
   };
 
-  return <DiffView state={state} setViewed={setViewed} setViewPref={setViewPref} />;
+  return <DiffView state={state} submitProgress={submitProgress} setViewed={setViewed} setViewPref={setViewPref} />;
 }
 
 const container = document.getElementById('root');

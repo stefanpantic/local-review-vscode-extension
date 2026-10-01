@@ -1,5 +1,5 @@
 import type { PendingSummary } from '../../src/review/pending';
-import type { SyncState } from '../../src/protocol/messages';
+import type { SubmitProgressEvent, SyncState } from '../../src/protocol/messages';
 
 /**
  * The pull-request actions, on their own persistent row under the diff summary. Every action you can take on
@@ -10,18 +10,23 @@ import type { SyncState } from '../../src/protocol/messages';
  * and re-checks the head: new commits then raise the banner below, which is where "load them" belongs, since
  * that changes which diff you are reviewing.
  *
+ * While a Submit runs, its button shows how many of the Submit's requests have been sent and what it is
+ * doing, and cannot be pressed again.
+ *
  * The row deliberately carries no PR title, number, or state. The summary row above names the pull request
  * and the description card below repeats it; what belongs here is the state that drives the buttons.
  */
 export function PrActionBar({
   pending,
   sync,
+  submitting,
   onSync,
   onSubmit,
   onDiscard,
 }: {
   pending?: PendingSummary;
   sync?: SyncState;
+  submitting?: SubmitProgressEvent | null;
   onSync: () => void;
   onSubmit: () => void;
   onDiscard: () => void;
@@ -70,14 +75,20 @@ export function PrActionBar({
           type="button"
           className="lr-submit-btn"
           onClick={onSubmit}
-          disabled={staged === 0}
+          disabled={staged === 0 || !!submitting}
           title={
-            staged === 0
-              ? 'Nothing staged yet. Comment, reply, resolve, or edit, then post it all as one review.'
-              : 'Post your staged changes to GitHub as one review'
+            submitting
+              ? submitting.label
+              : staged === 0
+                ? 'Nothing staged yet. Comment, reply, resolve, or edit, then post it all as one review.'
+                : 'Post your staged changes to GitHub as one review'
           }
         >
-          {staged > 0 ? `Submit review (${staged})` : 'Submit review'}
+          {submitting
+            ? `Submitting ${submitting.done} / ${submitting.total}…`
+            : staged > 0
+              ? `Submit review (${staged})`
+              : 'Submit review'}
         </button>
       </span>
     </div>

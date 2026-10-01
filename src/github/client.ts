@@ -4,6 +4,7 @@
 import { Octokit } from '@octokit/rest';
 import { throttling } from '@octokit/plugin-throttling';
 import type { PullRequestDetail, PullRequestSummary, RemoteRepoRef } from '../review/provider';
+import type { SubmitWait } from '../review/submit';
 import type { GhReviewThread } from './types';
 import { apiBaseUrls, type GithubProviderId } from './remote';
 
@@ -11,6 +12,12 @@ const ThrottledOctokit = Octokit.plugin(throttling);
 
 /** How many times a request refused by GitHub's secondary rate limit is resent after the wait it asks for. */
 const SECONDARY_RATE_LIMIT_RETRIES = 3;
+
+/** How many times a request refused by the primary rate limit is resent once the limit resets. */
+const RATE_LIMIT_RETRIES = 1;
+
+/** Told when GitHub refuses a request for a rate limit and it will be resent after a wait. */
+export type ThrottleListener = (wait: SubmitWait) => void;
 
 /** The read operations the provider needs. Fakeable, so the provider is testable without the network. */
 export interface GithubReadClient {
@@ -70,6 +77,8 @@ export interface GithubWriteClient extends GithubReadClient {
   resolveThread(input: { threadId: string; resolved: boolean }): Promise<void>;
   addReaction(subjectId: string, content: string): Promise<void>;
   removeReaction(subjectId: string, content: string): Promise<void>;
+  /** Hear every rate-limit wait until the returned function is called. One listener at a time. */
+  onThrottle?(listener: ThrottleListener): () => void;
 }
 
 const THREADS_QUERY = `
@@ -171,7 +180,15 @@ class OctokitClient implements GithubWriteClient {
   constructor(
     private readonly kit: Octokit,
     private readonly gql: GraphqlFn,
+    private readonly throttle: { listener?: ThrottleListener },
   ) {}
+
+  onThrottle(listener: ThrottleListener): () => void {
+    this.throttle.listener = listener;
+    return () => {
+      if (this.throttle.listener === listener) this.throttle.listener = undefined;
+    };
+  }
 
   async viewer(): Promise<string> {
     const data = await this.gql<{ viewer: { login: string } }>('query { viewer { login } }', {});
@@ -399,22 +416,26 @@ export function createGithubClient(opts: {
   enterpriseUri?: string;
 }): GithubWriteClient {
   const bases = apiBaseUrls(opts.providerId, opts.enterpriseUri);
+  // Whoever is listening hears each wait before it starts, so a long pause can be shown for what it is.
+  const throttle: { listener?: ThrottleListener } = {};
+  const retry = (retryAfter: number, retryCount: number, maxAttempts: number): true | undefined => {
+    if (retryCount >= maxAttempts) return undefined;
+    throttle.listener?.({ seconds: retryAfter, attempt: retryCount + 1, maxAttempts });
+    return true;
+  };
   const kit = new ThrottledOctokit({
     auth: opts.token,
     baseUrl: bases.rest,
     throttle: {
-      onRateLimit: (_retryAfter, _options, _octokit, retryCount) => {
-        if (retryCount === 0) return true; // retry once after waiting
-      },
+      onRateLimit: (retryAfter, _options, _octokit, retryCount) => retry(retryAfter, retryCount, RATE_LIMIT_RETRIES),
       // The secondary limit throttles bursts of writes, which a large Submit sends one after another. A
       // refused request was never applied, so waiting it out and resending cannot post anything twice.
-      onSecondaryRateLimit: (_retryAfter, _options, _octokit, retryCount) => {
-        if (retryCount < SECONDARY_RATE_LIMIT_RETRIES) return true;
-      },
+      onSecondaryRateLimit: (retryAfter, _options, _octokit, retryCount) =>
+        retry(retryAfter, retryCount, SECONDARY_RATE_LIMIT_RETRIES),
     },
   });
   // Octokit derives the GraphQL endpoint as `${baseUrl}/graphql`; on GHE the GraphQL root differs from the
   // REST root (`/api` vs `/api/v3`), so point graphql at the correct base rather than inheriting the REST one.
   const gql = kit.graphql.defaults({ baseUrl: bases.graphql.replace(/\/graphql$/, '') }) as unknown as GraphqlFn;
-  return new OctokitClient(kit, gql);
+  return new OctokitClient(kit, gql, throttle);
 }
