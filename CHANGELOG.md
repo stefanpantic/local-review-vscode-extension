@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.1](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.11.0...agentic-review-v0.11.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* cut the pull request poll's GraphQL cost and pause it when unused ([#114](https://github.com/stefanpantic/local-review-vscode-extension/issues/114)) ([36ffed7](https://github.com/stefanpantic/local-review-vscode-extension/commit/36ffed78e918f034376dd4e37e28f915f2830919))
+* show a large Submit's progress by batch, and say when GitHub makes it wait ([#112](https://github.com/stefanpantic/local-review-vscode-extension/issues/112)) ([7072c21](https://github.com/stefanpantic/local-review-vscode-extension/commit/7072c21eeb2571d8244060f1029e25d2669e3093))
+
 ## [0.11.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.10.2...agentic-review-v0.11.0) (2026-09-30)
 
 
