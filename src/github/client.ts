@@ -3,6 +3,7 @@
 // read surface for iteration 11; write-back joins in iteration 12. Network egress lives only here.
 import { Octokit } from '@octokit/rest';
 import { throttling } from '@octokit/plugin-throttling';
+import Bottleneck from 'bottleneck';
 import type { PullRequestDetail, PullRequestSummary, RemoteRepoRef } from '../review/provider';
 import type { SubmitWait } from '../review/submit';
 import type { GhReviewComment, GhReviewThread } from './types';
@@ -15,6 +16,13 @@ const SECONDARY_RATE_LIMIT_RETRIES = 3;
 
 /** How many times a request refused by the primary rate limit is resent once the limit resets. */
 const RATE_LIMIT_RETRIES = 1;
+
+/** How long one request may wait for GitHub's answer before it fails. A large review can take a while to post. */
+const REQUEST_TIMEOUT_MS = 120_000;
+
+// Each client gets its own request queues. The throttling plugin otherwise shares one set across every
+// client in the process, so one repository's Submit would queue behind every other repository's poll.
+let clientSeq = 0;
 
 /** Told when GitHub refuses a request for a rate limit and it will be resent after a wait. */
 export type ThrottleListener = (wait: SubmitWait) => void;
@@ -452,6 +460,8 @@ export function createGithubClient(opts: {
   token: string;
   providerId: GithubProviderId;
   enterpriseUri?: string;
+  /** Hears each request as it is sent and answered, for diagnostics. */
+  trace?: (message: string) => void;
 }): GithubWriteClient {
   const bases = apiBaseUrls(opts.providerId, opts.enterpriseUri);
   // Whoever is listening hears each wait before it starts, so a long pause can be shown for what it is.
@@ -464,7 +474,13 @@ export function createGithubClient(opts: {
   const kit = new ThrottledOctokit({
     auth: opts.token,
     baseUrl: bases.rest,
+    request: { fetch: fetchWithTimeout(opts.trace) },
     throttle: {
+      id: `reviewmate-${++clientSeq}`,
+      // The plugin spaces requests that notify people (comments, replies, reviews) 3 seconds apart, on top of
+      // the 1 second it already keeps between writes. GitHub asks for 1 second, so a large Submit spent most
+      // of its time waiting in this queue. Content creation still stays under GitHub's 80 per minute.
+      notifications: new Bottleneck.Group({ maxConcurrent: 1, minTime: 1000 }),
       onRateLimit: (retryAfter, _options, _octokit, retryCount) => retry(retryAfter, retryCount, RATE_LIMIT_RETRIES),
       // The secondary limit throttles bursts of writes, which a large Submit sends one after another. A
       // refused request was never applied, so waiting it out and resending cannot post anything twice.
@@ -476,4 +492,35 @@ export function createGithubClient(opts: {
   // REST root (`/api` vs `/api/v3`), so point graphql at the correct base rather than inheriting the REST one.
   const gql = kit.graphql.defaults({ baseUrl: bases.graphql.replace(/\/graphql$/, '') }) as unknown as GraphqlFn;
   return new OctokitClient(kit, gql, throttle);
+}
+
+/**
+ * Fetch with a deadline. Without one, a request GitHub never answers would hold its caller forever. Each
+ * attempt gets its own deadline, so a rate-limit wait before a retry does not count against it.
+ */
+const fetchWithTimeout =
+  (trace?: (message: string) => void): typeof fetch =>
+  async (input, init) => {
+    const deadline = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    const what = `${init?.method ?? 'GET'} ${requestPath(input)}`;
+    const started = Date.now();
+    trace?.(`-> ${what}`);
+    try {
+      const res = await fetch(input, {
+        ...init,
+        signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
+      });
+      trace?.(`<- ${what} ${res.status} in ${Date.now() - started} ms`);
+      return res;
+    } catch (err) {
+      trace?.(`!! ${what} after ${Date.now() - started} ms: ${String(err)}`);
+      if (deadline.aborted)
+        throw new Error(`GitHub did not answer within ${REQUEST_TIMEOUT_MS / 1000} seconds.`, { cause: err });
+      throw err;
+    }
+  };
+
+function requestPath(input: Parameters<typeof fetch>[0]): string {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  return new URL(url).pathname;
 }

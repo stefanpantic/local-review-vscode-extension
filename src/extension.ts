@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { log } from './log';
 import { ReviewState } from './reviewState';
 import { ReviewStore } from './comments/ReviewStore';
 import type { RepoSession, SubmitPreview } from './repoSession';
@@ -693,11 +694,15 @@ async function submitPullRequest(session: RepoSession): Promise<void> {
     );
     return;
   }
+  log('[submit] asking for the review event');
   const event = await pickReviewEvent(preview);
   if (!event) return;
+  log('[submit] event', event, '- asking for the summary');
   const body = await askReviewSummary();
   if (body === undefined) return; // dismissed the summary box: treat as cancelling the whole submit
+  log('[submit] asking for confirmation');
   if (!(await confirmSubmit(preview, event))) return;
+  log('[submit] confirmed');
   const finished: FinishedBatch[] = [];
   try {
     const { counts, orphans, unsent } = await vscode.window.withProgress(
@@ -710,12 +715,11 @@ async function submitPullRequest(session: RepoSession): Promise<void> {
           reported = Math.max(reported, percent);
           if (p.finished) {
             finished.push({ batch: p.batch, done: p.done });
+            // Every batch reports its end, the syncs included, so the last one shown is always the last one run.
             const doneText = BATCH_DONE_TEXT[p.batch.kind];
-            if (doneText) {
-              void vscode.window.showInformationMessage(
-                `ReviewMate: batch ${p.batchIndex + 1} of ${p.batchCount} done. ${doneText(p.done)}.`,
-              );
-            }
+            void vscode.window.showInformationMessage(
+              `ReviewMate: batch ${p.batchIndex + 1} of ${p.batchCount} (${p.batch.label}) done.${doneText ? ` ${doneText(p.done)}.` : ''}`,
+            );
           }
         });
       },
@@ -744,7 +748,7 @@ function submitProgressText(p: SubmitProgress): string {
   return `GitHub rate limit: waiting ${seconds} s before retry ${attempt} of ${maxAttempts}. ${step}`;
 }
 
-/** What a finished batch sent, for its notification. The two syncs send nothing, so they raise none. */
+/** What a finished batch sent, for its notification and a failure's summary. The two syncs send nothing. */
 const BATCH_DONE_TEXT: Partial<Record<SubmitBatchKind, (n: number) => string>> = {
   edits: (n) => `${n} ${n === 1 ? 'comment' : 'comments'} edited`,
   deletes: (n) => `${n} ${n === 1 ? 'comment' : 'comments'} deleted`,

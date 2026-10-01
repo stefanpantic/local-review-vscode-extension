@@ -42,6 +42,7 @@ import { reconcile, type OrphanReport } from './review/reconcile';
 import type { McpReviewApi } from './mcp/tools';
 import type { Events, EventType, PrDisplay, ReviewStatePayload, SyncState } from './protocol/messages';
 import { PrPoller } from './prPoller';
+import { log } from './log';
 
 type PanelPost = <K extends EventType>(type: K, payload: Events[K]) => void;
 
@@ -803,7 +804,9 @@ export class RepoSession implements vscode.Disposable {
     body: string | undefined,
     onProgress: ((p: SubmitProgress) => void) | undefined,
   ): Promise<SubmitResult> {
+    log('[submit] waiting for the PR lock');
     return this.withPrLock(async () => {
+      log('[submit] lock held');
       const pref = this.pref();
       if (pref.source !== 'pr') throw new Error('No pull request is open.');
       const repoRoot = this.repoRoot;
@@ -814,6 +817,7 @@ export class RepoSession implements vscode.Disposable {
       const remote = await this.currentRemote();
       if (!remote) throw new Error("This repository's origin is not a supported review host.");
       const number = review.remote.number ?? Number(review.remote.id);
+      log('[submit] remote resolved for PR', number);
 
       // The batches are first estimated from the staged work, then replaced once the sync below has
       // reconciled it, so the totals match what is actually sent.
@@ -823,7 +827,9 @@ export class RepoSession implements vscode.Disposable {
       });
       const syncBatch = async <T>(kind: 'sync-before' | 'sync-after', work: () => Promise<T>): Promise<T> => {
         tracker.handle({ kind: 'batch-start', batch: kind });
+        log('[submit]', kind, 'start');
         const out = await work();
+        log('[submit]', kind, 'done');
         tracker.handle({ kind: 'request-done', batch: kind });
         tracker.handle({ kind: 'batch-end', batch: kind });
         return out;
@@ -851,15 +857,21 @@ export class RepoSession implements vscode.Disposable {
       }
 
       let failure: { error: unknown } | undefined;
+      log('[submit] sending', JSON.stringify(counts));
       try {
         await remote.provider.submitReview(
           remote.repo,
           number,
           input,
           (step) => this.reviewStore.retireApplied(repoRoot, reviewId, step),
-          (step) => tracker.handle(step),
+          (step) => {
+            log('[submit] step', JSON.stringify(step));
+            tracker.handle(step);
+          },
         );
+        log('[submit] sent');
       } catch (error) {
+        log('[submit] send failed:', String(error));
         failure = { error };
       }
       // Success or failure, current upstream decides what is still pending. On success this stamps every
