@@ -445,7 +445,7 @@ test('submitReview passes rate-limit waits on while it runs, and stops listening
   const steps: SubmitStep[] = [];
   const origEdit = client.editComment.bind(client);
   client.editComment = async (r, input) => {
-    client.throttleListener?.({ seconds: 60, attempt: 1, maxAttempts: 3 });
+    client.throttleListener?.({ seconds: 60, attempt: 1, maxAttempts: 3, resource: 'graphql', secondary: false });
     await origEdit(r, input);
   };
   const p = new GithubReviewProvider('github', async () => client);
@@ -454,7 +454,7 @@ test('submitReview passes rate-limit waits on while it runs, and stops listening
   );
   assert.deepEqual(
     steps.filter((s) => s.kind === 'wait'),
-    [{ kind: 'wait', wait: { seconds: 60, attempt: 1, maxAttempts: 3 } }],
+    [{ kind: 'wait', wait: { seconds: 60, attempt: 1, maxAttempts: 3, resource: 'graphql', secondary: false } }],
   );
   assert.equal(client.throttleListener, undefined);
 });

@@ -4,6 +4,7 @@
 import { log } from '../log';
 import { githubTokenSource } from '../github/auth';
 import { createGithubProvider } from '../github/provider';
+import { rateLimits } from '../github/rateLimit';
 import { providerIdForHost } from '../github/remote';
 import type { RemoteRepoRef, ReviewProvider } from './provider';
 
@@ -16,5 +17,6 @@ export function resolveProvider(repo: RemoteRepoRef, enterpriseUri?: string): Re
     enterpriseUri,
     getToken: githubTokenSource(providerId),
     trace: (message) => log('[github]', message),
+    rateLimits,
   });
 }

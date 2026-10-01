@@ -26,6 +26,8 @@ import { AGENT_AUTHOR } from './model/Comment';
 import { parsePrReference, type GithubProviderId } from './github/remote';
 import { githubTokenSource } from './github/auth';
 import { githubErrorText } from './github/errors';
+import { clockTime, rateLimits, resourceLabel } from './github/rateLimit';
+import { showRateLimitStatus } from './rateLimitStatus';
 import type { FinishedBatch, SubmitBatchKind, SubmitCounts, SubmitEvent, SubmitProgress } from './review/submit';
 import { PullRequestsView } from './webview/pullRequestsView';
 import type { ReviewProvider, RemoteRepoRef, PullRequestSummary } from './review/provider';
@@ -50,6 +52,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.workspace.name ?? 'Untitled',
   );
   const workspace = new WorkspaceReviews(state, reviewStore, claims);
+  context.subscriptions.push(showRateLimitStatus(rateLimits));
   // Another window claiming or releasing a repository changes which ones are open twice. The folder has to
   // exist before it can be watched.
   await fs.mkdir(claims.dir, { recursive: true }).catch(() => undefined);
@@ -744,8 +747,10 @@ async function submitPullRequest(session: RepoSession): Promise<void> {
 function submitProgressText(p: SubmitProgress): string {
   const step = `Batch ${p.batchIndex + 1} of ${p.batchCount}: ${p.batch.label} (${p.done} of ${p.batch.total})`;
   if (!p.wait) return step;
-  const { seconds, attempt, maxAttempts } = p.wait;
-  return `GitHub rate limit: waiting ${seconds} s before retry ${attempt} of ${maxAttempts}. ${step}`;
+  const { seconds, attempt, maxAttempts, resource, secondary } = p.wait;
+  const limit = `GitHub ${resourceLabel(resource)}${secondary ? ' secondary' : ''} rate limit`;
+  const until = clockTime(new Date(Date.now() + seconds * 1000));
+  return `${limit}: waiting until ${until} (${seconds} s) before retry ${attempt} of ${maxAttempts}. ${step}`;
 }
 
 /** What a finished batch sent, for its notification and a failure's summary. The two syncs send nothing. */

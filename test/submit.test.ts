@@ -373,7 +373,10 @@ test('the progress tracker counts each batch and the whole Submit, and marks a b
     tracker.handle({ kind: 'batch-start', batch });
     tracker.handle({ kind: 'request-done', batch });
   }
-  tracker.handle({ kind: 'wait', wait: { seconds: 30, attempt: 1, maxAttempts: 3 } });
+  tracker.handle({
+    kind: 'wait',
+    wait: { seconds: 30, attempt: 1, maxAttempts: 3, resource: 'rest', secondary: true },
+  });
   tracker.handle({ kind: 'request-done', batch: 'edits' });
   tracker.handle({ kind: 'batch-end', batch: 'edits' });
 
@@ -385,7 +388,13 @@ test('the progress tracker counts each batch and the whole Submit, and marks a b
   assert.equal(last.doneOverall, 3); // the first sync counts once it starts and lands
   assert.equal(last.totalOverall, 4);
   assert.equal(last.finished, true);
-  assert.deepEqual(seen.find((p) => p.wait)?.wait, { seconds: 30, attempt: 1, maxAttempts: 3 });
+  assert.deepEqual(seen.find((p) => p.wait)?.wait, {
+    seconds: 30,
+    attempt: 1,
+    maxAttempts: 3,
+    resource: 'rest',
+    secondary: true,
+  });
   assert.deepEqual(
     tracker.finished().map((f) => [f.batch.kind, f.done]),
     [['edits', 2]],

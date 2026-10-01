@@ -7,6 +7,7 @@ import Bottleneck from 'bottleneck';
 import type { PullRequestDetail, PullRequestSummary, RemoteRepoRef } from '../review/provider';
 import type { SubmitWait } from '../review/submit';
 import type { GhReviewComment, GhReviewThread } from './types';
+import { isGraphqlUrl, readRateLimit, type RateLimitSnapshot } from './rateLimit';
 import { apiBaseUrls, type GithubProviderId } from './remote';
 
 const ThrottledOctokit = Octokit.plugin(throttling);
@@ -462,30 +463,40 @@ export function createGithubClient(opts: {
   enterpriseUri?: string;
   /** Hears each request as it is sent and answered, for diagnostics. */
   trace?: (message: string) => void;
+  /** Hears the rate-limit budget each response reports. */
+  onRateLimit?: (snapshot: RateLimitSnapshot) => void;
 }): GithubWriteClient {
   const bases = apiBaseUrls(opts.providerId, opts.enterpriseUri);
   // Whoever is listening hears each wait before it starts, so a long pause can be shown for what it is.
   const throttle: { listener?: ThrottleListener } = {};
-  const retry = (retryAfter: number, retryCount: number, maxAttempts: number): true | undefined => {
+  const retry = (
+    retryAfter: number,
+    options: { url?: string },
+    retryCount: number,
+    maxAttempts: number,
+    secondary: boolean,
+  ): true | undefined => {
     if (retryCount >= maxAttempts) return undefined;
-    throttle.listener?.({ seconds: retryAfter, attempt: retryCount + 1, maxAttempts });
+    const resource = isGraphqlUrl(options.url) ? 'graphql' : 'rest';
+    throttle.listener?.({ seconds: retryAfter, attempt: retryCount + 1, maxAttempts, resource, secondary });
     return true;
   };
   const kit = new ThrottledOctokit({
     auth: opts.token,
     baseUrl: bases.rest,
-    request: { fetch: fetchWithTimeout(opts.trace) },
+    request: { fetch: fetchWithTimeout(opts.trace, opts.onRateLimit) },
     throttle: {
       id: `reviewmate-${++clientSeq}`,
       // The plugin spaces requests that notify people (comments, replies, reviews) 3 seconds apart, on top of
       // the 1 second it already keeps between writes. GitHub asks for 1 second, so a large Submit spent most
       // of its time waiting in this queue. Content creation still stays under GitHub's 80 per minute.
       notifications: new Bottleneck.Group({ maxConcurrent: 1, minTime: 1000 }),
-      onRateLimit: (retryAfter, _options, _octokit, retryCount) => retry(retryAfter, retryCount, RATE_LIMIT_RETRIES),
+      onRateLimit: (retryAfter, options, _octokit, retryCount) =>
+        retry(retryAfter, options, retryCount, RATE_LIMIT_RETRIES, false),
       // The secondary limit throttles bursts of writes, which a large Submit sends one after another. A
       // refused request was never applied, so waiting it out and resending cannot post anything twice.
-      onSecondaryRateLimit: (retryAfter, _options, _octokit, retryCount) =>
-        retry(retryAfter, retryCount, SECONDARY_RATE_LIMIT_RETRIES),
+      onSecondaryRateLimit: (retryAfter, options, _octokit, retryCount) =>
+        retry(retryAfter, options, retryCount, SECONDARY_RATE_LIMIT_RETRIES, true),
     },
   });
   // Octokit derives the GraphQL endpoint as `${baseUrl}/graphql`; on GHE the GraphQL root differs from the
@@ -496,10 +507,11 @@ export function createGithubClient(opts: {
 
 /**
  * Fetch with a deadline. Without one, a request GitHub never answers would hold its caller forever. Each
- * attempt gets its own deadline, so a rate-limit wait before a retry does not count against it.
+ * attempt gets its own deadline, so a rate-limit wait before a retry does not count against it. Every
+ * answer's rate-limit headers are passed on, refused requests included.
  */
 const fetchWithTimeout =
-  (trace?: (message: string) => void): typeof fetch =>
+  (trace?: (message: string) => void, onRateLimit?: (snapshot: RateLimitSnapshot) => void): typeof fetch =>
   async (input, init) => {
     const deadline = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
     const what = `${init?.method ?? 'GET'} ${requestPath(input)}`;
@@ -511,6 +523,8 @@ const fetchWithTimeout =
         signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
       });
       trace?.(`<- ${what} ${res.status} in ${Date.now() - started} ms`);
+      const snapshot = readRateLimit(res.headers);
+      if (snapshot) onRateLimit?.(snapshot);
       return res;
     } catch (err) {
       trace?.(`!! ${what} after ${Date.now() - started} ms: ${String(err)}`);

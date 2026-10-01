@@ -5,6 +5,7 @@ import type { CommentThread, Comment, Review } from '../model/Comment';
 import { AGENT_AUTHOR, hasReactionDiff, REACTION_EMOJIS } from '../model/Comment';
 import { EMOJI_TO_GITHUB } from '../github/mapThreads';
 import type { Side } from '../model/ReviewDiff';
+import type { RateLimitResource } from '../github/rateLimit';
 
 /** The review action to submit with the batch. */
 export type SubmitEvent = 'comment' | 'approve' | 'request-changes';
@@ -334,11 +335,13 @@ export function allSubmitBatches(input: SubmitReviewInput): SubmitBatch[] {
   return [batch('sync-before', 1), ...submitBatches(input), batch('sync-after', 1)];
 }
 
-/** How long GitHub asked a request to wait before it is sent again, and which retry that is. */
+/** How long GitHub asked a request to wait before it is sent again, which limit asked, and which retry that is. */
 export interface SubmitWait {
   seconds: number;
   attempt: number; // 1-based
   maxAttempts: number;
+  resource: RateLimitResource;
+  secondary: boolean; // the short-burst limit, as opposed to the hourly one
 }
 
 /** What a submit reports while it runs. Each batch is started, then its requests land, then it ends. */
