@@ -94,7 +94,7 @@ network capability.
 - **File-level threads round-trip (iteration 17).** Import no longer drops a thread with no line. It becomes
   a `FileAnchor` thread, and a new file-level comment posts with `subject_type: "file"`.
 - **Rate limits (PR #89).** The client uses Octokit's throttling plugin. It retries a request once after a
-  primary or secondary rate limit, and spaces writes out so a large Submit doesn't burst. The provider reuses
+  primary or secondary rate limit, and spaces writes out so a large Submit doesn't burst. Writes, including the ones that notify people, are spaced 1 second apart, the gap GitHub asks for. Each client has its own queues, so one repository's Submit never waits behind another repository's poll. Every request fails after 2 minutes without an answer, so a request GitHub never answers cannot hold a Submit forever. The provider reuses
   one client while the token is unchanged, so the plugin keeps its rate-limit state across calls. The
   Pull Requests list stops at 200 open PRs, most recently updated first. The same PR backs the background poll
   off on repeated failures: each consecutive failed tick waits twice as long, capped at 10 minutes, and a

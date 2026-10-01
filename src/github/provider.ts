@@ -235,6 +235,7 @@ export function createGithubProvider(opts: {
   enterpriseUri?: string;
   getToken: TokenSource;
   buildClient?: typeof createGithubClient;
+  trace?: (message: string) => void;
 }): ReviewProvider {
   const build = opts.buildClient ?? createGithubClient;
   let cachedToken: string | undefined;
@@ -243,7 +244,12 @@ export function createGithubProvider(opts: {
     const token = await opts.getToken(interactive);
     if (!token) throw new GithubAuthError();
     if (token === cachedToken && cachedClient) return cachedClient;
-    cachedClient = build({ token, providerId: opts.providerId, enterpriseUri: opts.enterpriseUri });
+    cachedClient = build({
+      token,
+      providerId: opts.providerId,
+      enterpriseUri: opts.enterpriseUri,
+      trace: opts.trace,
+    });
     cachedToken = token;
     return cachedClient;
   };

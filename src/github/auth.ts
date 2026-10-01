@@ -1,6 +1,7 @@
 // The single caller of vscode.authentication. Tokens are used transiently to build one Authorization
 // header and are NEVER persisted to workspaceState, disk, or logs. VS Code owns the credential store.
 import * as vscode from 'vscode';
+import { log } from '../log';
 import type { GithubProviderId } from './remote';
 
 // 'repo' grants access to private repositories and their pull-request review comments. It is exercised
@@ -14,7 +15,10 @@ export type TokenSource = (interactive: boolean) => Promise<string | undefined>;
 export function githubTokenSource(providerId: GithubProviderId): TokenSource {
   return async (interactive: boolean) => {
     const options: vscode.AuthenticationGetSessionOptions = interactive ? { createIfNone: true } : { silent: true };
+    const started = Date.now();
+    log('[auth] getSession', providerId, interactive ? 'interactive' : 'silent');
     const session = await vscode.authentication.getSession(providerId, SCOPES, options);
+    log('[auth] getSession returned', session ? 'a session' : 'nothing', 'in', Date.now() - started, 'ms');
     return session?.accessToken;
   };
 }
