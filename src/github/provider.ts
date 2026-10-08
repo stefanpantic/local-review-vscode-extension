@@ -15,6 +15,7 @@ import {
 } from '../review/submit';
 import type { TokenSource } from './auth';
 import { createGithubClient, type GhNewComment, type GhPostedComment, type GithubWriteClient } from './client';
+import { mayHaveLanded } from './errors';
 import { mapThreads } from './mapThreads';
 import type { RateLimitTracker } from './rateLimit';
 import { enterpriseHost, type GithubProviderId } from './remote';
@@ -34,17 +35,42 @@ function ghComment(root: NewInlineComment): GhNewComment {
   };
 }
 
-/**
- * Find a just-posted root among a review's created comments (exact position + body match). The whole comment
- * comes back, because a root is both a reply target (its database id) and a reaction subject (its node id).
- */
-function matchPosted(posted: GhPostedComment[], root: NewInlineComment): GhPostedComment | undefined {
-  if (root.subject_type === 'file') {
-    return posted.find((c) => c.path === root.path && c.line == null && c.body === root.body);
-  }
-  const side = ghSide(root.side!);
-  return posted.find((c) => c.path === root.path && c.side === side && c.line === root.line && c.body === root.body);
+/** Whether a created comment sits where a new root was sent: same file, and same side and line unless file-level. */
+function samePlace(c: GhPostedComment, root: NewInlineComment): boolean {
+  if (c.path !== root.path) return false;
+  if (root.subject_type === 'file') return c.line == null;
+  return c.side === ghSide(root.side!) && c.line === root.line;
 }
+
+/**
+ * Pair each new root with the comment the review created for it, by position. GitHub creates a review's
+ * comments in the order they were sent, so roots that share a position pair in that order, oldest id first.
+ * The text plays no part: GitHub can change it on the way (a suggestion block, line endings), and the
+ * position is what the comment was sent with. A root left without a pair is missing from what was read.
+ */
+function pairCreated(posted: GhPostedComment[], roots: NewInlineComment[]): (GhPostedComment | undefined)[] {
+  const pool = [...posted].sort((a, b) => a.id - b.id);
+  const taken = new Set<GhPostedComment>();
+  return roots.map((root) => {
+    const match = pool.find((c) => !taken.has(c) && samePlace(c, root));
+    if (match) taken.add(match);
+    return match;
+  });
+}
+
+/** Text as GitHub may hand it back: line endings unified and outer whitespace dropped. */
+const normalized = (text: string): string => text.replace(/\r\n?/g, '\n').trim();
+
+/** The state GitHub gives a submitted review for each event. */
+const REVIEW_STATE = { COMMENT: 'COMMENTED', APPROVE: 'APPROVED', REQUEST_CHANGES: 'CHANGES_REQUESTED' } as const;
+
+/**
+ * How long to wait before each look for a review whose create call failed. GitHub can answer a large review
+ * with a server error and go on creating it, so the first look may come too early.
+ */
+const RECOVERY_DELAYS_MS = [0, 2_000, 5_000, 10_000];
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** How the provider builds a client. Overridable in tests with a fake; production uses Octokit. */
 export type ClientFactory = (interactive: boolean) => Promise<GithubWriteClient>;
@@ -53,6 +79,7 @@ class GithubReviewProvider implements ReviewProvider {
   constructor(
     readonly id: GithubProviderId,
     private readonly clientFor: ClientFactory,
+    private readonly pause?: (ms: number) => Promise<void>,
   ) {}
 
   headRefspec(number: number): string {
@@ -150,7 +177,8 @@ class GithubReviewProvider implements ReviewProvider {
       for (const r of input.replies) {
         const created = await client.reply(repo, number, { inReplyTo: Number(r.rootId), body: r.body });
         landed();
-        await addReactions(client, created.nodeId, r.reactions, landed);
+        await stampCreated(onApplied, r.localId, created);
+        await addReactions(client, created, r, landed, onApplied);
       }
     });
     await run('resolves', async (landed) => {
@@ -179,50 +207,116 @@ class GithubReviewProvider implements ReviewProvider {
     // A bare COMMENT with no new roots and no body is not a valid review, so that batch is not planned when
     // there is nothing to say. Approve / request-changes always post, even with no inline comments.
     let reviewId: number | undefined;
+    let pairs: (GhPostedComment | undefined)[] = [];
     await run('review', async (landed) => {
       const event =
         input.event === 'approve' ? 'APPROVE' : input.event === 'request-changes' ? 'REQUEST_CHANGES' : 'COMMENT';
-      const review = await client.createReview(repo, number, {
-        commitId: input.commitId,
-        event,
-        body: input.body,
-        comments: input.newThreads.map((t) => ghComment(t.root)),
-      });
-      reviewId = review.id;
+      try {
+        const review = await client.createReview(repo, number, {
+          commitId: input.commitId,
+          event,
+          body: input.body,
+          comments: input.newThreads.map((t) => ghComment(t.root)),
+        });
+        reviewId = review.id;
+      } catch (err) {
+        if (!mayHaveLanded(err)) throw err;
+        reviewId = await this.findCreatedReview(client, repo, number, input, REVIEW_STATE[event]);
+        if (reviewId === undefined) throw err;
+      }
       landed();
-    });
-
-    // The created roots have to be read back for anything that needs their ids: threading a follow-up reply
-    // to its root, and applying the reactions staged on a root or on one of those replies.
-    await run('follow-ups', async (landed) => {
-      if (reviewId === undefined) return;
+      // Read the created comments back to learn their ids: the drafts that made them are stamped with them,
+      // and follow-up replies and staged reactions need them.
+      if (input.newThreads.length === 0) return;
       const posted = await client.listReviewComments(repo, number, reviewId);
       landed();
-      for (const t of input.newThreads) {
-        const root = matchPosted(posted, t.root);
-        if (!root) continue; // exact match; a miss leaves the reply and the reactions for the next Submit
-        await addReactions(client, root.nodeId, t.root.reactions, landed);
+      pairs = pairCreated(
+        posted,
+        input.newThreads.map((t) => t.root),
+      );
+      for (const [i, t] of input.newThreads.entries()) await stampCreated(onApplied, t.root.localId, pairs[i]);
+    });
+
+    await run('follow-ups', async (landed) => {
+      for (const [i, t] of input.newThreads.entries()) {
+        const root = pairs[i];
+        if (!root) continue; // not read back: the reply and the reactions stay staged for the next Submit
+        await addReactions(client, root, t.root, landed, onApplied);
         for (const r of t.replies) {
           const created = await client.reply(repo, number, { inReplyTo: root.id, body: r.body });
           landed();
-          await addReactions(client, created.nodeId, r.reactions, landed);
+          await stampCreated(onApplied, r.localId, created);
+          await addReactions(client, created, r, landed, onApplied);
         }
       }
     });
   }
+
+  /**
+   * Find the review a failed create call made anyway: yours, on the reviewed commit, with the chosen event and
+   * the same summary, carrying at least one of the new comments. Newest first, so an earlier review with the
+   * same summary loses to this one. Looks a few times, because GitHub may still be creating it.
+   */
+  private async findCreatedReview(
+    client: GithubWriteClient,
+    repo: RemoteRepoRef,
+    number: number,
+    input: SubmitReviewInput,
+    state: string,
+  ): Promise<number | undefined> {
+    for (const delay of RECOVERY_DELAYS_MS) {
+      await (this.pause ?? sleep)(delay);
+      try {
+        const login = await client.viewer();
+        const candidates = (await client.listReviews(repo, number))
+          .filter((r) => r.author === login && r.commitId === input.commitId && r.state === state)
+          .filter((r) => r.body.trim() === input.body.trim())
+          .sort((a, b) => b.id - a.id);
+        for (const r of candidates) {
+          if (input.newThreads.length === 0) return r.id;
+          // An older review can sit on the same lines, so here the text has to agree as well.
+          const posted = await client.listReviewComments(repo, number, r.id);
+          const roots = input.newThreads.map((t) => t.root);
+          const same = pairCreated(posted, roots).some(
+            (c, i) => c !== undefined && normalized(c.body) === normalized(roots[i].body),
+          );
+          if (same) return r.id;
+        }
+      } catch {
+        // The lookup failed too. Try again after the next wait.
+      }
+    }
+    return undefined;
+  }
 }
 
-/** Apply the reactions a newly created comment carried, now that posting it has given it a node id. */
+/** Tell the caller which posted comment a local comment became, so it is linked by id. */
+async function stampCreated(
+  onApplied: OnApplied | undefined,
+  localId: string | undefined,
+  posted: GhPostedComment | undefined,
+): Promise<void> {
+  if (!localId || !posted) return;
+  await onApplied?.({ kind: 'created', commentId: localId, remoteId: String(posted.id), nodeId: posted.nodeId });
+}
+
+/**
+ * Apply the reactions a newly created comment carried, now that posting it has given it a node id, then
+ * report them applied. The stamped comment is addressed by that node id from here on.
+ */
 async function addReactions(
   client: GithubWriteClient,
-  nodeId: string,
-  contents: string[] | undefined,
+  posted: GhPostedComment,
+  staged: { reactions?: string[]; localId?: string },
   landed: () => void,
+  onApplied: OnApplied | undefined,
 ): Promise<void> {
-  for (const content of contents ?? []) {
-    await client.addReaction(nodeId, content);
+  if (!staged.reactions?.length) return;
+  for (const content of staged.reactions) {
+    await client.addReaction(posted.nodeId, content);
     landed();
   }
+  if (staged.localId) await onApplied?.({ kind: 'reaction', commentId: posted.nodeId });
 }
 
 /**

@@ -5,6 +5,7 @@ import {
   buildSubmitPlan,
   submitBatches,
   SubmitProgressTracker,
+  unlinkedPosts,
   unsubmittedRemoteReview,
   type SubmitProgress,
   type SubmitReviewInput,
@@ -88,7 +89,7 @@ test('a local-draft root becomes a new top-level comment positioned from its anc
   const { input, counts } = buildSubmitPlan(remoteReview([draft]), 'comment');
   assert.equal(counts.newComments, 1);
   assert.deepEqual(input.newThreads, [
-    { root: { path: 'src/x.ts', side: 'new', line: 12, body: 'looks off' }, replies: [] },
+    { root: { path: 'src/x.ts', side: 'new', line: 12, body: 'looks off', localId: 'n1' }, replies: [] },
   ]);
 });
 
@@ -107,7 +108,14 @@ test('a multi-line comment carries the range start and last line', () => {
     comments: [comment({ id: 'n1' })],
   });
   const { input } = buildSubmitPlan(remoteReview([draft]), 'comment');
-  assert.deepEqual(input.newThreads[0].root, { path: 'a.ts', side: 'old', line: 8, startLine: 5, body: 'b' });
+  assert.deepEqual(input.newThreads[0].root, {
+    path: 'a.ts',
+    side: 'old',
+    line: 8,
+    startLine: 5,
+    body: 'b',
+    localId: 'n1',
+  });
 });
 
 test('a new comment on an imported thread becomes a reply to the thread root', () => {
@@ -120,7 +128,7 @@ test('a new comment on an imported thread becomes a reply to the thread root', (
   const { input, counts } = buildSubmitPlan(remoteReview([imported]), 'comment');
   assert.equal(counts.replies, 1);
   assert.equal(counts.newComments, 0);
-  assert.deepEqual(input.replies, [{ rootId: '100', body: 'agreed' }]);
+  assert.deepEqual(input.replies, [{ rootId: '100', body: 'agreed', localId: 'r1' }]);
 });
 
 test('an imported comment whose body changed is an edit; unchanged is not', () => {
@@ -189,7 +197,7 @@ test('a draft thread you replied to before submitting carries its follow-up repl
   assert.equal(counts.replies, 1);
   assert.equal(input.newThreads.length, 1);
   assert.equal(input.newThreads[0].root.body, 'first');
-  assert.deepEqual(input.newThreads[0].replies, [{ body: 'second' }]);
+  assert.deepEqual(input.newThreads[0].replies, [{ body: 'second', localId: 'reply' }]);
   assert.equal(input.replies.length, 0); // it's a follow-up on a new thread, not an imported-thread reply
 });
 
@@ -267,7 +275,7 @@ test('a reaction on a draft follow-up reply travels with that reply', () => {
   });
   const { input } = buildSubmitPlan(remoteReview([draft]), 'comment');
   assert.equal(input.newThreads[0].root.reactions, undefined);
-  assert.deepEqual(input.newThreads[0].replies, [{ body: 'second', reactions: ['HOORAY'] }]);
+  assert.deepEqual(input.newThreads[0].replies, [{ body: 'second', reactions: ['HOORAY'], localId: 'reply' }]);
 });
 
 test('a reaction on an unsent reply to an imported thread travels with that reply', () => {
@@ -280,7 +288,7 @@ test('a reaction on an unsent reply to an imported thread travels with that repl
     ],
   });
   const { input } = buildSubmitPlan(remoteReview([imported]), 'comment');
-  assert.deepEqual(input.replies, [{ rootId: '100', body: 'agreed', reactions: ['EYES'] }]);
+  assert.deepEqual(input.replies, [{ rootId: '100', body: 'agreed', reactions: ['EYES'], localId: 'mine' }]);
 });
 
 test('every staged emoji on a draft is sent once, however many identities carry it locally', () => {
@@ -334,8 +342,8 @@ test('submitBatches lists the non-empty batches in send order, counting requests
       ['edits', 1],
       ['replies', 3], // the reply and its two reactions
       ['reactions', 1],
-      ['review', 1], // every new comment goes in the one review
-      ['follow-ups', 3], // the read-back, the root's reaction, and the follow-up reply
+      ['review', 2], // every new comment goes in the one review, then one read of what it created
+      ['follow-ups', 2], // the root's reaction and the follow-up reply
     ],
   );
 });
@@ -409,4 +417,25 @@ test('an ended batch counts as complete even when the provider skipped some of i
   tracker.handle({ kind: 'batch-end', batch: 'follow-ups' });
   assert.equal(seen.at(-1)!.doneOverall, 3);
   assert.equal(tracker.finished()[0].done, 1);
+});
+
+test('the follow-ups of a root that posted but was not read back reply to its posted id', () => {
+  const draft = thread({
+    id: 'draft',
+    comments: [
+      comment({ id: 'node-9', body: 'first', remoteId: '9', remoteBody: 'first' }),
+      comment({ id: 'reply', body: 'second' }),
+    ],
+  });
+  const { input, counts } = buildSubmitPlan(remoteReview([draft]), 'comment');
+  assert.equal(counts.newComments, 0, 'the root is not sent again');
+  assert.deepEqual(input.newThreads, []);
+  assert.deepEqual(input.replies, [{ rootId: '9', body: 'second', localId: 'reply' }]);
+});
+
+test('unlinkedPosts counts drafts whose root posted but whose thread was not read back', () => {
+  const stamped = thread({ id: 'a', comments: [comment({ remoteId: '9', remoteBody: 'b' })] });
+  const draft = thread({ id: 'b', comments: [comment()] });
+  const linked = thread({ id: 'c', remoteThreadId: 'T', comments: [comment({ remoteId: '8', remoteBody: 'b' })] });
+  assert.equal(unlinkedPosts(remoteReview([stamped, draft, linked])), 1);
 });

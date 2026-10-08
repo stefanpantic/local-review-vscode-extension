@@ -708,7 +708,7 @@ async function submitPullRequest(session: RepoSession): Promise<void> {
   log('[submit] confirmed');
   const finished: FinishedBatch[] = [];
   try {
-    const { counts, orphans, unsent } = await vscode.window.withProgress(
+    const { counts, orphans, unsent, readBack } = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'Submitting review to GitHub' },
       (progress) => {
         let reported = 0; // percent of the bar already filled
@@ -732,6 +732,16 @@ async function submitPullRequest(session: RepoSession): Promise<void> {
       const n = unsent.count;
       void vscode.window.showWarningMessage(
         `ReviewMate: the review was posted, but ${n} ${n === 1 ? 'change' : 'changes'} could not be sent and ${n === 1 ? 'stays' : 'stay'} staged. Submit again to finish. ${errorText(unsent.error)}${finishedNote(finished)}${note}`,
+      );
+      return;
+    }
+    if (readBack) {
+      const why =
+        readBack === 'failed'
+          ? 'the result could not be read back from GitHub'
+          : 'some new comments could not be matched to their posted copies yet';
+      void vscode.window.showWarningMessage(
+        `ReviewMate: submitted ${summarizeCounts(counts)}, but ${why}. Sync before you submit again, so nothing posts twice.${note}`,
       );
       return;
     }

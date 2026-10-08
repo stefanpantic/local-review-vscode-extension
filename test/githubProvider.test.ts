@@ -4,6 +4,7 @@ import { GithubReviewProvider, createGithubProvider } from '../src/github/provid
 import type {
   GhNewComment,
   GhPostedComment,
+  GhReview,
   GhViewerTeam,
   GithubWriteClient,
   ThrottleListener,
@@ -62,6 +63,9 @@ class FakeClient implements GithubWriteClient {
       this.posted.push({ id, nodeId: `node-${id}`, path: c.path, line: c.line ?? null, side: c.side, body: c.body });
     }
     return { id: 1 };
+  }
+  async listReviews(): Promise<GhReview[]> {
+    return [];
   }
   async listReviewComments(): Promise<GhPostedComment[]> {
     return this.posted;
@@ -432,9 +436,9 @@ test('submitReview reports each batch in order, with every request that lands', 
     'batch-end:replies',
     'batch-start:review',
     'request-done:review',
+    'request-done:review', // reading back the created comments
     'batch-end:review',
     'batch-start:follow-ups',
-    'request-done:follow-ups', // reading back the created comments
     'request-done:follow-ups', // the follow-up reply
     'batch-end:follow-ups',
   ]);

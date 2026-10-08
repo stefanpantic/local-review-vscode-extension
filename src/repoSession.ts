@@ -32,8 +32,12 @@ import { mergeRequestMeta } from './review/requestMeta';
 import {
   allSubmitBatches,
   buildSubmitPlan,
+  READ_BACK_DELAYS_MS,
+  readBackUntilLinked,
   SubmitProgressTracker,
+  unlinkedPosts,
   unsubmittedRemoteReview,
+  type ReadBackOutcome,
   type SubmitCounts,
   type SubmitEvent,
   type SubmitProgress,
@@ -59,12 +63,15 @@ export interface SessionHost {
 
 /**
  * What a Submit posted. `unsent` is set when the review itself went out but later changes in the batch did
- * not: they stay staged for the next Submit, and `error` says why they failed.
+ * not: they stay staged for the next Submit, and `error` says why they failed. `readBack` is set when
+ * everything posted but the result could not be read back in full, so some new comments are not yet linked
+ * to their posted copies and a Sync is needed before the next Submit.
  */
 export interface SubmitResult {
   counts: SubmitCounts;
   orphans: OrphanReport;
   unsent?: { count: number; error: unknown };
+  readBack?: Exclude<ReadBackOutcome, 'done'>;
 }
 
 /** What the Submit flow needs to know before it asks: what is staged, and what the PR will accept. */
@@ -818,6 +825,15 @@ export class RepoSession implements vscode.Disposable {
       if (!remote) throw new Error("This repository's origin is not a supported review host.");
       const number = review.remote.number ?? Number(review.remote.id);
       log('[submit] remote resolved for PR', number);
+      // Posted copies come back under your GitHub login, and only copies that are yours can be linked back to
+      // the drafts that made them. Without the real login, git user.name stands in and nothing links.
+      if (!this.viewerLogin) {
+        try {
+          this.viewerLogin = await remote.provider.viewer();
+        } catch {
+          // Keep the fallback identity. The cached login on the review usually covers this.
+        }
+      }
 
       // The batches are first estimated from the staged work, then replaced once the sync below has
       // reconciled it, so the totals match what is actually sent.
@@ -857,6 +873,7 @@ export class RepoSession implements vscode.Disposable {
       }
 
       let failure: { error: unknown } | undefined;
+      let reviewSent = false; // the create-review call went out, so new comments may have posted
       log('[submit] sending', JSON.stringify(counts));
       try {
         await remote.provider.submitReview(
@@ -866,6 +883,7 @@ export class RepoSession implements vscode.Disposable {
           (step) => this.reviewStore.retireApplied(repoRoot, reviewId, step),
           (step) => {
             log('[submit] step', JSON.stringify(step));
+            if (step.kind === 'batch-start' && step.batch === 'review') reviewSent = true;
             tracker.handle(step);
           },
         );
@@ -875,43 +893,64 @@ export class RepoSession implements vscode.Disposable {
         failure = { error };
       }
       // Success or failure, current upstream decides what is still pending. On success this stamps every
-      // new comment's remote id; on failure it retires exactly what did land. Its own failure must not
-      // replace the submit's error (that error is what the user needs to see), and it must not turn a
-      // successful submit into a failed one — the work is already posted either way.
-      try {
-        const after = await syncBatch('sync-after', () => this.syncFromRemote(repoRoot, reviewId, remote, number));
-        orphans = { localOnly: orphans.localOnly + after.localOnly, deletes: orphans.deletes + after.deletes };
-      } catch {
-        // Offline right after posting. Pending state stays as the apply-as-you-go steps left it, and the
-        // next sync reconciles the rest; a retry is still safe because drafts adopt on re-import.
-      }
+      // new comment's remote id; on failure it retires exactly what did land. GitHub can still be creating a
+      // large review's comments when it answers, so the read repeats until every new comment it sent is
+      // linked to its posted copy. A failed read must not replace the submit's error (that error is what the
+      // user needs to see), and it must not turn a successful submit into a failed one.
+      const remainingCounts = (): SubmitCounts | undefined => {
+        const left = this.reviewStore.get(repoRoot, reviewId);
+        return left?.kind === 'remote' ? buildSubmitPlan(left, event).counts : undefined;
+      };
+      const allLinked = (): boolean => {
+        const left = this.reviewStore.get(repoRoot, reviewId);
+        return left?.kind === 'remote' && unlinkedPosts(left) === 0 && remainingCounts()?.newComments === 0;
+      };
+      let readOrphans: OrphanReport = { localOnly: 0, deletes: 0 };
+      const readBack = await syncBatch('sync-after', () =>
+        readBackUntilLinked({
+          // A comment that just posted may not be in the read yet. Taking its absence for a deletion upstream
+          // would drop its posted id and post it again, so these reads only add and refresh.
+          read: async () => {
+            readOrphans = await this.syncFromRemote(repoRoot, reviewId, remote, number, { removeMissing: false });
+          },
+          linked: () => !reviewSent || allLinked(),
+          delaysMs: READ_BACK_DELAYS_MS,
+          pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        }),
+      );
+      log('[submit] read back:', readBack);
+      orphans = {
+        localOnly: orphans.localOnly + readOrphans.localOnly,
+        deletes: orphans.deletes + readOrphans.deletes,
+      };
       this.emit();
       this.panelPost?.('stateChanged', this.buildState());
-      if (!failure) return { counts, orphans };
+      if (!failure) return readBack === 'done' ? { counts, orphans } : { counts, orphans, readBack };
 
+      // Nothing left staged means everything landed, whatever the error said (a server error returned for
+      // work GitHub did anyway).
+      const remaining = remainingCounts();
+      if (remaining?.total === 0) return { counts, orphans };
       // The review itself went out when every new comment it carried now comes back linked to its posted
-      // copy. A failure after that (a follow-up reply or reaction refused by a rate limit, or a server error
-      // returned for a review GitHub created anyway) leaves the rest staged: report it as unfinished work,
-      // not as a submit that did not happen.
-      const left = this.reviewStore.get(repoRoot, reviewId);
-      const remaining = left?.kind === 'remote' ? buildSubmitPlan(left, event).counts : undefined;
+      // copy. A failure after that (a follow-up reply or reaction refused by a rate limit) leaves the rest
+      // staged: report it as unfinished work, not as a submit that did not happen.
       if (counts.newComments === 0 || !remaining || remaining.newComments > 0) throw failure.error;
       return { counts, orphans, unsent: { count: remaining.total, error: failure.error } };
-      return { counts, orphans };
     });
   }
 
   /**
    * Pull the posted set and merge it over local pending work, persisting the result. The one place every
-   * explicit sync goes through (open, refresh, pre-submit, post-submit, discard). `removeMissing` is on, so
-   * an upstream deletion is reflected here, unlike the background poll.
+   * explicit sync goes through (open, refresh, pre-submit, post-submit, discard). An upstream deletion is
+   * reflected here, unlike the background poll, except in the post-submit read, which turns that off because
+   * a comment it just posted may not show yet.
    */
   private async syncFromRemote(
     repoRoot: string,
     reviewId: string,
     remote: { repo: RemoteRepoRef; provider: ReviewProvider },
     number: number,
-    opts?: { discardPending?: boolean },
+    opts?: { discardPending?: boolean; removeMissing?: boolean },
   ): Promise<OrphanReport> {
     const diff = this.currentDiff();
     const review = this.reviewStore.get(repoRoot, reviewId);
@@ -923,7 +962,10 @@ export class RepoSession implements vscode.Disposable {
       await this.reviewStore.clearPendingDeletes(repoRoot, reviewId);
       return { localOnly: 0, deletes: 0 };
     }
-    const rec = reconcile(review.threads, review.pendingDeletes ?? [], imported, { viewer: this.authorIdentity() });
+    const rec = reconcile(review.threads, review.pendingDeletes ?? [], imported, {
+      viewer: this.authorIdentity(),
+      removeMissing: opts?.removeMissing,
+    });
     await this.reviewStore.updateThreads(repoRoot, reviewId, rec.threads);
     await this.reviewStore.setPendingDeletes(repoRoot, reviewId, rec.pendingDeletes);
     return rec.orphans;

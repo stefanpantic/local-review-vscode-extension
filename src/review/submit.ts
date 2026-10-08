@@ -19,12 +19,14 @@ export interface NewInlineComment {
   body: string;
   subject_type?: 'file'; // present for file-level comments
   reactions?: string[]; // reactions staged on it locally, applied once posting gives it an id
+  localId?: string; // the local comment it posts, so the posted id can be stamped back on it
 }
 
 /** A brand-new reply, with any reactions staged on it before it existed on the remote. */
 export interface NewReply {
   body: string;
   reactions?: string[];
+  localId?: string; // the local comment it posts, so the posted id can be stamped back on it
 }
 
 /**
@@ -53,14 +55,15 @@ export interface SubmitReviewInput {
 /**
  * One step of a submit that has actually landed on the remote. The provider reports each as it succeeds so
  * the caller can clear that item's pending state immediately: if a later step fails, what already posted is
- * no longer staged and a retry does only the work that is left. Created content (new threads and replies)
- * has no local id to stamp, so it is not reported here — it reconciles by re-import instead.
+ * no longer staged and a retry does only the work that is left. A created comment is reported with the ids
+ * GitHub gave it, so the local comment that made it is linked to its posted copy by id, never by its text.
  */
 export type AppliedStep =
   | { kind: 'edit'; commentId: string } // the local body is now the remote body: re-baseline it
   | { kind: 'delete'; commentId: string }
   | { kind: 'resolve'; threadId: string; resolved: boolean }
-  | { kind: 'reaction'; commentId: string }; // reactions are now the remote baseline: re-baseline them
+  | { kind: 'reaction'; commentId: string } // reactions are now the remote baseline: re-baseline them
+  | { kind: 'created'; commentId: string; remoteId: string; nodeId: string }; // `commentId` is the local id
 
 /** Called by the provider after each step lands. Awaited, so the caller can persist before the next call. */
 export type OnApplied = (step: AppliedStep) => Promise<void> | void;
@@ -179,7 +182,7 @@ export function buildSubmitPlan(
       for (const c of t.comments) {
         if (!c.remoteId) {
           if (t.remoteRootId) {
-            replies.push({ rootId: t.remoteRootId, body: bodyForSubmit(c), ...stagedReactions(c) });
+            replies.push({ rootId: t.remoteRootId, body: bodyForSubmit(c), ...stagedReactions(c), localId: c.id });
             countAgent(c);
           }
         } else if (c.remoteBody !== undefined && c.body !== c.remoteBody) {
@@ -189,24 +192,35 @@ export function buildSubmitPlan(
     } else {
       // Local-draft thread: its root posts as a new top-level comment; its follow-ups become replies to it.
       const root = t.comments[0];
+      const followups = t.comments.slice(1).filter((c) => !c.remoteId);
+      const asReply = (c: Comment): NewReply => ({ body: bodyForSubmit(c), ...stagedReactions(c), localId: c.id });
       if (root && !root.remoteId) {
-        const followups = t.comments.slice(1).filter((c) => !c.remoteId);
         const rootComment: NewInlineComment =
           t.anchor.kind === 'file'
-            ? { path: t.anchor.filePath, body: bodyForSubmit(root), subject_type: 'file', ...stagedReactions(root) }
+            ? {
+                path: t.anchor.filePath,
+                body: bodyForSubmit(root),
+                subject_type: 'file',
+                ...stagedReactions(root),
+                localId: root.id,
+              }
             : {
                 path: t.anchor.filePath,
                 side: t.anchor.side,
                 ...positionOf(t),
                 body: bodyForSubmit(root),
                 ...stagedReactions(root),
+                localId: root.id,
               };
-        newThreads.push({
-          root: rootComment,
-          replies: followups.map((c) => ({ body: bodyForSubmit(c), ...stagedReactions(c) })),
-        });
+        newThreads.push({ root: rootComment, replies: followups.map(asReply) });
         countAgent(root);
         followups.forEach(countAgent);
+      } else if (root?.remoteId) {
+        // The root posted but its thread has not been read back yet: what follows it replies to its id.
+        for (const c of followups) {
+          replies.push({ rootId: root.remoteId, ...asReply(c) });
+          countAgent(c);
+        }
       }
     }
   }
@@ -306,8 +320,8 @@ export function postsReview(input: SubmitReviewInput): boolean {
 
 /**
  * The provider's batches for a submit input, in the order it sends them, with empty ones left out. Counts
- * are requests: a reply staged with a reaction is two, and the follow-ups on new comments start with one
- * read of the comments the review created.
+ * are requests: a reply staged with a reaction is two, and a review with new comments is two, the post and
+ * one read of the comments it created.
  */
 export function submitBatches(input: SubmitReviewInput): SubmitBatch[] {
   const reactionsOn = (r: { reactions?: string[] }): number => r.reactions?.length ?? 0;
@@ -324,8 +338,8 @@ export function submitBatches(input: SubmitReviewInput): SubmitBatch[] {
     ),
     batch('resolves', input.resolves.length),
     batch('reactions', input.reactions.length),
-    batch('review', postsReview(input) ? 1 : 0),
-    batch('follow-ups', followUps > 0 ? followUps + 1 : 0),
+    batch('review', postsReview(input) ? 1 + (input.newThreads.length > 0 ? 1 : 0) : 0),
+    batch('follow-ups', followUps),
   ];
   return all.filter((b) => b.total > 0);
 }
@@ -333,6 +347,53 @@ export function submitBatches(input: SubmitReviewInput): SubmitBatch[] {
 /** Every batch of a Submit, the two syncs included. */
 export function allSubmitBatches(input: SubmitReviewInput): SubmitBatch[] {
   return [batch('sync-before', 1), ...submitBatches(input), batch('sync-after', 1)];
+}
+
+/**
+ * How many comments posted but not yet linked to their thread on the remote: a draft whose root carries its
+ * posted id while its thread has not been read back. Until it is read back it cannot be resolved or replied
+ * to as a remote thread, so a Submit keeps reading until this is zero.
+ */
+export function unlinkedPosts(review: Review): number {
+  if (review.kind !== 'remote') return 0;
+  return review.threads.filter((t) => !t.remoteThreadId && t.comments[0]?.remoteId).length;
+}
+
+/**
+ * How long to wait before each read of a Submit's result. GitHub can still be creating a large review's
+ * comments after it answers, so a read that comes too early misses some of them.
+ */
+export const READ_BACK_DELAYS_MS: readonly number[] = [0, 2_000, 5_000, 10_000, 20_000];
+
+/**
+ * How reading a Submit's result back ended: every new comment linked to its posted copy, read but some still
+ * unmatched, or no read succeeded at all.
+ */
+export type ReadBackOutcome = 'done' | 'unmatched' | 'failed';
+
+/**
+ * Read a Submit's result back until every new comment is linked to its posted copy, waiting before each read
+ * as `delaysMs` says. A failed read counts as one attempt. Until a new comment is linked it stays a staged
+ * draft, so it would post twice on the next Submit and lose the author it was written under.
+ */
+export async function readBackUntilLinked(opts: {
+  read: () => Promise<void>;
+  linked: () => boolean;
+  delaysMs: readonly number[];
+  pause: (ms: number) => Promise<void>;
+}): Promise<ReadBackOutcome> {
+  let anyRead = false;
+  for (const delay of opts.delaysMs) {
+    await opts.pause(delay);
+    try {
+      await opts.read();
+    } catch {
+      continue;
+    }
+    anyRead = true;
+    if (opts.linked()) return 'done';
+  }
+  return anyRead ? 'unmatched' : 'failed';
 }
 
 /** How long GitHub asked a request to wait before it is sent again, which limit asked, and which retry that is. */

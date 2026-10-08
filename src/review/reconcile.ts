@@ -100,10 +100,11 @@ function positionKey(t: CommentThread): string {
 
 /**
  * Link local drafts that are already on the remote to their posted thread instead of leaving them staged.
- * A submit that failed partway can leave a draft whose comment did land, and re-sending it would double-post.
- * The match is on file, side, body, and suggestion, and on lines where they agree, restricted to your own content and to fetched
- * threads no local thread already mirrors. The draft's un-posted follow-up replies stay pending on the
- * adopted thread, so one retry finishes exactly the work that is left.
+ * A draft that Submit stamped with its posted id links to the fetched thread whose root has that id. That is
+ * the normal case, and exact. A draft without one (a submit that died before it could learn the id) falls
+ * back to its content: file, side, body, and suggestion, and lines where they agree, restricted to your own
+ * content. Either way only fetched threads no local thread already mirrors are linked. The draft's un-posted
+ * follow-up replies stay pending on the adopted thread, so one retry finishes exactly the work that is left.
  */
 function adoptPostedDrafts(
   local: CommentThread[],
@@ -113,14 +114,23 @@ function adoptPostedDrafts(
   const claimed = new Set<string>();
   for (const t of local) if (t.remoteThreadId) claimed.add(t.remoteThreadId);
 
-  const candidates: CommentThread[] = [];
-  for (const ft of fresh) {
-    const root = ft.comments[0];
-    if (!ft.remoteThreadId || !root?.remoteId || claimed.has(ft.remoteThreadId) || !isMine(root.author)) continue;
-    candidates.push(ft);
-  }
-  if (candidates.length === 0) return { threads: local, adopted: 0 };
+  const unclaimed = fresh.filter(
+    (ft) => ft.remoteThreadId && ft.comments[0]?.remoteId && !claimed.has(ft.remoteThreadId),
+  );
+  if (unclaimed.length === 0) return { threads: local, adopted: 0 };
 
+  const matches = new Map<CommentThread, CommentThread>();
+  const taken = new Set<CommentThread>();
+  for (const t of local) {
+    const id = t.comments[0]?.remoteId;
+    if (t.remoteThreadId || !id) continue;
+    const match = unclaimed.find((ft) => !taken.has(ft) && ft.comments[0].remoteId === id);
+    if (!match) continue; // posted, but not in this read yet
+    matches.set(t, match);
+    taken.add(match);
+  }
+
+  const candidates = unclaimed.filter((ft) => !taken.has(ft) && isMine(ft.comments[0].author));
   const drafts = local.filter((t) => {
     const root = t.comments[0];
     return !t.remoteThreadId && root && !root.remoteId && isMine(root.author);
@@ -129,8 +139,6 @@ function adoptPostedDrafts(
   // which draft claims which copy. Pair on the exact position first: two comments with the same text on
   // different lines must each claim their own copy, or the agent's authorship lands on yours. Only a draft
   // left without a positional match (GitHub moved the line) falls back to the same text anywhere in the file.
-  const matches = new Map<CommentThread, CommentThread>();
-  const taken = new Set<CommentThread>();
   for (const key of [positionKey, contentKey]) {
     for (const t of drafts) {
       if (matches.has(t)) continue;

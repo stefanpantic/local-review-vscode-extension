@@ -8,10 +8,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ReviewStore, type KeyValueStore } from '../src/comments/ReviewStore';
 import { GithubReviewProvider } from '../src/github/provider';
-import { buildSubmitPlan } from '../src/review/submit';
+import { buildSubmitPlan, readBackUntilLinked } from '../src/review/submit';
 import { reconcile } from '../src/review/reconcile';
 import type { CommentThread, RemoteRef, RemoteReview } from '../src/model/Comment';
-import type { GhNewComment, GhPostedComment, GhViewerTeam, GithubWriteClient } from '../src/github/client';
+import { AGENT_AUTHOR } from '../src/model/Comment';
+import type { GhNewComment, GhPostedComment, GhReview, GhViewerTeam, GithubWriteClient } from '../src/github/client';
 import type { PullRequestDetail, PullRequestSummary } from '../src/review/provider';
 import type { GhReviewThread } from '../src/github/types';
 
@@ -35,6 +36,10 @@ class FlakyClient implements GithubWriteClient {
   deletes: number[] = [];
   resolves: { threadId: string; resolved: boolean }[] = [];
   failOn?: 'edit' | 'delete' | 'resolve' | 'createReview' | 'reply' | 'reaction';
+  /** Make createReview answer with this error after it has created the review, as GitHub does under load. */
+  createdThenFails?: unknown;
+  created: GhReview[] = [];
+  listReviewsCalls = 0;
   private nextId = 500;
   async viewer(): Promise<string> {
     return 'me';
@@ -58,7 +63,14 @@ class FlakyClient implements GithubWriteClient {
       const id = this.nextId++;
       this.posted.push({ id, nodeId: `node-${id}`, path: c.path, line: c.line ?? null, side: c.side, body: c.body });
     }
+    const state = { COMMENT: 'COMMENTED', APPROVE: 'APPROVED', REQUEST_CHANGES: 'CHANGES_REQUESTED' }[input.event];
+    this.created.push({ id: 1, author: 'me', commitId: input.commitId, state, body: input.body });
+    if (this.createdThenFails) throw this.createdThenFails;
     return { id: 1 };
+  }
+  async listReviews(): Promise<GhReview[]> {
+    this.listReviewsCalls++;
+    return this.created;
   }
   async listReviewComments(): Promise<GhPostedComment[]> {
     return this.posted;
@@ -382,4 +394,216 @@ test("a draft's reaction is finished by the retry when its own call is the one t
   assert.equal(retry.counts.reactions, 1, 'the reaction is what remains');
   await provider.submitReview(repo, 7, retry.input, () => undefined);
   assert.deepEqual(client.reactions, [{ subjectId: 'node-500', content: 'THUMBS_UP', add: true }]);
+});
+
+/** A GitHub error with an HTTP status, shaped like the ones Octokit throws. */
+const httpError = (status: number): Error => Object.assign(new Error(`HTTP ${status}`), { status });
+
+const instant = async (): Promise<void> => {};
+
+/** A new draft thread with a follow-up reply, written by `author`. */
+function draftWithReply(author: string): CommentThread {
+  return {
+    id: 'draft',
+    anchor,
+    resolved: false,
+    comments: [
+      { id: 'd1', body: 'new note', createdAt: '', updatedAt: '', author },
+      { id: 'd2', body: 'follow-up', createdAt: '', updatedAt: '', author },
+    ],
+  };
+}
+
+test('a review GitHub created despite a server error still gets its follow-ups', async () => {
+  const { store, id } = await seed([draftWithReply('me')]);
+  const client = new FlakyClient();
+  client.createdThenFails = httpError(502);
+  const provider = new GithubReviewProvider('github', async () => client, instant);
+  const { input } = buildSubmitPlan(current(store, id), 'comment');
+
+  await provider.submitReview(repo, 7, input, () => undefined);
+
+  assert.equal(client.reviews.length, 1, 'the review was not sent twice');
+  assert.deepEqual(client.replies, [{ inReplyTo: 500, body: 'follow-up' }]);
+});
+
+test('a server error on a review GitHub did not create is still reported', async () => {
+  const { store, id } = await seed([draftWithReply('me')]);
+  const client = new FlakyClient();
+  client.failOn = 'createReview';
+  const provider = new GithubReviewProvider('github', async () => client, instant);
+  const { input } = buildSubmitPlan(current(store, id), 'comment');
+
+  await assert.rejects(() => provider.submitReview(repo, 7, input, () => undefined), /network died/);
+  assert.ok(client.listReviewsCalls > 0, 'it looked for the review first');
+  assert.deepEqual(client.replies, []);
+});
+
+test('a refused review is reported without looking for it', async () => {
+  const { store, id } = await seed([draftWithReply('me')]);
+  const client = new FlakyClient();
+  client.createdThenFails = httpError(422);
+  const provider = new GithubReviewProvider('github', async () => client, instant);
+  const { input } = buildSubmitPlan(current(store, id), 'comment');
+
+  await assert.rejects(() => provider.submitReview(repo, 7, input, () => undefined), /HTTP 422/);
+  assert.equal(client.listReviewsCalls, 0);
+});
+
+test('an older review with the same summary is not taken for the one that failed', async () => {
+  const { store, id } = await seed([draftWithReply('me')]);
+  const client = new FlakyClient();
+  client.failOn = 'createReview';
+  client.created.push({ id: 1, author: 'me', commitId: 'head', state: 'COMMENTED', body: '' });
+  const provider = new GithubReviewProvider('github', async () => client, instant);
+  const { input } = buildSubmitPlan(current(store, id), 'comment');
+
+  await assert.rejects(() => provider.submitReview(repo, 7, input, () => undefined), /network died/);
+  assert.deepEqual(client.replies, [], 'no follow-up was threaded under an unrelated review');
+});
+
+test('reading back repeats until every new comment is linked', async () => {
+  let reads = 0;
+  const outcome = await readBackUntilLinked({
+    read: async () => {
+      reads++;
+    },
+    linked: () => reads >= 2,
+    delaysMs: [0, 0, 0, 0],
+    pause: instant,
+  });
+  assert.equal(outcome, 'done');
+  assert.equal(reads, 2);
+});
+
+test('reading back reports a result it could not match or could not read', async () => {
+  const unmatched = await readBackUntilLinked({
+    read: instant,
+    linked: () => false,
+    delaysMs: [0, 0],
+    pause: instant,
+  });
+  assert.equal(unmatched, 'unmatched');
+
+  let reads = 0;
+  const failed = await readBackUntilLinked({
+    read: async () => {
+      reads++;
+      throw new Error('offline');
+    },
+    linked: () => true,
+    delaysMs: [0, 0, 0],
+    pause: instant,
+  });
+  assert.equal(failed, 'failed');
+  assert.equal(reads, 3, 'a failed read counts as one attempt');
+});
+
+/** The posted copy of an agent draft, as GitHub returns it: authored by the human's login. */
+const postedCopy = (login: string): CommentThread[] => [
+  {
+    id: 'T9',
+    anchor,
+    resolved: false,
+    remoteThreadId: 'T9',
+    remoteRootId: '500',
+    remoteResolved: false,
+    comments: [
+      {
+        id: 'u1',
+        body: 'new note',
+        createdAt: '',
+        updatedAt: '',
+        author: login,
+        remoteId: '500',
+        remoteBody: 'new note',
+      },
+    ],
+  },
+];
+
+test("an agent draft keeps its author once linked under the human's GitHub login", () => {
+  const rec = reconcile([draftWithReply(AGENT_AUTHOR)], [], postedCopy('octocat'), { viewer: 'octocat' });
+  assert.equal(rec.adopted, 1);
+  assert.equal(rec.threads[0].comments[0].author, AGENT_AUTHOR);
+  assert.equal(rec.threads[0].comments[0].remoteId, '500');
+});
+
+test('an agent draft is not linked when the viewer is not the GitHub login', () => {
+  // git user.name standing in for the login: the posted copy is not recognised as yours.
+  const rec = reconcile([draftWithReply(AGENT_AUTHOR)], [], postedCopy('octocat'), { viewer: 'Octo Cat' });
+  assert.equal(rec.adopted, 0);
+});
+
+test('a posted draft is linked by its id even when GitHub hands its text back changed', async () => {
+  const { store, id } = await seed([draftWithReply(AGENT_AUTHOR)]);
+  const client = new FlakyClient();
+  const provider = new GithubReviewProvider('github', async () => client, instant);
+  const { input } = buildSubmitPlan(current(store, id), 'comment');
+  await provider.submitReview(repo, 7, input, (step) => store.retireApplied('/r', id, step));
+
+  // The read comes back with different text, so content alone could not match it.
+  const upstream: CommentThread[] = [
+    {
+      id: 'T9',
+      anchor,
+      resolved: false,
+      remoteThreadId: 'T9',
+      remoteRootId: '500',
+      remoteResolved: false,
+      comments: [
+        { id: 'node-500', body: 'changed', createdAt: '', updatedAt: '', author: 'me', remoteId: '500' },
+        { id: 'node-501', body: 'changed too', createdAt: '', updatedAt: '', author: 'me', remoteId: '501' },
+      ],
+    },
+  ];
+  const rec = reconcile(current(store, id).threads, [], upstream, { viewer: 'me' });
+  assert.equal(rec.threads.length, 1, 'no leftover draft beside the posted thread');
+  assert.equal(rec.threads[0].remoteThreadId, 'T9');
+  assert.deepEqual(
+    rec.threads[0].comments.map((c) => [c.remoteId, c.author]),
+    [
+      ['500', AGENT_AUTHOR],
+      ['501', AGENT_AUTHOR],
+    ],
+  );
+  await store.updateThreads('/r', id, rec.threads);
+  assert.equal(buildSubmitPlan(current(store, id), 'comment').counts.newComments, 0);
+});
+
+test('a posted draft that is not in the read yet is neither re-sent nor dropped', async () => {
+  const { store, id } = await seed([draftWithReply(AGENT_AUTHOR)]);
+  const client = new FlakyClient();
+  const provider = new GithubReviewProvider('github', async () => client, instant);
+  const { input } = buildSubmitPlan(current(store, id), 'comment');
+  await provider.submitReview(repo, 7, input, (step) => store.retireApplied('/r', id, step));
+
+  const rec = reconcile(current(store, id).threads, [], [], { viewer: 'me', removeMissing: false });
+  await store.updateThreads('/r', id, rec.threads);
+  const review = current(store, id);
+  assert.equal(review.threads[0].comments[0].remoteId, '500', 'the posted id is kept');
+  assert.equal(buildSubmitPlan(review, 'comment').counts.total, 0, 'nothing would post twice');
+});
+
+test('roots sent to the same line are paired with their posted copies in the order sent', async () => {
+  const first: CommentThread = {
+    id: 'one',
+    anchor,
+    resolved: false,
+    comments: [{ id: 'd1', body: 'same', createdAt: '', updatedAt: '', author: AGENT_AUTHOR }],
+  };
+  const second: CommentThread = {
+    id: 'two',
+    anchor,
+    resolved: false,
+    comments: [{ id: 'd2', body: 'same', createdAt: '', updatedAt: '', author: 'me' }],
+  };
+  const { store, id } = await seed([first, second]);
+  const client = new FlakyClient();
+  const provider = new GithubReviewProvider('github', async () => client, instant);
+  const { input } = buildSubmitPlan(current(store, id), 'comment');
+  await provider.submitReview(repo, 7, input, (step) => store.retireApplied('/r', id, step));
+
+  const byThread = Object.fromEntries(current(store, id).threads.map((t) => [t.id, t.comments[0].remoteId]));
+  assert.deepEqual(byThread, { one: '500', two: '501' });
 });

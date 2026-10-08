@@ -45,6 +45,17 @@ export function githubErrorText(err: unknown, now?: Date): string | undefined {
   }
 }
 
+/**
+ * Whether a failed write may still have been applied. A server error or an answer that never arrived (a
+ * timeout or a dropped connection) says nothing about whether GitHub did the work, and on a large review it
+ * often has. A refusal (a 4xx, a rate limit) means the request was never applied.
+ */
+export function mayHaveLanded(err: unknown): boolean {
+  if (rateLimitOf(err)) return false;
+  const status = statusOf(err);
+  return status === undefined || status >= 500;
+}
+
 /** Which limit a refused request ran into, and when it can be tried again. */
 function rateLimitText(hit: RateLimitHit, now: Date): string {
   const name = resourceLabel(hit.resource);
