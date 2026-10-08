@@ -65,6 +65,15 @@ export interface GhPostedComment {
   body: string;
 }
 
+/** A submitted or pending review on a pull request, enough to recognise one a failed create made anyway. */
+export interface GhReview {
+  id: number;
+  author?: string;
+  commitId?: string;
+  state: string; // 'COMMENTED' | 'APPROVED' | 'CHANGES_REQUESTED' | 'PENDING' | 'DISMISSED'
+  body: string;
+}
+
 /** The write operations Submit needs, on top of the read surface. All egress runs through these. */
 export interface GithubWriteClient extends GithubReadClient {
   createReview(
@@ -77,6 +86,8 @@ export interface GithubWriteClient extends GithubReadClient {
       comments: GhNewComment[];
     },
   ): Promise<{ id: number }>;
+  /** Every review on the pull request, oldest first. */
+  listReviews(repo: RemoteRepoRef, number: number): Promise<GhReview[]>;
   /** The comments a review created, so a just-posted root can be found to reply to it in the same Submit. */
   listReviewComments(repo: RemoteRepoRef, number: number, reviewId: number): Promise<GhPostedComment[]>;
   /** Returns the created reply, so a reaction staged on it can be applied once it has an id. */
@@ -308,6 +319,22 @@ class OctokitClient implements GithubWriteClient {
       comments: input.comments,
     });
     return { id: data.id };
+  }
+
+  async listReviews(repo: RemoteRepoRef, number: number): Promise<GhReview[]> {
+    const data = await this.kit.paginate(this.kit.rest.pulls.listReviews, {
+      owner: repo.owner,
+      repo: repo.repo,
+      pull_number: number,
+      per_page: 100,
+    });
+    return data.map((r) => ({
+      id: r.id,
+      author: r.user?.login,
+      commitId: r.commit_id ?? undefined,
+      state: r.state,
+      body: r.body ?? '',
+    }));
   }
 
   async listReviewComments(repo: RemoteRepoRef, number: number, reviewId: number): Promise<GhPostedComment[]> {

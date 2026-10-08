@@ -142,6 +142,18 @@ export class ReviewStore {
       }
     } else if (step.kind === 'resolve') {
       for (const t of review.threads) if (t.remoteThreadId === step.threadId) t.remoteResolved = step.resolved;
+    } else if (step.kind === 'created') {
+      // The comment is on the remote now. It takes the posted ids, so the next read links it to its posted
+      // copy by id. Its body is the baseline, and its reactions are not posted until they are reported.
+      for (const t of review.threads) {
+        for (const c of t.comments) {
+          if (c.id !== step.commentId || c.remoteId) continue;
+          c.id = step.nodeId;
+          c.remoteId = step.remoteId;
+          c.remoteBody = c.body;
+          if (c.reactions) c.remoteReactions = {};
+        }
+      }
     } else if (step.kind === 'reaction') {
       for (const t of review.threads) {
         for (const c of t.comments) {
