@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.12.0...agentic-review-v0.12.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* link submitted comments by id, and stop reporting a posted review as failed ([#121](https://github.com/stefanpantic/local-review-vscode-extension/issues/121)) ([63624c9](https://github.com/stefanpantic/local-review-vscode-extension/commit/63624c910e559e0abf354f89a327b44f1df378bc))
+
 ## [0.12.0](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.11.2...agentic-review-v0.12.0) (2026-10-01)
 
 
