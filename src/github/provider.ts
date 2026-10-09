@@ -35,31 +35,49 @@ function ghComment(root: NewInlineComment): GhNewComment {
   };
 }
 
-/** Whether a created comment sits where a new root was sent: same file, and same side and line unless file-level. */
+/** Text as GitHub may hand it back: line endings unified and outer whitespace dropped. */
+const normalized = (text: string): string => text.replace(/\r\n?/g, '\n').trim();
+
+/**
+ * Whether a created comment sits where a new root was sent: same file, and for a line comment the same side
+ * and the same lines on the reviewed commit. A file-level root only ever matches a file-level comment.
+ */
 function samePlace(c: GhPostedComment, root: NewInlineComment): boolean {
   if (c.path !== root.path) return false;
-  if (root.subject_type === 'file') return c.line == null;
-  return c.side === ghSide(root.side!) && c.line === root.line;
+  if (root.subject_type === 'file') return c.subjectType === 'file';
+  return (
+    c.subjectType === 'line' &&
+    c.side === ghSide(root.side!) &&
+    c.originalLine === root.line &&
+    c.originalStartLine === root.startLine
+  );
 }
 
 /**
- * Pair each new root with the comment the review created for it, by position. GitHub creates a review's
- * comments in the order they were sent, so roots that share a position pair in that order, oldest id first.
- * The text plays no part: GitHub can change it on the way (a suggestion block, line endings), and the
- * position is what the comment was sent with. A root left without a pair is missing from what was read.
+ * Pair each new root with the comment the review created for it. A root first takes a copy in the same place
+ * with the same text, so two different comments sent to one line each find their own. A root whose text
+ * GitHub changed on the way (a suggestion block, line endings) then takes any copy left in its place, oldest
+ * id first. A root left without a pair is missing from what was read.
  */
-function pairCreated(posted: GhPostedComment[], roots: NewInlineComment[]): (GhPostedComment | undefined)[] {
+export function pairCreated(posted: GhPostedComment[], roots: NewInlineComment[]): (GhPostedComment | undefined)[] {
   const pool = [...posted].sort((a, b) => a.id - b.id);
   const taken = new Set<GhPostedComment>();
-  return roots.map((root) => {
-    const match = pool.find((c) => !taken.has(c) && samePlace(c, root));
-    if (match) taken.add(match);
-    return match;
-  });
+  const pairs: (GhPostedComment | undefined)[] = roots.map(() => undefined);
+  const claim = (sameText: boolean): void => {
+    for (const [i, root] of roots.entries()) {
+      if (pairs[i]) continue;
+      const match = pool.find(
+        (c) => !taken.has(c) && samePlace(c, root) && (!sameText || normalized(c.body) === normalized(root.body)),
+      );
+      if (!match) continue;
+      pairs[i] = match;
+      taken.add(match);
+    }
+  };
+  claim(true);
+  claim(false);
+  return pairs;
 }
-
-/** Text as GitHub may hand it back: line endings unified and outer whitespace dropped. */
-const normalized = (text: string): string => text.replace(/\r\n?/g, '\n').trim();
 
 /** The state GitHub gives a submitted review for each event. */
 const REVIEW_STATE = { COMMENT: 'COMMENTED', APPROVE: 'APPROVED', REQUEST_CHANGES: 'CHANGES_REQUESTED' } as const;

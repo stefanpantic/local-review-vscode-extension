@@ -89,33 +89,28 @@ export class ReviewStore {
     return updated;
   }
 
+  /**
+   * Change one review in place and save it. The review is read, changed, and saved without yielding in
+   * between, so the change always applies to what is stored right now. A caller that fetched something over
+   * the network applies it in `fn`, against this read, never against one it took before the fetch: anything
+   * saved while the fetch was out (a comment added, a Submit stamping a posted id) would otherwise be lost.
+   * `fn` returns false to leave the review unsaved.
+   */
+  async mutate(repoRoot: string, id: string, fn: (review: Review) => boolean | void): Promise<Review | undefined> {
+    const map = this.allMap();
+    const review = map[repoRoot]?.find((r) => r.id === id);
+    if (!review || fn(review) === false) return review;
+    review.updatedAt = new Date().toISOString();
+    await this.store.update(REVIEWS_KEY, map);
+    return review;
+  }
+
   /** Record that an imported comment (already on the remote) was deleted locally, so Submit removes it too. */
   async addPendingDelete(repoRoot: string, id: string, remoteId: string): Promise<void> {
-    const map = this.allMap();
-    const review = map[repoRoot]?.find((r) => r.id === id);
-    if (review?.kind !== 'remote') return;
-    if (!review.pendingDeletes?.includes(remoteId)) {
+    await this.mutate(repoRoot, id, (review) => {
+      if (review.kind !== 'remote' || review.pendingDeletes?.includes(remoteId)) return false;
       review.pendingDeletes = [...(review.pendingDeletes ?? []), remoteId];
-      await this.store.update(REVIEWS_KEY, map);
-    }
-  }
-
-  /** Drop all staged deletes for a review (after a Submit has applied them). */
-  async clearPendingDeletes(repoRoot: string, id: string): Promise<void> {
-    const map = this.allMap();
-    const review = map[repoRoot]?.find((r) => r.id === id);
-    if (review?.kind !== 'remote' || !review.pendingDeletes?.length) return;
-    review.pendingDeletes = [];
-    await this.store.update(REVIEWS_KEY, map);
-  }
-
-  /** Replace the staged deletes for a review (reconciliation drops those whose target is gone upstream). */
-  async setPendingDeletes(repoRoot: string, id: string, remoteIds: string[]): Promise<void> {
-    const map = this.allMap();
-    const review = map[repoRoot]?.find((r) => r.id === id);
-    if (review?.kind !== 'remote') return;
-    review.pendingDeletes = [...remoteIds];
-    await this.store.update(REVIEWS_KEY, map);
+    });
   }
 
   /**
@@ -125,54 +120,17 @@ export class ReviewStore {
    * so a retry does what is left instead of posting anything twice.
    */
   async retireApplied(repoRoot: string, id: string, step: AppliedStep): Promise<void> {
-    const map = this.allMap();
-    const review = map[repoRoot]?.find((r) => r.id === id);
-    if (review?.kind !== 'remote') return;
-    if (step.kind === 'delete') {
-      // The comment itself already left the thread when the delete was staged; only the queued id remains.
-      review.pendingDeletes = (review.pendingDeletes ?? []).filter((d) => d !== step.commentId);
-    } else if (step.kind === 'edit') {
-      for (const t of review.threads) {
-        for (const c of t.comments) {
-          if (c.remoteId === step.commentId) {
-            c.remoteBody = c.body;
-            delete c.conflict; // your text is upstream now, so there is nothing left to collide with
-          }
-        }
-      }
-    } else if (step.kind === 'resolve') {
-      for (const t of review.threads) if (t.remoteThreadId === step.threadId) t.remoteResolved = step.resolved;
-    } else if (step.kind === 'created') {
-      // The comment is on the remote now. It takes the posted ids, so the next read links it to its posted
-      // copy by id. Its body is the baseline, and its reactions are not posted until they are reported.
-      for (const t of review.threads) {
-        for (const c of t.comments) {
-          if (c.id !== step.commentId || c.remoteId) continue;
-          c.id = step.nodeId;
-          c.remoteId = step.remoteId;
-          c.remoteBody = c.body;
-          if (c.reactions) c.remoteReactions = {};
-        }
-      }
-    } else if (step.kind === 'reaction') {
-      for (const t of review.threads) {
-        for (const c of t.comments) {
-          if (c.id === step.commentId) c.remoteReactions = c.reactions ? structuredClone(c.reactions) : undefined;
-        }
-      }
-    }
-    review.updatedAt = new Date().toISOString();
-    await this.store.update(REVIEWS_KEY, map);
+    await this.mutate(repoRoot, id, (review) => {
+      if (review.kind !== 'remote') return false;
+      retireStep(review, step);
+    });
   }
 
   /** Replace a review's threads (durable subset) and bump `updatedAt` — the autosave path. */
   async updateThreads(repoRoot: string, id: string, threads: CommentThread[]): Promise<void> {
-    const map = this.allMap();
-    const review = map[repoRoot]?.find((r) => r.id === id);
-    if (!review) return;
-    review.threads = threads.map(durableThread);
-    review.updatedAt = new Date().toISOString();
-    await this.store.update(REVIEWS_KEY, map);
+    await this.mutate(repoRoot, id, (review) => {
+      review.threads = threads.map(durableThread);
+    });
   }
 
   async rename(repoRoot: string, id: string, name: string): Promise<void> {
@@ -296,4 +254,41 @@ function isReview(r: unknown): r is Review {
     Array.isArray(o.threads) &&
     o.threads.every(isCommentThread)
   );
+}
+
+/** Apply one landed step of a Submit to the review it came from. */
+function retireStep(review: RemoteReview, step: AppliedStep): void {
+  if (step.kind === 'delete') {
+    // The comment itself already left the thread when the delete was staged; only the queued id remains.
+    review.pendingDeletes = (review.pendingDeletes ?? []).filter((d) => d !== step.commentId);
+  } else if (step.kind === 'edit') {
+    for (const t of review.threads) {
+      for (const c of t.comments) {
+        if (c.remoteId === step.commentId) {
+          c.remoteBody = c.body;
+          delete c.conflict; // your text is upstream now, so there is nothing left to collide with
+        }
+      }
+    }
+  } else if (step.kind === 'resolve') {
+    for (const t of review.threads) if (t.remoteThreadId === step.threadId) t.remoteResolved = step.resolved;
+  } else if (step.kind === 'created') {
+    // The comment is on the remote now. It takes the posted ids, so the next read links it to its posted
+    // copy by id. Its body is the baseline, and its reactions are not posted until they are reported.
+    for (const t of review.threads) {
+      for (const c of t.comments) {
+        if (c.id !== step.commentId || c.remoteId) continue;
+        c.id = step.nodeId;
+        c.remoteId = step.remoteId;
+        c.remoteBody = c.body;
+        if (c.reactions) c.remoteReactions = {};
+      }
+    }
+  } else if (step.kind === 'reaction') {
+    for (const t of review.threads) {
+      for (const c of t.comments) {
+        if (c.id === step.commentId) c.remoteReactions = c.reactions ? structuredClone(c.reactions) : undefined;
+      }
+    }
+  }
 }

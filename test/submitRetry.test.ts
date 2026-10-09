@@ -12,7 +12,16 @@ import { buildSubmitPlan, readBackUntilLinked } from '../src/review/submit';
 import { reconcile } from '../src/review/reconcile';
 import type { CommentThread, RemoteRef, RemoteReview } from '../src/model/Comment';
 import { AGENT_AUTHOR } from '../src/model/Comment';
-import type { GhNewComment, GhPostedComment, GhReview, GhViewerTeam, GithubWriteClient } from '../src/github/client';
+import { createdByReview, postedComment } from '../src/github/client';
+import type {
+  GhNewComment,
+  GhPostedComment,
+  GhRestReviewComment,
+  GhReview,
+  GhViewerTeam,
+  GithubWriteClient,
+} from '../src/github/client';
+import { restReply, restRoot } from './fixtures/githubRest';
 import type { PullRequestDetail, PullRequestSummary } from '../src/review/provider';
 import type { GhReviewThread } from '../src/github/types';
 
@@ -30,7 +39,7 @@ class FakeStore implements KeyValueStore {
 /** A client that records every write and can be told to throw on one of them, mid-batch. */
 class FlakyClient implements GithubWriteClient {
   reviews: { event: string; commitId: string; body: string; comments: GhNewComment[] }[] = [];
-  posted: GhPostedComment[] = [];
+  rest: GhRestReviewComment[] = []; // every review comment on the pull request, as GitHub lists them
   replies: { inReplyTo: number; body: string }[] = [];
   edits: { commentId: number; body: string }[] = [];
   deletes: number[] = [];
@@ -59,27 +68,28 @@ class FlakyClient implements GithubWriteClient {
   ): Promise<{ id: number }> {
     if (this.failOn === 'createReview') throw new Error('network died');
     this.reviews.push(input);
-    for (const c of input.comments) {
-      const id = this.nextId++;
-      this.posted.push({ id, nodeId: `node-${id}`, path: c.path, line: c.line ?? null, side: c.side, body: c.body });
-    }
+    const reviewId = this.reviews.length;
+    for (const c of input.comments) this.rest.push(restRoot(this.nextId++, reviewId, c));
     const state = { COMMENT: 'COMMENTED', APPROVE: 'APPROVED', REQUEST_CHANGES: 'CHANGES_REQUESTED' }[input.event];
-    this.created.push({ id: 1, author: 'me', commitId: input.commitId, state, body: input.body });
+    this.created.push({ id: reviewId, author: 'me', commitId: input.commitId, state, body: input.body });
     if (this.createdThenFails) throw this.createdThenFails;
-    return { id: 1 };
+    return { id: reviewId };
   }
   async listReviews(): Promise<GhReview[]> {
     this.listReviewsCalls++;
     return this.created;
   }
-  async listReviewComments(): Promise<GhPostedComment[]> {
-    return this.posted;
+  async listReviewComments(_repo: unknown, _number: number, reviewId: number): Promise<GhPostedComment[]> {
+    return createdByReview(this.rest, reviewId);
   }
   async reply(_repo: unknown, _number: number, input: { inReplyTo: number; body: string }): Promise<GhPostedComment> {
     if (this.failOn === 'reply') throw new Error('network died');
     this.replies.push(input);
-    const id = this.nextId++;
-    return { id, nodeId: `node-${id}`, path: 'a.ts', line: null, body: input.body };
+    const root =
+      this.rest.find((c) => c.id === input.inReplyTo) ?? restRoot(input.inReplyTo, 0, { path: 'a.ts', body: '' });
+    const reply = restReply(this.nextId++, this.reviews.length + 1000, root, input.body);
+    this.rest.push(reply);
+    return postedComment(reply);
   }
   async editComment(_repo: unknown, input: { commentId: number; body: string }): Promise<void> {
     if (this.failOn === 'edit') throw new Error('network died');
@@ -606,4 +616,52 @@ test('roots sent to the same line are paired with their posted copies in the ord
 
   const byThread = Object.fromEntries(current(store, id).threads.map((t) => [t.id, t.comments[0].remoteId]));
   assert.deepEqual(byThread, { one: '500', two: '501' });
+});
+
+test('a fetch applied once it lands keeps what was saved while it was out', async () => {
+  const { store, id } = await seed([draftWithReply(AGENT_AUTHOR)]);
+  // A poll's fetch went out before the Submit, so what it brings back has none of the new comments.
+  const fetchedBefore: CommentThread[] = [];
+
+  // While it was out, the Submit posted the draft and its reply, and someone added a comment.
+  const client = new FlakyClient();
+  const provider = new GithubReviewProvider('github', async () => client, instant);
+  const { input } = buildSubmitPlan(current(store, id), 'comment');
+  await provider.submitReview(repo, 7, input, (step) => store.retireApplied('/r', id, step));
+  const added: CommentThread = {
+    id: 'added',
+    anchor,
+    resolved: false,
+    comments: [{ id: 'new', body: 'added meanwhile', createdAt: '', updatedAt: '', author: 'me' }],
+  };
+  await store.mutate('/r', id, (r) => {
+    r.threads.push(added);
+  });
+
+  // The fetch lands and is merged into the review as it is stored now.
+  await store.mutate('/r', id, (latest) => {
+    if (latest.kind !== 'remote') return false;
+    const rec = reconcile(latest.threads, latest.pendingDeletes ?? [], fetchedBefore, {
+      viewer: 'me',
+      removeMissing: false,
+    });
+    latest.threads = rec.threads;
+  });
+
+  const review = current(store, id);
+  assert.deepEqual(
+    review.threads[0].comments.map((c) => [c.remoteId, c.author]),
+    [
+      ['500', AGENT_AUTHOR],
+      ['501', AGENT_AUTHOR],
+    ],
+    'the posted ids the Submit stamped are kept',
+  );
+  assert.ok(
+    review.threads.some((t) => t.id === 'added'),
+    'the comment added meanwhile is kept',
+  );
+  const { counts } = buildSubmitPlan(review, 'comment');
+  assert.equal(counts.newComments, 1, 'only the added comment is left to post');
+  assert.equal(counts.replies, 0, 'the posted reply is not sent again');
 });
