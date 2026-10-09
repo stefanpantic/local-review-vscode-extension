@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.2](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.12.1...agentic-review-v0.12.2) (2026-10-09)
+
+
+### Bug Fixes
+
+* link submitted comments by position, and stop sync and poll from overwriting a Submit ([#123](https://github.com/stefanpantic/local-review-vscode-extension/issues/123)) ([a568537](https://github.com/stefanpantic/local-review-vscode-extension/commit/a56853710f43fdb3a39334fae6b48baff8d92a4a))
+
 ## [0.12.1](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.12.0...agentic-review-v0.12.1) (2026-10-08)
 
 
