@@ -14,7 +14,13 @@ import {
   type SubmitReviewInput,
 } from '../review/submit';
 import type { TokenSource } from './auth';
-import { createGithubClient, type GhNewComment, type GhPostedComment, type GithubWriteClient } from './client';
+import {
+  createdByReview,
+  createGithubClient,
+  type GhNewComment,
+  type GhPostedComment,
+  type GithubWriteClient,
+} from './client';
 import { mayHaveLanded } from './errors';
 import { mapThreads } from './mapThreads';
 import type { RateLimitTracker } from './rateLimit';
@@ -39,8 +45,8 @@ function ghComment(root: NewInlineComment): GhNewComment {
 const normalized = (text: string): string => text.replace(/\r\n?/g, '\n').trim();
 
 /**
- * Whether a created comment sits where a new root was sent: same file, and for a line comment the same side
- * and the same lines on the reviewed commit. A file-level root only ever matches a file-level comment.
+ * Whether a created comment is at the position a new root was sent to: same file, and for a line comment the
+ * same side and the same lines on the reviewed commit. A file-level root matches only a file-level comment.
  */
 function samePlace(c: GhPostedComment, root: NewInlineComment): boolean {
   if (c.path !== root.path) return false;
@@ -54,10 +60,10 @@ function samePlace(c: GhPostedComment, root: NewInlineComment): boolean {
 }
 
 /**
- * Pair each new root with the comment the review created for it. A root first takes a copy in the same place
- * with the same text, so two different comments sent to one line each find their own. A root whose text
- * GitHub changed on the way (a suggestion block, line endings) then takes any copy left in its place, oldest
- * id first. A root left without a pair is missing from what was read.
+ * Pair each new root with the comment the review created for it. The first pass pairs a root with a copy in
+ * the same place with the same text, so two different comments sent to one line each pair with their own
+ * copy. The second pass pairs a root whose text GitHub changed (a suggestion block, line endings) with any
+ * unpaired copy in its place, oldest id first. A root without a pair has no copy in the comments the read returned.
  */
 export function pairCreated(posted: GhPostedComment[], roots: NewInlineComment[]): (GhPostedComment | undefined)[] {
   const pool = [...posted].sort((a, b) => a.id - b.id);
@@ -246,7 +252,7 @@ class GithubReviewProvider implements ReviewProvider {
       // Read the created comments back to learn their ids: the drafts that made them are stamped with them,
       // and follow-up replies and staged reactions need them.
       if (input.newThreads.length === 0) return;
-      const posted = await client.listReviewComments(repo, number, reviewId);
+      const posted = createdByReview(await client.listPullRequestComments(repo, number), reviewId);
       landed();
       pairs = pairCreated(
         posted,
@@ -290,11 +296,14 @@ class GithubReviewProvider implements ReviewProvider {
           .filter((r) => r.author === login && r.commitId === input.commitId && r.state === state)
           .filter((r) => r.body.trim() === input.body.trim())
           .sort((a, b) => b.id - a.id);
+        if (candidates.length === 0) continue;
+        if (input.newThreads.length === 0) return candidates[0].id;
+        // One listing covers every candidate. An older review can have comments on the same lines, so here
+        // the text has to agree as well.
+        const comments = await client.listPullRequestComments(repo, number);
+        const roots = input.newThreads.map((t) => t.root);
         for (const r of candidates) {
-          if (input.newThreads.length === 0) return r.id;
-          // An older review can sit on the same lines, so here the text has to agree as well.
-          const posted = await client.listReviewComments(repo, number, r.id);
-          const roots = input.newThreads.map((t) => t.root);
+          const posted = createdByReview(comments, r.id);
           const same = pairCreated(posted, roots).some(
             (c, i) => c !== undefined && normalized(c.body) === normalized(roots[i].body),
           );

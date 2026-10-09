@@ -1,8 +1,8 @@
-// The real Octokit client against a fake `fetch`, so what is asserted is the request it actually sends and
-// how it reads GitHub's answer, without the network. The answers come from responses captured from GitHub.
+// The real Octokit client against a fake `fetch`, so the tests assert on the request the client sends and
+// how the client reads GitHub's response, without the network. The fake serves responses captured from GitHub.
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { createGithubClient } from '../src/github/client';
+import { createdByReview, createGithubClient } from '../src/github/client';
 import captured from './fixtures/review-comments.json';
 
 const repo = { host: 'github.com', owner: 'o', repo: 'r' };
@@ -39,7 +39,7 @@ test("created comments are read from the pull request's comment list, every page
   );
   const client = createGithubClient({ token: 't', providerId: 'github' });
 
-  const posted = await client.listReviewComments(repo, 7, captured.reviewId);
+  const posted = createdByReview(await client.listPullRequestComments(repo, 7), captured.reviewId);
 
   assert.deepEqual(
     seen.map((r) => `${r.method} ${r.url.pathname}`),

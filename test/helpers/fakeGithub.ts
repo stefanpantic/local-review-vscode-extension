@@ -1,7 +1,7 @@
 // An in-memory GitHub pull request for tests that drive a whole Submit. It keeps review comments the way
 // GitHub stores them, answers each read from that state in GitHub's own shapes, and can hold any call
 // part-way so a test can do something else while that request is out.
-import { createdByReview, postedComment } from '../../src/github/client';
+import { postedComment } from '../../src/github/client';
 import type {
   GhNewComment,
   GhPostedComment,
@@ -150,9 +150,9 @@ export class FakeGithub implements GithubWriteClient {
     return this.reviews;
   }
 
-  async listReviewComments(_repo: unknown, _number: number, reviewId: number): Promise<GhPostedComment[]> {
-    this.calls.push('listReviewComments');
-    return createdByReview(this.rest, reviewId);
+  async listPullRequestComments(): Promise<GhRestReviewComment[]> {
+    this.calls.push('listPullRequestComments');
+    return this.rest;
   }
 
   async reply(_repo: unknown, _number: number, input: { inReplyTo: number; body: string }): Promise<GhPostedComment> {

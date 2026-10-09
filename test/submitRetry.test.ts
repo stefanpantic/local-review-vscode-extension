@@ -6,13 +6,13 @@
 //      after a submit adopts a draft whose comment already posted instead of re-sending it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ReviewStore, type KeyValueStore } from '../src/comments/ReviewStore';
+import { ReviewStore, stagePendingDelete, type KeyValueStore } from '../src/comments/ReviewStore';
 import { GithubReviewProvider } from '../src/github/provider';
 import { buildSubmitPlan, readBackUntilLinked } from '../src/review/submit';
 import { reconcile } from '../src/review/reconcile';
 import type { CommentThread, RemoteRef, RemoteReview } from '../src/model/Comment';
 import { AGENT_AUTHOR } from '../src/model/Comment';
-import { createdByReview, postedComment } from '../src/github/client';
+import { postedComment } from '../src/github/client';
 import type {
   GhNewComment,
   GhPostedComment,
@@ -79,8 +79,8 @@ class FlakyClient implements GithubWriteClient {
     this.listReviewsCalls++;
     return this.created;
   }
-  async listReviewComments(_repo: unknown, _number: number, reviewId: number): Promise<GhPostedComment[]> {
-    return createdByReview(this.rest, reviewId);
+  async listPullRequestComments(): Promise<GhRestReviewComment[]> {
+    return this.rest;
   }
   async reply(_repo: unknown, _number: number, input: { inReplyTo: number; body: string }): Promise<GhPostedComment> {
     if (this.failOn === 'reply') throw new Error('network died');
@@ -181,7 +181,9 @@ async function seed(
   const store = new ReviewStore(new FakeStore());
   const review = await store.create('/r', 'pr/github/7', 'head', remoteRef);
   await store.updateThreads('/r', review.id, threads);
-  for (const d of pendingDeletes) await store.addPendingDelete('/r', review.id, d);
+  await store.mutate('/r', review.id, (r) => {
+    for (const d of pendingDeletes) stagePendingDelete(r, d);
+  });
   return { store, id: review.id };
 }
 
@@ -618,12 +620,12 @@ test('roots sent to the same line are paired with their posted copies in the ord
   assert.deepEqual(byThread, { one: '500', two: '501' });
 });
 
-test('a fetch applied once it lands keeps what was saved while it was out', async () => {
+test('a fetch applied once it arrives keeps what was saved while it was out', async () => {
   const { store, id } = await seed([draftWithReply(AGENT_AUTHOR)]);
   // A poll's fetch went out before the Submit, so what it brings back has none of the new comments.
   const fetchedBefore: CommentThread[] = [];
 
-  // While it was out, the Submit posted the draft and its reply, and someone added a comment.
+  // While the poll's fetch was pending, the Submit posted the draft and its reply, and someone added a comment.
   const client = new FlakyClient();
   const provider = new GithubReviewProvider('github', async () => client, instant);
   const { input } = buildSubmitPlan(current(store, id), 'comment');
@@ -638,7 +640,7 @@ test('a fetch applied once it lands keeps what was saved while it was out', asyn
     r.threads.push(added);
   });
 
-  // The fetch lands and is merged into the review as it is stored now.
+  // The fetch returns, and the test merges the result into the review as stored now.
   await store.mutate('/r', id, (latest) => {
     if (latest.kind !== 'remote') return false;
     const rec = reconcile(latest.threads, latest.pendingDeletes ?? [], fetchedBefore, {

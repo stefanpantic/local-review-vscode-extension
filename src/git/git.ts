@@ -169,6 +169,24 @@ async function vscodeGitRepo(repoRoot: string): Promise<GitRepositoryLike | unde
 }
 
 /**
+ * How long one fetch of a pull request ref may take. Opening a pull request fetches while it holds the pull
+ * request's lock, so a fetch with no answer would block every Sync and Submit until the window reloads.
+ */
+const FETCH_TIMEOUT_MS = 120_000;
+
+/**
+ * Reject with `message` once `ms` pass. The work itself goes on: the VS Code git API offers no way to cancel a
+ * fetch, so this bounds only how long the caller waits for it.
+ */
+export function withDeadline<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
+}
+
+/**
  * Fetch a PR's head + base commit into the local object store, then pin both under hidden refs, without
  * touching the working tree or any branch. The network fetch goes through the vscode.git API so VS Code
  * supplies credentials for private remotes; the pins are local (no-network) update-refs. The CLI fetch is a
@@ -190,10 +208,12 @@ export async function fetchPr(req: {
   // Fetching the base by branch name is reliable; a bare-sha fetch is the fallback (servers often refuse it).
   const baseSpecs = [req.baseRef, req.baseSha].filter((s): s is string => !!s);
   const repo = await vscodeGitRepo(req.repoRoot);
-  const fetchOne = async (ref: string): Promise<void> => {
-    if (repo) await repo.fetch({ remote: req.remote, ref });
-    else await git(req.repoRoot, ['fetch', '--no-tags', req.remote, ref]);
-  };
+  const fetchOne = (ref: string): Promise<void> =>
+    withDeadline<unknown>(
+      repo ? repo.fetch({ remote: req.remote, ref }) : git(req.repoRoot, ['fetch', '--no-tags', req.remote, ref]),
+      FETCH_TIMEOUT_MS,
+      `git fetch of ${ref} did not finish within ${FETCH_TIMEOUT_MS / 1000} seconds.`,
+    ).then(() => undefined);
   await fetchOne(headSpec);
   for (const spec of baseSpecs) {
     try {

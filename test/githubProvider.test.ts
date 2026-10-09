@@ -69,8 +69,8 @@ class FakeClient implements GithubWriteClient {
   async listReviews(): Promise<GhReview[]> {
     return [];
   }
-  async listReviewComments(_repo: unknown, _number: number, reviewId: number): Promise<GhPostedComment[]> {
-    return createdByReview(this.rest, reviewId);
+  async listPullRequestComments(): Promise<GhRestReviewComment[]> {
+    return this.rest;
   }
   async reply(_repo: unknown, _number: number, input: { inReplyTo: number; body: string }): Promise<GhPostedComment> {
     this.replies.push(input);
@@ -354,7 +354,7 @@ test('a reaction staged on an unsent reply to an imported thread posts against t
 
 test('a root that cannot be matched back leaves its reaction for the next Submit', async () => {
   const client = new FakeClient();
-  client.listReviewComments = async (): Promise<GhPostedComment[]> => []; // the read-back finds nothing
+  client.listPullRequestComments = async (): Promise<GhRestReviewComment[]> => []; // the read-back finds nothing
   const p = new GithubReviewProvider('github', async () => client);
   await p.submitReview(repo, 7, {
     event: 'comment',

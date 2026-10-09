@@ -1,6 +1,6 @@
 // A whole Submit driven through the real session, store, reconcile, and provider, against an in-memory GitHub.
-// These cover what the unit tests of each piece cannot: a poll, a Sync, or a new comment arriving while a
-// Submit's requests are out, and whose name each comment carries once the Submit is done.
+// These tests cover cases outside the unit tests of each piece: a poll, a Sync, or a new comment arriving
+// while a Submit's requests are pending, and the author attributed to each comment after the Submit finishes.
 import './helpers/vscodeStub';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,8 +13,8 @@ import { prBranchKey, type DiffRow, type PrRef, type ReviewDiff } from '../src/m
 import { FakeGithub } from './helpers/fakeGithub';
 
 // Behaves like VS Code's workspaceState: `update` stores a JSON copy, and `get` hands back the stored object.
-// Storing the caller's own objects instead would let a stale read see later in-place changes and hide a
-// lost update.
+// Storing the caller's own objects would expose later in-place changes to a stale read, and a test would
+// then miss a lost update.
 class Memento implements KeyValueStore {
   private readonly data = new Map<string, unknown>();
   get<T>(key: string): T | undefined {
@@ -151,7 +151,7 @@ const expectedAuthors = {
   'agent suggests': { author: AGENT_AUTHOR, posted: true },
 };
 
-const tick = (ms = 20): Promise<void> => new Promise((r) => setTimeout(r, ms));
+const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 20));
 
 test('every comment keeps its author through a Submit, a Sync, and a second Submit', async () => {
   using s = await setup();
@@ -186,7 +186,31 @@ async function stageEditOfPosted(s: {
   await s.session.editComment(thread.id, thread.comments[0].id, 'edited before Submit');
 }
 
-test('a poll that was out when Submit started does not undo what Submit did, or drop a new comment', async () => {
+test('a poll answered before a Submit and arriving after it does not undo the Submit or drop a new comment', async () => {
+  using s = await setup();
+  await stageEditOfPosted(s);
+  await stageMixedReview(s.session);
+
+  // GitHub answers the poll before the Submit posts anything, and the answer arrives after the Submit ends.
+  const pollFetch = s.github.hold('getReviewThreads');
+  const poll = s.session.pollPullRequest();
+  await pollFetch.entered;
+  await s.session.submitPullRequest('comment');
+  await s.session.addComment({ filePath: 'a.ts', side: 'new', startLine: 9, body: 'added while the poll was out' });
+  pollFetch.release();
+  await poll;
+
+  assert.deepEqual(byBody(s.review()), {
+    ...expectedAuthors,
+    'edited before Submit': { author: 'me', posted: true },
+    'added while the poll was out': { author: 'me', posted: false },
+  });
+  const comments = s.review().threads.flatMap((t) => t.comments);
+  assert.ok(!comments.some((c) => c.conflict), 'the edit that posted is not shown as a conflict');
+  assert.equal(s.session.submitPreview()?.counts.total, 1, 'only the comment added meanwhile is staged');
+});
+
+test("a poll that a Submit overtook discards its answer, and the next poll brings in others' comments", async () => {
   using s = await setup();
   await stageEditOfPosted(s);
   await stageMixedReview(s.session);
@@ -197,22 +221,21 @@ test('a poll that was out when Submit started does not undo what Submit did, or 
   await pollFetch.entered;
   await s.session.submitPullRequest('comment');
   s.github.post({ path: 'a.ts', line: 1, body: 'from someone else', author: 'them' });
-  await s.session.addComment({ filePath: 'a.ts', side: 'new', startLine: 9, body: 'added while the poll was out' });
+  const before = JSON.stringify(s.review().threads);
   pollFetch.release();
   await poll;
+  assert.equal(JSON.stringify(s.review().threads), before, 'the overtaken poll saved nothing');
 
+  await s.session.pollPullRequest();
   assert.deepEqual(byBody(s.review()), {
     ...expectedAuthors,
     'edited before Submit': { author: 'me', posted: true },
     'from someone else': { author: 'them', posted: true },
-    'added while the poll was out': { author: 'me', posted: false },
   });
-  const comments = s.review().threads.flatMap((t) => t.comments);
-  assert.ok(!comments.some((c) => c.conflict), 'the edit that posted is not shown as a conflict');
-  assert.equal(s.session.submitPreview()?.counts.total, 1, 'only the comment added meanwhile is staged');
+  assert.equal(s.session.submitPreview()?.counts.total, 0);
 });
 
-test('a poll that lands in the middle of a Submit leaves its fetch unapplied', async () => {
+test('a poll whose answer arrives in the middle of a Submit leaves its fetch unapplied', async () => {
   using s = await setup();
   await stageEditOfPosted(s);
   await stageMixedReview(s.session);
@@ -290,6 +313,11 @@ test('a review GitHub created despite a server error is reported as posted, with
   const result = await s.session.submitPullRequest('comment');
   assert.equal(result.unsent, undefined);
   assert.equal(s.github.reviews.length, 1, 'the review was not posted a second time');
+  assert.deepEqual(
+    s.github.calls.filter((c) => c === 'listPullRequestComments').length,
+    2,
+    'one listing to recognise the review, one to read its comments back',
+  );
   assert.equal(s.github.rest.length, 7, 'the reply on a new thread still posted');
   assert.deepEqual(byBody(s.review()), expectedAuthors);
   assert.equal(s.session.submitPreview()?.counts.total, 0);

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import type { ReviewState } from './reviewState';
 import type { RepoPref, ViewPrefs } from './review/prefs';
-import { ReviewStore } from './comments/ReviewStore';
+import { ReviewStore, stagePendingDelete } from './comments/ReviewStore';
 import { reanchor, reanchorOne, createAnchor, rangeText, type AnchorLocator } from './comments/anchoring';
 import {
   getRepoInfo,
@@ -528,8 +528,8 @@ export class RepoSession implements vscode.Disposable {
   /**
    * Serialize the PR network mutations (open, refresh, submit, discard) against one another and against the
    * background poll, so two of them can never interleave writes to the same stored review. The wait is
-   * bounded so a long Submit cannot leave a Sync hanging, but a waiter that gives up fails rather than
-   * running beside the operation it waited on.
+   * bounded so a long Submit cannot block a Sync without limit. A waiter that times out fails with an error
+   * and does not run beside the operation ahead of it.
    */
   private withPrLock<T>(fn: () => Promise<T>): Promise<T> {
     return this.prLock.run(fn, { waitMs: this.prLockWaitMs });
@@ -901,7 +901,7 @@ export class RepoSession implements vscode.Disposable {
         const left = this.reviewStore.get(repoRoot, reviewId);
         return left?.kind === 'remote' ? buildSubmitPlan(left, event).counts : undefined;
       };
-      // Only the comments this Submit sent are waited on. One added while it ran is not on GitHub to be found.
+      // The read-back waits on the comments this Submit sent. A comment added during the Submit is not on GitHub.
       const sentRoots = new Set(input.newThreads.map((t) => t.root.localId));
       const unsentRoots = (left: Review): number =>
         left.threads
@@ -962,7 +962,7 @@ export class RepoSession implements vscode.Disposable {
     const diff = this.currentDiff();
     if (!diff || this.reviewStore.get(repoRoot, reviewId)?.kind !== 'remote') return { localOnly: 0, deletes: 0 };
     const imported = await remote.provider.getThreads(remote.repo, number, diff);
-    // Merged into the review as stored once the fetch is back, so nothing saved meanwhile is lost.
+    // Merge into the review as stored when the fetch returns, so the merge keeps changes saved during the fetch.
     let orphans: OrphanReport = { localOnly: 0, deletes: 0 };
     await this.reviewStore.mutate(repoRoot, reviewId, (review) => {
       if (review.kind !== 'remote') return false;
@@ -1028,21 +1028,30 @@ export class RepoSession implements vscode.Disposable {
     if (!remote) return {};
     const number = review.remote.number ?? Number(review.remote.id);
 
+    // A Submit, Sync, or open that started during this tick's fetches reads upstream on its own, and this
+    // tick's results predate it, so the tick discards them.
+    const requested = this.prLock.requested;
+    const untouched = (): boolean => !this.prLock.busy && this.prLock.requested === requested;
+
     let headChanged = false;
     let metaChanged = false;
     let failed = false;
     try {
       const detail = await remote.provider.getRequest(remote.repo, number);
-      if (detail.headSha !== review.remote.headSha && !this.headStale) {
-        this.headStale = true;
-        headChanged = true;
-      }
-      // The request's own metadata is the remote's to own, so a tick takes it. This only refreshes what
-      // is displayed and removes nothing, so it stays within what a background tick is allowed to do.
-      const meta = mergeRequestMeta(review.remote, detail);
-      if (meta) {
-        await this.reviewStore.setRemote(repoRoot, review.id, meta);
-        metaChanged = true;
+      if (untouched()) {
+        // The request's own metadata is the remote's to own, so a tick takes it. This only refreshes what
+        // is displayed and removes nothing, so it stays within what a background tick is allowed to do.
+        await this.reviewStore.mutate(repoRoot, review.id, (latest) => {
+          if (latest.kind !== 'remote') return false;
+          if (detail.headSha !== latest.remote.headSha && !this.headStale) {
+            this.headStale = true;
+            headChanged = true;
+          }
+          const meta = mergeRequestMeta(latest.remote, detail);
+          if (!meta) return false;
+          latest.remote = meta;
+          metaChanged = true;
+        });
       }
     } catch {
       failed = true;
@@ -1053,10 +1062,8 @@ export class RepoSession implements vscode.Disposable {
     let threadsChanged = false;
     try {
       const imported = await remote.provider.getThreads(remote.repo, number, diff);
-      // A Submit, Sync, or open that started while this was fetching owns the review now. It reads upstream
-      // itself, so this tick leaves its result unapplied.
-      if (!this.prLock.busy) {
-        // Merged into the review as stored once the fetch is back, so nothing saved meanwhile is lost.
+      if (untouched()) {
+        // Merge into the review as stored when the fetch returns, so the merge keeps changes saved during the fetch.
         await this.reviewStore.mutate(repoRoot, review.id, (latest) => {
           if (latest.kind !== 'remote') return false;
           const rec = reconcile(latest.threads, latest.pendingDeletes ?? [], imported, {
@@ -1264,10 +1271,9 @@ export class RepoSession implements vscode.Disposable {
     await this.reviewStore.mutate(repoRoot, id, (review) => {
       const thread = review.threads.find((t) => t.id === threadId);
       if (!thread) return false;
-      // A comment already posted on the remote must be deleted there on Submit — stage its id before removing.
+      // Submit deletes the remote copy of a posted comment, so stage the remote id before removing the comment.
       const removed = thread.comments.find((c) => c.id === commentId);
-      if (review.kind === 'remote' && removed?.remoteId && !review.pendingDeletes?.includes(removed.remoteId))
-        review.pendingDeletes = [...(review.pendingDeletes ?? []), removed.remoteId];
+      if (removed?.remoteId) stagePendingDelete(review, removed.remoteId);
       thread.comments = thread.comments.filter((c) => c.id !== commentId);
       threadDeleted = thread.comments.length === 0;
       if (threadDeleted) review.threads = review.threads.filter((t) => t.id !== threadId);
@@ -1408,7 +1414,7 @@ export class RepoSession implements vscode.Disposable {
 /** Quiet window after the last panel paint before the sidebar treats the diff as fully loaded. */
 const RENDER_SETTLE_MS = 300;
 
-/** How long a PR action waits on one already in flight before it gives up with an error. */
+/** How long a PR action waits for a running PR action to finish before the waiting action fails with an error. */
 const PR_LOCK_TIMEOUT_MS = 30_000;
 
 /** Consecutive failed poll ticks before the panel says sync is paused rather than showing a silently stale view. */
