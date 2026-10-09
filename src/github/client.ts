@@ -55,14 +55,54 @@ export interface GhNewComment {
   subject_type?: 'file';
 }
 
-/** A review comment as posted, enough to match it back to the local thread that created it. */
+/** A review comment as posted, enough to match it back to the local comment that created it. */
 export interface GhPostedComment {
   id: number; // databaseId — the reply target
   nodeId: string; // GraphQL node id — the reaction subject
   path: string;
-  line: number | null;
+  subjectType: 'line' | 'file';
   side?: 'LEFT' | 'RIGHT';
+  // Lines on the commit the comment targets, the same lines Submit sent. GitHub recomputes the current-head lines
+  // when the pull request receives new commits, so those lines cannot identify the comment.
+  originalLine?: number; // the last line of a range, or the only line
+  originalStartLine?: number; // the first line of a multi-line comment
   body: string;
+}
+
+/** The fields of GitHub's REST review comment that a posted comment is read from. */
+export interface GhRestReviewComment {
+  id: number;
+  node_id: string;
+  path: string;
+  body: string;
+  side?: string | null;
+  original_line?: number | null;
+  original_start_line?: number | null;
+  subject_type?: string | null;
+  pull_request_review_id?: number | null;
+  in_reply_to_id?: number | null;
+}
+
+/** A REST review comment as a posted comment. */
+export function postedComment(c: GhRestReviewComment): GhPostedComment {
+  return {
+    id: c.id,
+    nodeId: c.node_id,
+    path: c.path,
+    subjectType: c.subject_type === 'file' ? 'file' : 'line',
+    side: c.side === 'LEFT' || c.side === 'RIGHT' ? c.side : undefined,
+    ...(c.original_line != null ? { originalLine: c.original_line } : {}),
+    ...(c.original_start_line != null ? { originalStartLine: c.original_start_line } : {}),
+    body: c.body,
+  };
+}
+
+/**
+ * The top-level comments a review created, out of all review comments on the pull request. This function
+ * skips replies, because a reply belongs to an existing thread.
+ */
+export function createdByReview(comments: GhRestReviewComment[], reviewId: number): GhPostedComment[] {
+  return comments.filter((c) => c.pull_request_review_id === reviewId && c.in_reply_to_id == null).map(postedComment);
 }
 
 /** A submitted or pending review on a pull request, enough to recognise one a failed create made anyway. */
@@ -88,8 +128,12 @@ export interface GithubWriteClient extends GithubReadClient {
   ): Promise<{ id: number }>;
   /** Every review on the pull request, oldest first. */
   listReviews(repo: RemoteRepoRef, number: number): Promise<GhReview[]>;
-  /** The comments a review created, so a just-posted root can be found to reply to it in the same Submit. */
-  listReviewComments(repo: RemoteRepoRef, number: number, reviewId: number): Promise<GhPostedComment[]>;
+  /**
+   * Every review comment on the pull request, with the positions each was sent with and the review it came
+   * from. `createdByReview` narrows it to one review's new roots, so each is linked to its posted copy and its
+   * follow-up replies can be threaded in the same Submit.
+   */
+  listPullRequestComments(repo: RemoteRepoRef, number: number): Promise<GhRestReviewComment[]>;
   /** Returns the created reply, so a reaction staged on it can be applied once it has an id. */
   reply(repo: RemoteRepoRef, number: number, input: { inReplyTo: number; body: string }): Promise<GhPostedComment>;
   editComment(repo: RemoteRepoRef, input: { commentId: number; body: string }): Promise<void>;
@@ -337,22 +381,15 @@ class OctokitClient implements GithubWriteClient {
     }));
   }
 
-  async listReviewComments(repo: RemoteRepoRef, number: number, reviewId: number): Promise<GhPostedComment[]> {
-    const data = await this.kit.paginate(this.kit.rest.pulls.listCommentsForReview, {
+  // The per-review comments endpoint returns null line, side, and subject type, so the caller cannot tell
+  // where each comment is. The pull request's own list returns those fields and the review id of each comment.
+  async listPullRequestComments(repo: RemoteRepoRef, number: number): Promise<GhRestReviewComment[]> {
+    return this.kit.paginate(this.kit.rest.pulls.listReviewComments, {
       owner: repo.owner,
       repo: repo.repo,
       pull_number: number,
-      review_id: reviewId,
       per_page: 100,
     });
-    return data.map((c) => ({
-      id: c.id,
-      nodeId: c.node_id,
-      path: c.path,
-      line: c.line ?? c.original_line ?? null,
-      side: c.side === 'LEFT' || c.side === 'RIGHT' ? c.side : undefined,
-      body: c.body,
-    }));
   }
 
   async reply(
@@ -367,14 +404,7 @@ class OctokitClient implements GithubWriteClient {
       comment_id: input.inReplyTo,
       body: input.body,
     });
-    return {
-      id: data.id,
-      nodeId: data.node_id,
-      path: data.path,
-      line: data.line ?? data.original_line ?? null,
-      side: data.side === 'LEFT' || data.side === 'RIGHT' ? data.side : undefined,
-      body: data.body,
-    };
+    return postedComment(data);
   }
 
   async editComment(repo: RemoteRepoRef, input: { commentId: number; body: string }): Promise<void> {

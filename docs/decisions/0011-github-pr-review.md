@@ -63,8 +63,15 @@ explicit human Submit, still confined to `src/github/*`, still no network capabi
   the same imported baseline is flagged `conflict` and keeps your text until you decide. The flag has to be
   **persisted**, because every reconcile advances the baseline and the collision cannot be re-derived on a
   later pass. This replaces "last-write-wins for now" — the write still wins on Submit, but never quietly.
-- **All PR network mutations are serialized behind one lock,** with a bounded wait so a hung call cannot wedge
-  the poll forever. The poll skips entirely while the lock is held.
+- **One lock serializes all PR network mutations,** in the order callers requested them. The wait has a time
+  limit so a long Submit cannot block a Sync indefinitely, and a waiter that times out fails with a message. The
+  waiter does not run beside the holder, because a Submit can hold the lock for minutes and an operation running
+  beside the Submit would save a review built from a read that the Submit has since changed. The poll skips
+  while a mutation holds or waits for the lock, and discards its fetch result if a mutation started during the
+  fetch. Opening a pull request fetches its refs inside the lock, so each git fetch has a 120 second limit and
+  every holder releases the lock.
+- **Sync and the poll merge a fetched result into the review as stored when the response arrives.** The merge
+  keeps comments added and ids stamped while the request was pending.
 - **Both ends of a PR are pinned.** The head moves from `refs/agentic-review/pr/<n>` to `<n>/head`, and the
   base is pinned beside it at `<n>/base`. A restored session verifies both and re-fetches what is missing. A
   three-dot diff needs both ends to exist, so pinning only the head left a review one `git gc` away from
@@ -91,6 +98,12 @@ network capability.
   that has never been posted cannot go in that pass. It travels with its comment in the batch instead and is
   applied from the id the creation reports back, which is also why the created roots are read back for their
   node ids and not only to thread a follow-up reply (#93).
+- **Submit reads created roots back from the pull request's comment list.** The per-review comment list returns
+  null `line`, `side`, and `subject_type`, so a reader cannot place a comment from that list. The pull request's
+  list returns those fields and the id of the review each comment came from. Submit pairs each new root with its
+  copy by file, side, and its lines on the reviewed commit (`original_line`, `original_start_line`), which do not
+  change when the pull request gains commits. Submit tries a copy with the same place and the same text first, so
+  two comments on one line each pair with the right copy. A file-level root pairs only with a file-level comment.
 - **File-level threads round-trip (iteration 17).** Import no longer drops a thread with no line. It becomes
   a `FileAnchor` thread, and a new file-level comment posts with `subject_type: "file"`.
 - **Rate limits (PR #89).** The client uses Octokit's throttling plugin. It retries a request once after a

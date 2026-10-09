@@ -14,7 +14,13 @@ import {
   type SubmitReviewInput,
 } from '../review/submit';
 import type { TokenSource } from './auth';
-import { createGithubClient, type GhNewComment, type GhPostedComment, type GithubWriteClient } from './client';
+import {
+  createdByReview,
+  createGithubClient,
+  type GhNewComment,
+  type GhPostedComment,
+  type GithubWriteClient,
+} from './client';
 import { mayHaveLanded } from './errors';
 import { mapThreads } from './mapThreads';
 import type { RateLimitTracker } from './rateLimit';
@@ -35,31 +41,49 @@ function ghComment(root: NewInlineComment): GhNewComment {
   };
 }
 
-/** Whether a created comment sits where a new root was sent: same file, and same side and line unless file-level. */
+/** Text as GitHub may hand it back: line endings unified and outer whitespace dropped. */
+const normalized = (text: string): string => text.replace(/\r\n?/g, '\n').trim();
+
+/**
+ * Whether a created comment is at the position a new root was sent to: same file, and for a line comment the
+ * same side and the same lines on the reviewed commit. A file-level root matches only a file-level comment.
+ */
 function samePlace(c: GhPostedComment, root: NewInlineComment): boolean {
   if (c.path !== root.path) return false;
-  if (root.subject_type === 'file') return c.line == null;
-  return c.side === ghSide(root.side!) && c.line === root.line;
+  if (root.subject_type === 'file') return c.subjectType === 'file';
+  return (
+    c.subjectType === 'line' &&
+    c.side === ghSide(root.side!) &&
+    c.originalLine === root.line &&
+    c.originalStartLine === root.startLine
+  );
 }
 
 /**
- * Pair each new root with the comment the review created for it, by position. GitHub creates a review's
- * comments in the order they were sent, so roots that share a position pair in that order, oldest id first.
- * The text plays no part: GitHub can change it on the way (a suggestion block, line endings), and the
- * position is what the comment was sent with. A root left without a pair is missing from what was read.
+ * Pair each new root with the comment the review created for it. The first pass pairs a root with a copy in
+ * the same place with the same text, so two different comments sent to one line each pair with their own
+ * copy. The second pass pairs a root whose text GitHub changed (a suggestion block, line endings) with any
+ * unpaired copy in its place, oldest id first. A root without a pair has no copy in the comments the read returned.
  */
-function pairCreated(posted: GhPostedComment[], roots: NewInlineComment[]): (GhPostedComment | undefined)[] {
+export function pairCreated(posted: GhPostedComment[], roots: NewInlineComment[]): (GhPostedComment | undefined)[] {
   const pool = [...posted].sort((a, b) => a.id - b.id);
   const taken = new Set<GhPostedComment>();
-  return roots.map((root) => {
-    const match = pool.find((c) => !taken.has(c) && samePlace(c, root));
-    if (match) taken.add(match);
-    return match;
-  });
+  const pairs: (GhPostedComment | undefined)[] = roots.map(() => undefined);
+  const claim = (sameText: boolean): void => {
+    for (const [i, root] of roots.entries()) {
+      if (pairs[i]) continue;
+      const match = pool.find(
+        (c) => !taken.has(c) && samePlace(c, root) && (!sameText || normalized(c.body) === normalized(root.body)),
+      );
+      if (!match) continue;
+      pairs[i] = match;
+      taken.add(match);
+    }
+  };
+  claim(true);
+  claim(false);
+  return pairs;
 }
-
-/** Text as GitHub may hand it back: line endings unified and outer whitespace dropped. */
-const normalized = (text: string): string => text.replace(/\r\n?/g, '\n').trim();
 
 /** The state GitHub gives a submitted review for each event. */
 const REVIEW_STATE = { COMMENT: 'COMMENTED', APPROVE: 'APPROVED', REQUEST_CHANGES: 'CHANGES_REQUESTED' } as const;
@@ -228,7 +252,7 @@ class GithubReviewProvider implements ReviewProvider {
       // Read the created comments back to learn their ids: the drafts that made them are stamped with them,
       // and follow-up replies and staged reactions need them.
       if (input.newThreads.length === 0) return;
-      const posted = await client.listReviewComments(repo, number, reviewId);
+      const posted = createdByReview(await client.listPullRequestComments(repo, number), reviewId);
       landed();
       pairs = pairCreated(
         posted,
@@ -272,11 +296,14 @@ class GithubReviewProvider implements ReviewProvider {
           .filter((r) => r.author === login && r.commitId === input.commitId && r.state === state)
           .filter((r) => r.body.trim() === input.body.trim())
           .sort((a, b) => b.id - a.id);
+        if (candidates.length === 0) continue;
+        if (input.newThreads.length === 0) return candidates[0].id;
+        // One listing covers every candidate. An older review can have comments on the same lines, so here
+        // the text has to agree as well.
+        const comments = await client.listPullRequestComments(repo, number);
+        const roots = input.newThreads.map((t) => t.root);
         for (const r of candidates) {
-          if (input.newThreads.length === 0) return r.id;
-          // An older review can sit on the same lines, so here the text has to agree as well.
-          const posted = await client.listReviewComments(repo, number, r.id);
-          const roots = input.newThreads.map((t) => t.root);
+          const posted = createdByReview(comments, r.id);
           const same = pairCreated(posted, roots).some(
             (c, i) => c !== undefined && normalized(c.body) === normalized(roots[i].body),
           );

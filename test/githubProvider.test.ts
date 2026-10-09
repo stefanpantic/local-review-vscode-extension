@@ -1,16 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { GithubReviewProvider, createGithubProvider } from '../src/github/provider';
+import { GithubReviewProvider, createGithubProvider, pairCreated } from '../src/github/provider';
+import captured from './fixtures/review-comments.json';
+import { createdByReview, postedComment } from '../src/github/client';
+import { restReply, restRoot } from './fixtures/githubRest';
 import type {
   GhNewComment,
   GhPostedComment,
+  GhRestReviewComment,
   GhReview,
   GhViewerTeam,
   GithubWriteClient,
   ThrottleListener,
 } from '../src/github/client';
 import type { PullRequestDetail, PullRequestSummary } from '../src/review/provider';
-import type { SubmitReviewInput, SubmitStep } from '../src/review/submit';
+import type { NewInlineComment, SubmitReviewInput, SubmitStep } from '../src/review/submit';
 import type { GhReviewThread } from '../src/github/types';
 import type { DiffRow, FileDiff, Hunk, ReviewDiff } from '../src/model/ReviewDiff';
 import type { LineAnchor } from '../src/model/Comment';
@@ -32,7 +36,7 @@ function diff(rows: DiffRow[]): ReviewDiff {
 class FakeClient implements GithubWriteClient {
   // Recorded write calls, so a submit's translation + sequencing can be asserted without the network.
   reviews: { event: string; commitId: string; body: string; comments: GhNewComment[] }[] = [];
-  posted: GhPostedComment[] = []; // comments createReview created, returned by listReviewComments
+  rest: GhRestReviewComment[] = []; // every review comment on the pull request, as GitHub lists them
   replies: { inReplyTo: number; body: string }[] = [];
   edits: { commentId: number; body: string }[] = [];
   deletes: number[] = [];
@@ -58,22 +62,23 @@ class FakeClient implements GithubWriteClient {
     },
   ): Promise<{ id: number }> {
     this.reviews.push(input);
-    for (const c of input.comments) {
-      const id = this.nextId++;
-      this.posted.push({ id, nodeId: `node-${id}`, path: c.path, line: c.line ?? null, side: c.side, body: c.body });
-    }
-    return { id: 1 };
+    const reviewId = this.reviews.length;
+    for (const c of input.comments) this.rest.push(restRoot(this.nextId++, reviewId, c));
+    return { id: reviewId };
   }
   async listReviews(): Promise<GhReview[]> {
     return [];
   }
-  async listReviewComments(): Promise<GhPostedComment[]> {
-    return this.posted;
+  async listPullRequestComments(): Promise<GhRestReviewComment[]> {
+    return this.rest;
   }
   async reply(_repo: unknown, _number: number, input: { inReplyTo: number; body: string }): Promise<GhPostedComment> {
     this.replies.push(input);
-    const id = this.nextId++;
-    return { id, nodeId: `node-${id}`, path: 'a.ts', line: null, body: input.body };
+    const root =
+      this.rest.find((c) => c.id === input.inReplyTo) ?? restRoot(input.inReplyTo, 0, { path: 'a.ts', body: '' });
+    const reply = restReply(this.nextId++, this.reviews.length + 1000, root, input.body);
+    this.rest.push(reply);
+    return postedComment(reply);
   }
   async editComment(_repo: unknown, input: { commentId: number; body: string }): Promise<void> {
     this.edits.push(input);
@@ -349,7 +354,7 @@ test('a reaction staged on an unsent reply to an imported thread posts against t
 
 test('a root that cannot be matched back leaves its reaction for the next Submit', async () => {
   const client = new FakeClient();
-  client.listReviewComments = async (): Promise<GhPostedComment[]> => []; // the read-back finds nothing
+  client.listPullRequestComments = async (): Promise<GhRestReviewComment[]> => []; // the read-back finds nothing
   const p = new GithubReviewProvider('github', async () => client);
   await p.submitReview(repo, 7, {
     event: 'comment',
@@ -366,6 +371,122 @@ test('a root that cannot be matched back leaves its reaction for the next Submit
   });
   assert.equal(client.reviews.length, 1); // the comment itself did post
   assert.deepEqual(client.reactions, []); // its reaction did not, and stays staged
+});
+
+// --- linking new roots to the comments the review created ---
+
+test("the pull request's comment list carries the positions the per-review list leaves out", () => {
+  // Captured from GitHub: the same two comments of one review, read from both endpoints.
+  const roots: NewInlineComment[] = [
+    { path: 'submit-repro.txt', side: 'new', line: 2, body: 'repro comment C' },
+    { path: 'submit-repro.txt', side: 'new', line: 4, body: 'repro comment D' },
+  ];
+  const perReview = createdByReview(captured.perReview, captured.reviewId);
+  assert.deepEqual(
+    pairCreated(perReview, roots).map((c) => c?.id),
+    [undefined, undefined],
+  );
+  const pullRequest = createdByReview(captured.pullRequest, captured.reviewId);
+  assert.equal(pullRequest.length, 2); // the other reviews' comments are left out
+  assert.deepEqual(
+    pairCreated(pullRequest, roots).map((c) => c?.id),
+    [4154488801, 4154488809],
+  );
+});
+
+test('a file-level root never claims a line comment on the same file', () => {
+  const line = postedComment(restRoot(1, 9, { path: 'a.ts', body: 'on a line', line: 3, side: 'RIGHT' }));
+  const file = postedComment(restRoot(2, 9, { path: 'a.ts', body: 'on the file', subject_type: 'file' }));
+  const pairs = pairCreated(
+    [line, file],
+    [
+      { path: 'a.ts', body: 'on the file', subject_type: 'file' },
+      { path: 'a.ts', side: 'new', line: 3, body: 'on a line' },
+    ],
+  );
+  assert.deepEqual(
+    pairs.map((c) => c?.id),
+    [2, 1],
+  );
+});
+
+test('two roots sent to one line each take the copy with their own text', () => {
+  // GitHub gave the second root the lower id.
+  const second = postedComment(restRoot(1, 9, { path: 'a.ts', body: 'second', line: 3, side: 'RIGHT' }));
+  const first = postedComment(restRoot(2, 9, { path: 'a.ts', body: 'first', line: 3, side: 'RIGHT' }));
+  const pairs = pairCreated(
+    [second, first],
+    [
+      { path: 'a.ts', side: 'new', line: 3, body: 'first' },
+      { path: 'a.ts', side: 'new', line: 3, body: 'second' },
+    ],
+  );
+  assert.deepEqual(
+    pairs.map((c) => c?.id),
+    [2, 1],
+  );
+});
+
+test('a root whose text GitHub changed still pairs by its place', () => {
+  const posted = postedComment(
+    restRoot(1, 9, { path: 'a.ts', body: 'see\n\n```suggestion\nx\n```', line: 3, side: 'RIGHT' }),
+  );
+  const pairs = pairCreated(
+    [posted],
+    [{ path: 'a.ts', side: 'new', line: 3, body: 'see\r\n\r\n```suggestion\r\nx\n```\n' }],
+  );
+  assert.equal(pairs[0]?.id, 1);
+});
+
+test('a root pairs on the line it was sent with after the pull request gained commits', () => {
+  // The current-head line moved to 9. The line on the reviewed commit is still 3.
+  const moved = { ...restRoot(1, 9, { path: 'a.ts', body: 'x', line: 3, side: 'RIGHT' }), line: 9 };
+  const pairs = pairCreated([postedComment(moved)], [{ path: 'a.ts', side: 'new', line: 3, body: 'x' }]);
+  assert.equal(pairs[0]?.id, 1);
+});
+
+test('a multi-line root pairs on both its first and last line, and on its side', () => {
+  const single = postedComment(restRoot(1, 9, { path: 'a.ts', body: 'x', line: 5, side: 'RIGHT' }));
+  const left = postedComment(
+    restRoot(2, 9, { path: 'a.ts', body: 'x', line: 5, start_line: 3, side: 'LEFT', start_side: 'LEFT' }),
+  );
+  const range = postedComment(
+    restRoot(3, 9, { path: 'a.ts', body: 'x', line: 5, start_line: 3, side: 'RIGHT', start_side: 'RIGHT' }),
+  );
+  const pairs = pairCreated([single, left, range], [{ path: 'a.ts', side: 'new', line: 5, startLine: 3, body: 'x' }]);
+  assert.equal(pairs[0]?.id, 3);
+});
+
+test('a line root and a file-level root on one file both get their follow-up replies', async () => {
+  const client = new FakeClient();
+  const p = new GithubReviewProvider('github', async () => client);
+  const stamped: string[] = [];
+  await p.submitReview(
+    repo,
+    7,
+    {
+      event: 'comment',
+      commitId: 'H',
+      body: '',
+      newThreads: [
+        { root: { path: 'a.ts', body: 'file', subject_type: 'file', localId: 'f' }, replies: [{ body: 'r1' }] },
+        { root: { path: 'a.ts', side: 'new', line: 4, body: 'line', localId: 'l' }, replies: [{ body: 'r2' }] },
+      ],
+      replies: [],
+      edits: [],
+      deletes: [],
+      resolves: [],
+      reactions: [],
+    },
+    (step) => {
+      if (step.kind === 'created') stamped.push(`${step.commentId}=${step.remoteId}`);
+    },
+  );
+  assert.deepEqual(stamped, ['f=500', 'l=501']);
+  assert.deepEqual(client.replies, [
+    { inReplyTo: 500, body: 'r1' },
+    { inReplyTo: 501, body: 'r2' },
+  ]);
 });
 
 // --- client caching via createGithubProvider ---
