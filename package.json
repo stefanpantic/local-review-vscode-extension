@@ -674,7 +674,7 @@
     "publish": "vsce publish --no-dependencies"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.31.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@octokit/plugin-throttling": "^11.0.5",
     "@octokit/rest": "^22.0.1",
     "bottleneck": "^2.19.5",
