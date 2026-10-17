@@ -52,7 +52,8 @@ Two things follow.
 **Authorship survives the round trip.** Reconcile keeps `AGENT_AUTHOR` on a comment whose local copy carried
 it, so submitting no longer turns the agent's comment into one of the human's. This also keeps the agent
 badge and the `author:@agent` filter honest on a review that has been submitted, which the old behavior
-silently broke. It is provenance only: the remote record stays what it is.
+silently broke. It is provenance only: the remote record stays what it is. _(**Superseded.** Posted comments now take the
+GitHub author. See the addendum on attribution after Submit below.)_
 
 **The rule measures against the human's identity.** `canEditComment(comment, viewer, remote)` with `viewer`
 from `authorIdentity()`, exactly the call the human UI makes, so the agent may change whatever the human may
@@ -77,6 +78,19 @@ whole file. The file must be in the current diff.
 the repo, and the `localReview.mcp.autoStart` setting. The connect file now lives in the extension's
 per-workspace storage, so nothing is written into the repository, and **Open MCP Config** opens it. The
 setting is `agenticReview.mcp.autoStart`, renamed with the extension.
+
+## Addendum: a submitted comment takes the GitHub author
+
+Keeping `AGENT_AUTHOR` after Submit left the agent's comments labelled "AI Agent" forever, while GitHub shows
+them under the human's account. The review then disagreed with the pull request it mirrors.
+
+Reconcile now takes the fetched author for every posted comment. `AGENT_AUTHOR` marks only agent content that
+has not posted yet: drafts and pending replies. Once Submit posts a comment and a fetch reads it back, it is
+the human's, in the panel, the sidebar, exports, and MCP output. The agent badge and the `author:@agent` filter
+match only unposted agent content. A review saved under the old rule corrects itself on its next sync or poll.
+
+The permission rule does not change. It measures against the human's identity, so the agent can still edit
+and delete a comment it wrote after that comment is submitted.
 
 ## Consequences
 

@@ -304,9 +304,7 @@ test('drafts with the same text on different lines each adopt the copy on their 
   assert.equal(adopted, 2);
   const onLine = (n: number) => threads.find((t) => t.anchor.kind === 'line' && t.anchor.lineNumber === n)!;
   assert.equal(onLine(5).remoteThreadId, 'T5');
-  assert.equal(onLine(5).comments[0].author, AGENT_AUTHOR);
   assert.equal(onLine(9).remoteThreadId, 'T9');
-  assert.equal(onLine(9).comments[0].author, 'me');
 });
 
 test('a draft whose line moved upstream still adopts its copy by text', () => {
@@ -349,7 +347,6 @@ test('a draft adopts its copy when the import trimmed the text', () => {
   const { threads, adopted } = reconcile([draft], [], fresh, { viewer: 'me' });
   assert.equal(adopted, 1);
   assert.equal(threads.length, 1, 'no pending copy left beside the posted one');
-  assert.equal(threads[0].comments[0].author, AGENT_AUTHOR);
 });
 
 test("someone else's identical comment is never adopted as your draft (#3)", () => {
@@ -471,10 +468,9 @@ test('your local edit of an unsubmitted comment keeps both the edit and the flag
 });
 
 // The agent's comments are posted under your identity, so every fetch after a submit hands them back
-// authored by you. Keeping the agent's mark is what leaves them the agent's to revise, and what keeps the
-// agent badge and the author filter working on a review that has been submitted.
+// authored by you, and that is the author they keep. Only a comment that has not posted stays the agent's.
 
-test('the agent keeps authorship of a draft of its own that has posted', () => {
+test('an agent draft that has posted takes the author GitHub recorded', () => {
   const draft = thread({ id: 'draft', comments: [comment({ id: 'n1', body: 'agent note', author: AGENT_AUTHOR })] });
   // Posted under your identity, so it comes back as yours.
   const fresh = [
@@ -485,11 +481,18 @@ test('the agent keeps authorship of a draft of its own that has posted', () => {
   const { threads, adopted } = reconcile([draft], [], fresh, { viewer: 'me' });
   assert.equal(adopted, 1);
   assert.equal(threads[0].comments[0].remoteId, 'T9c'); // linked, so it is not re-sent
+  assert.equal(threads[0].comments[0].author, 'me');
+});
+
+test("an agent draft that has not posted stays the agent's", () => {
+  const draft = thread({ id: 'draft', comments: [comment({ id: 'n1', body: 'agent note', author: AGENT_AUTHOR })] });
+  const { threads, adopted } = reconcile([draft], [], [], { viewer: 'me' });
+  assert.equal(adopted, 0);
   assert.equal(threads[0].comments[0].author, AGENT_AUTHOR);
 });
 
-test("a later sync does not quietly hand the agent's posted comment back to you", () => {
-  // The regression: adoption above is undone by the next fetch if the rebuild takes upstream wholesale.
+test('a posted comment stored as the agent takes the fetched login on the next sync or poll', () => {
+  // A review saved while posted comments kept the agent's mark corrects itself on the next fetch.
   const local = [
     imported('T1', 'agent note', {
       comments: [
@@ -500,11 +503,11 @@ test("a later sync does not quietly hand the agent's posted comment back to you"
   const fresh = [imported('T1', 'agent note')]; // the helper authors as 'me', which is what GitHub reports
   for (const removeMissing of [true, false]) {
     const { threads } = reconcile(local, [], fresh, { viewer: 'me', removeMissing });
-    assert.equal(threads[0].comments[0].author, AGENT_AUTHOR, `removeMissing: ${removeMissing}`);
+    assert.equal(threads[0].comments[0].author, 'me', `removeMissing: ${removeMissing}`);
   }
 });
 
-test("an upstream edit of the agent's comment lands without taking its authorship", () => {
+test("an upstream edit of the agent's posted comment lands with the fetched author", () => {
   const local = [
     imported('T1', 'agent note', {
       comments: [
@@ -515,10 +518,10 @@ test("an upstream edit of the agent's comment lands without taking its authorshi
   const fresh = [imported('T1', 'reworded on github')];
   const { threads } = reconcile(local, [], fresh, { viewer: 'me' });
   assert.equal(threads[0].comments[0].body, 'reworded on github');
-  assert.equal(threads[0].comments[0].author, AGENT_AUTHOR);
+  assert.equal(threads[0].comments[0].author, 'me');
 });
 
-test("the agent's pending edit keeps its authorship alongside the edit", () => {
+test("a pending edit of the agent's posted comment survives with the fetched author", () => {
   const local = [
     imported('T1', 'agent note', {
       comments: [
@@ -529,10 +532,10 @@ test("the agent's pending edit keeps its authorship alongside the edit", () => {
   const fresh = [imported('T1', 'agent note')];
   const { threads } = reconcile(local, [], fresh, { viewer: 'me' });
   assert.equal(threads[0].comments[0].body, 'agent rewrite'); // still pending, still submittable
-  assert.equal(threads[0].comments[0].author, AGENT_AUTHOR);
+  assert.equal(threads[0].comments[0].author, 'me');
 });
 
-test('the agent keeps authorship of a reply of its own that has posted', () => {
+test('an agent reply that has posted takes the author GitHub recorded', () => {
   const local = [imported('T1', 'root')];
   local[0].comments.push(comment({ id: 'r1', body: 'agent reply', author: AGENT_AUTHOR }));
   const fresh = [
@@ -550,7 +553,7 @@ test('the agent keeps authorship of a reply of its own that has posted', () => {
     ['root', 'agent reply'], // exactly one copy of the reply, and it is the posted one
   );
   assert.equal(threads[0].comments[1].remoteId, 'T1r');
-  assert.equal(threads[0].comments[1].author, AGENT_AUTHOR);
+  assert.equal(threads[0].comments[1].author, 'me');
 });
 
 test('your own comment takes the fetched login, which is what edit permission measures against', () => {

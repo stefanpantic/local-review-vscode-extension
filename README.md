@@ -91,7 +91,7 @@ For **GitHub Enterprise**, set `agenticReview.github.enterpriseUri` to your serv
 
 ## Agent integration (MCP)
 
-ReviewMate runs a standard, local MCP server (bound to `127.0.0.1`, token-guarded, off by default) that any MCP client can use. You comment and the agent acts on it. The agent can also post its own comments, replies, and suggestions. They show up in the panel attributed to "AI Agent", anchored like yours, and on a pull request they post to GitHub with the rest of your review, under your account. They keep the "AI Agent" label in your review afterwards, so you can still tell which comments it wrote.
+ReviewMate runs a standard, local MCP server (bound to `127.0.0.1`, token-guarded, off by default) that any MCP client can use. You comment and the agent acts on it. The agent can also post its own comments, replies, and suggestions. They show up in the panel attributed to "AI Agent", anchored like yours, and on a pull request they post to GitHub with the rest of your review, under your account. Once submitted, they show under your login, matching what GitHub records.
 
 1. Run **ReviewMate: Set up MCP**. Pick a port and whether to start it on launch.
 2. It generates an mcp.json (URL, token, and ready-to-run connect commands: Claude Code, plus a generic `mcpServers` config for other clients) and opens it. Reopen it anytime with **Open MCP Config**. It lives in the extension's per-workspace storage, not in your repo.

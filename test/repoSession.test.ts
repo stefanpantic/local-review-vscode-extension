@@ -141,19 +141,21 @@ async function stageMixedReview(session: RepoSession): Promise<void> {
   });
 }
 
+// Every comment posted under the human's login, so that is who each one is attributed to once read back,
+// the agent's included.
 const expectedAuthors = {
-  'agent on 2': { author: AGENT_AUTHOR, posted: true },
+  'agent on 2': { author: 'me', posted: true },
   'human on 2': { author: 'me', posted: true },
-  'agent on the file': { author: AGENT_AUTHOR, posted: true },
+  'agent on the file': { author: 'me', posted: true },
   'human on 3-4': { author: 'me', posted: true },
-  'agent on 6': { author: AGENT_AUTHOR, posted: true },
+  'agent on 6': { author: 'me', posted: true },
   'human reply on 6': { author: 'me', posted: true },
-  'agent suggests': { author: AGENT_AUTHOR, posted: true },
+  'agent suggests': { author: 'me', posted: true },
 };
 
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 20));
 
-test('every comment keeps its author through a Submit, a Sync, and a second Submit', async () => {
+test("every comment takes the human's login through a Submit, a Sync, and a second Submit", async () => {
   using s = await setup();
   await stageMixedReview(s.session);
 
