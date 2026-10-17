@@ -98,9 +98,10 @@ Author and provenance are now two fields:
 - **Origin.** `post_comment` and `reply` set `origin: 'agent'` on what they create. Nothing changes it
   afterwards. Reconcile copies it from the local copy onto the fetched copy at adoption and at every later
   sync and poll, because GitHub has no record of it. MCP output marks these comments `via MCP`, so an agent
-  can find its own comments to revise them for a second Submit. The panel shows a purple `via MCP` badge on
-  them before and after Submit. The `author:@agent` filter and the "AI Agent" preset match on origin, and
-  `author:@me` leaves the agent's comments out, so the two never overlap. Grouping by author puts a thread
+  can find its own comments to revise them for a second Submit. The panel shows a purple `via MCP` badge
+  right after the author of each of them, before and after Submit. Discarding pending changes keeps the
+  origin of every posted comment, because the origin is not pending work. The `author:@agent` filter and the
+  "AI Agent" preset match on origin, and `author:@me` leaves the agent's comments out, so the two never overlap. Grouping by author puts a thread
   the agent opened under "AI Agent". The JSON export carries `origin`.
 
 The permission rule does not change. It checks edits against the human's identity, so the agent can still

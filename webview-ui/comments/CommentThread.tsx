@@ -263,17 +263,17 @@ export function CommentThreadView({
                 {c.author && (
                   <div className="lr-comment-author">
                     {c.author}
+                    {isAgentComment(c) && (
+                      <span className="lr-badge lr-badge-agent" title={`Written by the ${AGENT_NAME} through MCP`}>
+                        via MCP
+                      </span>
+                    )}
                     {c.conflict && (
                       <span
                         className="lr-badge lr-badge-conflict"
                         title="This comment also changed on GitHub after you edited it. Submitting replaces their version with yours. Edit it to merge the two, or discard your edit to take theirs."
                       >
                         edited on both sides
-                      </span>
-                    )}
-                    {isAgentComment(c) && (
-                      <span className="lr-badge lr-badge-agent" title={`Written by the ${AGENT_NAME} through MCP`}>
-                        via MCP
                       </span>
                     )}
                   </div>

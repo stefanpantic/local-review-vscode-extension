@@ -42,7 +42,7 @@ import {
   type SubmitEvent,
   type SubmitProgress,
 } from './review/submit';
-import { reconcile, type OrphanReport } from './review/reconcile';
+import { keepOrigins, reconcile, type OrphanReport } from './review/reconcile';
 import { PrLock } from './review/prLock';
 import type { McpReviewApi } from './mcp/tools';
 import type { Events, EventType, PrDisplay, ReviewStatePayload, SyncState } from './protocol/messages';
@@ -968,8 +968,8 @@ export class RepoSession implements vscode.Disposable {
     await this.reviewStore.mutate(repoRoot, reviewId, (review) => {
       if (review.kind !== 'remote') return false;
       if (opts?.discardPending) {
-        // Throw local work away wholesale and take upstream as it stands.
-        review.threads = imported.map(durableThread);
+        // Throw local work away wholesale and take upstream as it stands, keeping which comments the agent wrote.
+        review.threads = keepOrigins(review.threads, imported).map(durableThread);
         review.pendingDeletes = [];
         return;
       }
