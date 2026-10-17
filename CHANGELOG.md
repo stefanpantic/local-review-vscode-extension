@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.12.3](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.12.2...agentic-review-v0.12.3) (2026-10-17)
+
+
+### Bug Fixes
+
+* author agent comments as the human and mark them by origin ([#129](https://github.com/stefanpantic/local-review-vscode-extension/issues/129)) ([d13db3e](https://github.com/stefanpantic/local-review-vscode-extension/commit/d13db3ead2731e369b413c4b8b1ffb727df052dd))
+* post file-level comments through a pending review ([#131](https://github.com/stefanpantic/local-review-vscode-extension/issues/131)) ([8fec2a1](https://github.com/stefanpantic/local-review-vscode-extension/commit/8fec2a176cdbefaa319b31eb48cf1770bda99b82))
+* show a submitted AI Agent comment under the GitHub login that posted it ([#127](https://github.com/stefanpantic/local-review-vscode-extension/issues/127)) ([3a5e555](https://github.com/stefanpantic/local-review-vscode-extension/commit/3a5e5558ec1c95d7f521fa5b752e1da7f1e24f70))
+* show the via MCP badge after the author, and keep origins on discard ([#130](https://github.com/stefanpantic/local-review-vscode-extension/issues/130)) ([8438660](https://github.com/stefanpantic/local-review-vscode-extension/commit/84386604011eb4aec768becdbd43e57a1aa1f30e))
+
 ## [0.12.2](https://github.com/stefanpantic/local-review-vscode-extension/compare/agentic-review-v0.12.1...agentic-review-v0.12.2) (2026-10-09)
 
 
