@@ -44,19 +44,6 @@ function toLocalOnly(c: Comment): Comment {
   return out;
 }
 
-/**
- * Keep the agent's authorship on a comment it wrote. Submitting posts the agent's comments under your
- * identity, so the fetched copy comes back authored by you: upstream is right about who posted it, and
- * locally the agent still wrote it, which is what keeps it the agent's to revise and what the agent filter
- * and the agent badge read. Only that mark is carried over. Your own comments take the fetched author,
- * because that login is what edit permission measures against and it need not equal the git user.name they
- * were written under.
- */
-function keepAgentAuthor(fetched: Comment, local: Comment | undefined): Comment {
-  if (local?.author !== AGENT_AUTHOR || fetched.author === AGENT_AUTHOR) return fetched;
-  return { ...fetched, author: AGENT_AUTHOR };
-}
-
 function mergeReactions(local: Comment, fetched: Comment): Partial<Pick<Comment, 'reactions' | 'remoteReactions'>> {
   if (!hasReactionDiff(local)) return {};
   return {
@@ -135,10 +122,9 @@ function adoptPostedDrafts(
     const root = t.comments[0];
     return !t.remoteThreadId && root && !root.remoteId && isMine(root.author);
   });
-  // Every posted copy comes back under your login, so the agent's comments and yours are told apart only by
-  // which draft claims which copy. Pair on the exact position first: two comments with the same text on
-  // different lines must each claim their own copy, or the agent's authorship lands on yours. Only a draft
-  // left without a positional match (GitHub moved the line) falls back to the same text anywhere in the file.
+  // Pair on the exact position first: two comments with the same text on different lines must each claim
+  // their own copy. Only a draft left without a positional match (GitHub moved the line) falls back to the
+  // same text anywhere in the file.
   for (const key of [positionKey, contentKey]) {
     for (const t of drafts) {
       if (matches.has(t)) continue;
@@ -157,9 +143,9 @@ function adoptPostedDrafts(
     const match = matches.get(t);
     if (!match) return t;
     adopted++;
-    // Take the posted root (it carries the remote ids and the imported baselines), keeping the agent's
-    // authorship that the post itself could not carry, and keep the local follow-ups after it, where the
-    // normal rebuild picks them up as pending replies. A reaction staged on the draft is kept over the
+    // Take the posted root (it carries the remote ids, the imported baselines, and the author GitHub
+    // recorded), and keep the local follow-ups after it, where the normal rebuild picks them up as pending
+    // replies. A reaction staged on the draft is kept over the
     // fetched copy too: if it posted with the comment the two agree and nothing stays staged, and if it did
     // not it is still pending, so the next Submit finishes it instead of dropping it.
     return {
@@ -168,10 +154,7 @@ function adoptPostedDrafts(
       remoteRootId: match.remoteRootId,
       remoteResolved: match.resolved,
       resolved: match.resolved,
-      comments: [
-        { ...keepAgentAuthor(match.comments[0], root), ...mergeReactions(root, match.comments[0]) },
-        ...t.comments.slice(1),
-      ],
+      comments: [{ ...match.comments[0], ...mergeReactions(root, match.comments[0]) }, ...t.comments.slice(1)],
     };
   });
   return { threads, adopted };
@@ -188,8 +171,8 @@ function adoptPostedDrafts(
  *   keeps your text until you resolve it either way;
  * - local-draft threads are kept, except one that turns out to be posted already, which is linked to its
  *   remote thread rather than re-sent;
- * - a comment the agent wrote keeps its authorship when its posted copy comes back under your identity, so
- *   submitting it does not quietly turn it into one of yours;
+ * - a posted comment takes the author GitHub recorded, so a comment the agent wrote is yours once
+ *   submitted, because your identity posted it;
  * - a comment of yours that is gone upstream is NOT removed: it is kept as **local-only** (its remote link
  *   dropped so it reposts, flagged so you can repost on Submit or delete to discard). Someone else's
  *   vanished comment is removed. Both only when `removeMissing` is set, so a poll never removes anything;
@@ -258,8 +241,8 @@ export function reconcile(
     }
     const comments: Comment[] = [];
     // Fetched comments we have never seen locally, each with where it sits in `comments`. Either genuinely
-    // new upstream activity, or a reply of yours that posted before a submit failed — the loop below tells
-    // the two apart, and needs the position to put an adopted reply's authorship back on the fetched copy.
+    // new upstream activity, or a reply of yours that posted before a submit failed. The loop below tells
+    // the two apart, and needs the position to put an adopted reply's staged reaction on the fetched copy.
     const unseen: { comment: Comment; at: number }[] = [];
     for (const fc of ft.comments) {
       if (fc.remoteId && staged.has(fc.remoteId)) continue; // staged for deletion: hidden until Submit posts it
@@ -275,17 +258,17 @@ export function reconcile(
       const edited = lc.remoteBody !== undefined && lc.body !== lc.remoteBody;
       const rxMerge = mergeReactions(lc, fc);
       if (!edited && !rxMerge.reactions) {
-        comments.push(keepAgentAuthor(fc, lc));
+        comments.push(fc);
         continue;
       }
       if (!edited) {
-        comments.push({ ...keepAgentAuthor(fc, lc), ...rxMerge });
+        comments.push({ ...fc, ...rxMerge });
         continue;
       }
       // Your edit wins locally. If upstream moved off the same baseline too, this is a genuine collision.
       const upstreamChanged = lc.remoteBody !== undefined && fc.body !== lc.remoteBody;
       const conflict = lc.conflict === true || upstreamChanged;
-      comments.push({ ...keepAgentAuthor(fc, lc), body: lc.body, ...(conflict ? { conflict: true } : {}), ...rxMerge });
+      comments.push({ ...fc, body: lc.body, ...(conflict ? { conflict: true } : {}), ...rxMerge });
     }
     // Pending replies, minus any that turn out to have posted already (a submit that failed after sending
     // them). Same adoption rule as a draft root: match your own content, and consume each fetched comment
@@ -294,9 +277,9 @@ export function reconcile(
       const i = unseen.findIndex((u) => mine(u.comment.author) && sameContent(u.comment, r));
       if (i >= 0) {
         // Already on the remote: the fetched copy stands and the pending one is retired, so the fetched copy
-        // is where the agent's authorship and any reaction staged on the pending copy have to land.
+        // is where any reaction staged on the pending copy has to land.
         const [u] = unseen.splice(i, 1);
-        comments[u.at] = { ...keepAgentAuthor(comments[u.at], r), ...mergeReactions(r, u.comment) };
+        comments[u.at] = { ...comments[u.at], ...mergeReactions(r, u.comment) };
         adopted++;
         continue;
       }

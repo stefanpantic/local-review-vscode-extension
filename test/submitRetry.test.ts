@@ -534,10 +534,10 @@ const postedCopy = (login: string): CommentThread[] => [
   },
 ];
 
-test("an agent draft keeps its author once linked under the human's GitHub login", () => {
+test("an agent draft takes the human's GitHub login once linked to its posted copy", () => {
   const rec = reconcile([draftWithReply(AGENT_AUTHOR)], [], postedCopy('octocat'), { viewer: 'octocat' });
   assert.equal(rec.adopted, 1);
-  assert.equal(rec.threads[0].comments[0].author, AGENT_AUTHOR);
+  assert.equal(rec.threads[0].comments[0].author, 'octocat');
   assert.equal(rec.threads[0].comments[0].remoteId, '500');
 });
 
@@ -575,8 +575,8 @@ test('a posted draft is linked by its id even when GitHub hands its text back ch
   assert.deepEqual(
     rec.threads[0].comments.map((c) => [c.remoteId, c.author]),
     [
-      ['500', AGENT_AUTHOR],
-      ['501', AGENT_AUTHOR],
+      ['500', 'me'],
+      ['501', 'me'],
     ],
   );
   await store.updateThreads('/r', id, rec.threads);
