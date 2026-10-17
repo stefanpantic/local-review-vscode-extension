@@ -4,6 +4,7 @@
 import { postedComment } from '../../src/github/client';
 import type {
   GhNewComment,
+  GhReviewEvent,
   GhPostedComment,
   GhRestReviewComment,
   GhReview,
@@ -12,7 +13,7 @@ import type {
 } from '../../src/github/client';
 import type { GhReviewThread } from '../../src/github/types';
 import type { PullRequestDetail, PullRequestSummary } from '../../src/review/provider';
-import { restReply, restRoot } from '../fixtures/githubRest';
+import { REVIEW_STATES, restReply, restRoot } from '../fixtures/githubRest';
 
 type Method = 'createReview' | 'getReviewThreads' | 'getPullRequest' | 'reply';
 
@@ -130,19 +131,53 @@ export class FakeGithub implements GithubWriteClient {
     _number: number,
     input: {
       commitId: string;
-      event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
+      event?: GhReviewEvent;
       body: string;
       comments: GhNewComment[];
     },
-  ): Promise<{ id: number }> {
+  ): Promise<{ id: number; nodeId: string }> {
     this.calls.push('createReview');
     await this.gate('createReview');
+    // GitHub's create call refuses a file-level comment.
+    if (input.comments.some((c) => 'subject_type' in c || c.line == null)) {
+      throw Object.assign(new Error('Unprocessable Entity'), { status: 422 });
+    }
     const id = 9000 + this.reviews.length;
-    const state = { COMMENT: 'COMMENTED', APPROVE: 'APPROVED', REQUEST_CHANGES: 'CHANGES_REQUESTED' }[input.event];
-    this.reviews.push({ id, author: this.login, commitId: input.commitId, state, body: input.body });
+    const state = input.event ? REVIEW_STATES[input.event] : 'PENDING';
+    this.reviews.push({
+      id,
+      nodeId: `review-${id}`,
+      author: this.login,
+      commitId: input.commitId,
+      state,
+      body: input.body,
+    });
     for (const c of input.comments) this.rest.push(restRoot(this.nextId++, id, c));
     if (this.createdThenFails) throw this.createdThenFails;
-    return { id };
+    return { id, nodeId: `review-${id}` };
+  }
+
+  async addFileThread(reviewNodeId: string, input: { path: string; body: string }): Promise<void> {
+    this.calls.push('addFileThread');
+    const id = Number(reviewNodeId.replace('review-', ''));
+    this.rest.push(restRoot(this.nextId++, id, { ...input, subject_type: 'file' }));
+  }
+
+  async submitPendingReview(
+    _repo: unknown,
+    _number: number,
+    reviewId: number,
+    input: { event: GhReviewEvent; body: string },
+  ): Promise<void> {
+    this.calls.push('submitPendingReview');
+    const review = this.reviews.find((r) => r.id === reviewId);
+    if (review) Object.assign(review, { state: REVIEW_STATES[input.event], body: input.body });
+  }
+
+  async deletePendingReview(_repo: unknown, _number: number, reviewId: number): Promise<void> {
+    this.calls.push('deletePendingReview');
+    this.reviews = this.reviews.filter((r) => r.id !== reviewId);
+    this.rest = this.rest.filter((c) => c.pull_request_review_id !== reviewId);
   }
 
   async listReviews(): Promise<GhReview[]> {

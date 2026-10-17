@@ -321,7 +321,10 @@ export function postsReview(input: SubmitReviewInput): boolean {
 /**
  * The provider's batches for a submit input, in the order it sends them, with empty ones left out. Counts
  * are requests: a reply staged with a reaction is two, and a review with new comments is two, the post and
- * one read of the comments it created.
+ * one read of the comments it created. The post cannot include file-level comments, so for a review with
+ * file-level comments the provider first checks that you have no pending review (two requests), creates the review
+ * pending, adds each file-level comment in its own request, and then submits the review. That adds one request
+ * per file-level comment, plus three for the check and the submit.
  */
 export function submitBatches(input: SubmitReviewInput): SubmitBatch[] {
   const reactionsOn = (r: { reactions?: string[] }): number => r.reactions?.length ?? 0;
@@ -338,10 +341,17 @@ export function submitBatches(input: SubmitReviewInput): SubmitBatch[] {
     ),
     batch('resolves', input.resolves.length),
     batch('reactions', input.reactions.length),
-    batch('review', postsReview(input) ? 1 + (input.newThreads.length > 0 ? 1 : 0) : 0),
+    batch('review', postsReview(input) ? reviewRequests(input) : 0),
     batch('follow-ups', followUps),
   ];
   return all.filter((b) => b.total > 0);
+}
+
+/** Count the requests for posting a review: the post, the pending flow's extra requests, and the read back. */
+function reviewRequests(input: SubmitReviewInput): number {
+  const fileRoots = input.newThreads.filter((t) => t.root.subject_type === 'file').length;
+  const read = input.newThreads.length > 0 ? 1 : 0;
+  return 1 + (fileRoots > 0 ? fileRoots + 3 : 0) + read;
 }
 
 /** Every batch of a Submit, the two syncs included. */

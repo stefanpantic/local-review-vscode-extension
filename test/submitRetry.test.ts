@@ -14,13 +14,14 @@ import type { CommentThread, RemoteRef, RemoteReview } from '../src/model/Commen
 import { postedComment } from '../src/github/client';
 import type {
   GhNewComment,
+  GhReviewEvent,
   GhPostedComment,
   GhRestReviewComment,
   GhReview,
   GhViewerTeam,
   GithubWriteClient,
 } from '../src/github/client';
-import { restReply, restRoot } from './fixtures/githubRest';
+import { REVIEW_STATES, restReply, restRoot } from './fixtures/githubRest';
 import type { PullRequestDetail, PullRequestSummary } from '../src/review/provider';
 import type { GhReviewThread } from '../src/github/types';
 
@@ -37,7 +38,7 @@ class FakeStore implements KeyValueStore {
 
 /** A client that records every write and can be told to throw on one of them, mid-batch. */
 class FlakyClient implements GithubWriteClient {
-  reviews: { event: string; commitId: string; body: string; comments: GhNewComment[] }[] = [];
+  reviews: { event?: string; commitId: string; body: string; comments: GhNewComment[] }[] = [];
   rest: GhRestReviewComment[] = []; // every review comment on the pull request, as GitHub lists them
   replies: { inReplyTo: number; body: string }[] = [];
   edits: { commentId: number; body: string }[] = [];
@@ -60,20 +61,30 @@ class FlakyClient implements GithubWriteClient {
     _number: number,
     input: {
       commitId: string;
-      event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
+      event?: GhReviewEvent;
       body: string;
       comments: GhNewComment[];
     },
-  ): Promise<{ id: number }> {
+  ): Promise<{ id: number; nodeId: string }> {
     if (this.failOn === 'createReview') throw new Error('network died');
     this.reviews.push(input);
     const reviewId = this.reviews.length;
     for (const c of input.comments) this.rest.push(restRoot(this.nextId++, reviewId, c));
-    const state = { COMMENT: 'COMMENTED', APPROVE: 'APPROVED', REQUEST_CHANGES: 'CHANGES_REQUESTED' }[input.event];
-    this.created.push({ id: reviewId, author: 'me', commitId: input.commitId, state, body: input.body });
+    const state = input.event ? REVIEW_STATES[input.event] : 'PENDING';
+    this.created.push({
+      id: reviewId,
+      nodeId: `review-${reviewId}`,
+      author: 'me',
+      commitId: input.commitId,
+      state,
+      body: input.body,
+    });
     if (this.createdThenFails) throw this.createdThenFails;
-    return { id: reviewId };
+    return { id: reviewId, nodeId: `review-${reviewId}` };
   }
+  async addFileThread(): Promise<void> {}
+  async submitPendingReview(): Promise<void> {}
+  async deletePendingReview(): Promise<void> {}
   async listReviews(): Promise<GhReview[]> {
     this.listReviewsCalls++;
     return this.created;
@@ -85,7 +96,8 @@ class FlakyClient implements GithubWriteClient {
     if (this.failOn === 'reply') throw new Error('network died');
     this.replies.push(input);
     const root =
-      this.rest.find((c) => c.id === input.inReplyTo) ?? restRoot(input.inReplyTo, 0, { path: 'a.ts', body: '' });
+      this.rest.find((c) => c.id === input.inReplyTo) ??
+      restRoot(input.inReplyTo, 0, { path: 'a.ts', body: '', line: 1, side: 'RIGHT' });
     const reply = restReply(this.nextId++, this.reviews.length + 1000, root, input.body);
     this.rest.push(reply);
     return postedComment(reply);
@@ -471,7 +483,7 @@ test('an older review with the same summary is not taken for the one that failed
   const { store, id } = await seed([draftWithReply('me')]);
   const client = new FlakyClient();
   client.failOn = 'createReview';
-  client.created.push({ id: 1, author: 'me', commitId: 'head', state: 'COMMENTED', body: '' });
+  client.created.push({ id: 1, nodeId: 'review-1', author: 'me', commitId: 'head', state: 'COMMENTED', body: '' });
   const provider = new GithubReviewProvider('github', async () => client, instant);
   const { input } = buildSubmitPlan(current(store, id), 'comment');
 
