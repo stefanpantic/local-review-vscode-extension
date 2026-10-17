@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { reconcile } from '../src/review/reconcile';
+import { keepOrigins, reconcile } from '../src/review/reconcile';
 import type { Comment, CommentThread } from '../src/model/Comment';
 
 function comment(over: Partial<Comment> = {}): Comment {
@@ -667,4 +667,19 @@ test("a pending reply's reaction is kept when the reply turns out to have posted
   const { threads } = reconcile(local, [], fresh, { viewer: 'me' });
   assert.equal(threads[0].comments[1].remoteId, 'T1r');
   assert.deepEqual(threads[0].comments[1].reactions, { '🎉': ['me'] });
+});
+
+test('discarding local work keeps the origin of posted comments and drops everything pending', () => {
+  const local = [
+    imported('T1', 'agent note', {
+      comments: [agentComment({ id: 'T1c', remoteId: 'T1c', body: 'agent rewrite', remoteBody: 'agent note' })],
+    }),
+    thread({ id: 'draft', comments: [agentComment({ id: 'n1', body: 'never posted' })] }),
+  ];
+  const fresh = [imported('T1', 'agent note'), imported('T2', 'someone else')];
+  const threads = keepOrigins(local, fresh);
+  assert.equal(threads.length, 2, 'the unposted draft is gone');
+  assert.equal(threads[0].comments[0].body, 'agent note', 'the pending edit is gone');
+  assert.equal(threads[0].comments[0].origin, 'agent');
+  assert.equal(threads[1].comments[0].origin, undefined);
 });

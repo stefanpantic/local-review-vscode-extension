@@ -54,6 +54,24 @@ function withOrigin(fetched: Comment, local: Comment): Comment {
   return local.origin ? { ...fetched, origin: local.origin } : fetched;
 }
 
+/**
+ * The fetched threads, with the origin of every posted comment carried over from its local copy. Used when
+ * local work is thrown away and upstream is taken as it stands: the origin is not pending work, and GitHub
+ * has no record of it, so dropping it would lose which comments the agent wrote.
+ */
+export function keepOrigins(local: CommentThread[], fresh: CommentThread[]): CommentThread[] {
+  const byId = new Map<string, Comment>();
+  for (const t of local) for (const c of t.comments) if (c.remoteId && c.origin) byId.set(c.remoteId, c);
+  if (byId.size === 0) return fresh;
+  return fresh.map((t) => ({
+    ...t,
+    comments: t.comments.map((c) => {
+      const lc = c.remoteId ? byId.get(c.remoteId) : undefined;
+      return lc ? withOrigin(c, lc) : c;
+    }),
+  }));
+}
+
 function mergeReactions(local: Comment, fetched: Comment): Partial<Pick<Comment, 'reactions' | 'remoteReactions'>> {
   if (!hasReactionDiff(local)) return {};
   return {
