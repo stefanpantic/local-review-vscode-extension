@@ -1,11 +1,11 @@
 // Filtering for the review's comment list. A small token grammar over the threads the view already holds,
 // so narrowing is a local predicate and never a refetch or a re-anchor. Pure: no vscode, no network.
-import type { AnchorStatus, CommentThread } from '../model/Comment';
-import { AGENT_AUTHOR } from '../model/Comment';
+import type { AnchorStatus, Comment, CommentThread } from '../model/Comment';
+import { AGENT_NAME, isAgentComment } from '../model/Comment';
 
 /** Stands in for the current user in `author:`. */
 export const ME = '@me';
-/** Stands in for the coding agent in `author:`, so its comments are reachable without typing the label. */
+/** Stands in for the coding agent in `author:`. Matches the comments it wrote, by their origin. */
 export const AGENT = '@agent';
 
 const STATUSES: AnchorStatus[] = ['anchored', 'moved', 'outdated'];
@@ -71,7 +71,7 @@ export function describeCommentFilter(filter: CommentFilter): string {
   const set = [filter.author, filter.resolved, filter.status, filter.unknown].filter((v) => v !== undefined);
   if (set.length === 1) {
     if (filter.author === ME) return 'By me';
-    if (filter.author === AGENT) return `By ${AGENT_AUTHOR}`;
+    if (filter.author === AGENT) return `By ${AGENT_NAME}`;
     if (filter.author) return `By ${filter.author}`;
     if (filter.resolved === true) return 'Resolved';
     if (filter.resolved === false) return 'Unresolved';
@@ -83,11 +83,15 @@ export function describeCommentFilter(filter: CommentFilter): string {
 const eqName = (a: string | undefined, b: string | undefined): boolean =>
   a !== undefined && b !== undefined && a.toLowerCase() === b.toLowerCase();
 
-/** Resolve the placeholders against the current identity; a plain name passes through. */
-function who(value: string, viewer?: string): string | undefined {
-  if (value === ME) return viewer;
-  if (value === AGENT) return AGENT_AUTHOR;
-  return value;
+/**
+ * Whether a comment is by the `author:` value. `@agent` is every comment the agent wrote, and `@me` is every
+ * comment authored as you that the agent did not write, so the two never overlap even though the agent's
+ * comments are authored as you. A plain name compares against the author.
+ */
+function byAuthor(c: Comment, value: string, viewer?: string): boolean {
+  if (value === AGENT) return isAgentComment(c);
+  if (value === ME) return !isAgentComment(c) && eqName(c.author, viewer);
+  return eqName(c.author, value);
 }
 
 /**
@@ -95,8 +99,8 @@ function who(value: string, viewer?: string): string | undefined {
  * someone replied to is the point of filtering by them. (Grouping is by the root author instead, so a thread
  * still lands in exactly one group.)
  */
-const hasAuthor = (thread: CommentThread, name: string | undefined): boolean =>
-  thread.comments.some((c) => eqName(c.author, name));
+const hasAuthor = (thread: CommentThread, value: string, viewer?: string): boolean =>
+  thread.comments.some((c) => byAuthor(c, value, viewer));
 
 /**
  * Apply a filter to the review's threads. `viewer` is what `@me` resolves to: whatever your own comments are
@@ -110,7 +114,7 @@ export function applyCommentFilter(threads: CommentThread[], filter: CommentFilt
   if (isCommentFilterEmpty(filter)) return threads;
   if (filter.unknown?.length) return [];
   return threads.filter((t) => {
-    if (filter.author && !hasAuthor(t, who(filter.author, viewer))) return false;
+    if (filter.author && !hasAuthor(t, filter.author, viewer)) return false;
     if (filter.resolved !== undefined && t.resolved !== filter.resolved) return false;
     if (filter.status && (t.status ?? 'anchored') !== filter.status) return false;
     return true;

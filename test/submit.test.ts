@@ -10,7 +10,6 @@ import {
   type SubmitProgress,
   type SubmitReviewInput,
 } from '../src/review/submit';
-import { AGENT_AUTHOR } from '../src/model/Comment';
 import type { CommentThread, Comment, LocalReview, RemoteReview } from '../src/model/Comment';
 
 function comment(over: Partial<Comment> = {}): Comment {
@@ -179,7 +178,7 @@ test('a suggestion is re-attached as a fenced suggestion block', () => {
 });
 
 test('agent comments are included in the batch and counted', () => {
-  const draft = thread({ comments: [comment({ id: 'a1', author: AGENT_AUTHOR, body: 'nit' })] });
+  const draft = thread({ comments: [comment({ id: 'a1', origin: 'agent', body: 'nit' })] });
   const { input, counts } = buildSubmitPlan(remoteReview([draft]), 'comment');
   assert.equal(counts.newComments, 1);
   assert.equal(counts.agentComments, 1);
@@ -208,7 +207,7 @@ test('an unsubmitted review of yours on the remote is detected, whoever of you a
   const agents = remoteReview([
     thread({
       remoteThreadId: 'T1',
-      comments: [comment({ remoteId: '1', author: AGENT_AUTHOR, remotePending: true })],
+      comments: [comment({ remoteId: '1', author: 'Stefan Pantic', origin: 'agent', remotePending: true })],
     }),
   ]);
   assert.equal(unsubmittedRemoteReview(mine, 'me'), true);
@@ -293,7 +292,7 @@ test('a reaction on an unsent reply to an imported thread travels with that repl
 
 test('every staged emoji on a draft is sent once, however many identities carry it locally', () => {
   const draft = thread({
-    comments: [comment({ id: 'root', reactions: { '👍': ['me', AGENT_AUTHOR], '👀': [] } })],
+    comments: [comment({ id: 'root', reactions: { '👍': ['me', 'Stefan Pantic'], '👀': [] } })],
   });
   const { input } = buildSubmitPlan(remoteReview([draft]), 'comment');
   // One op per emoji: they all post under your identity, and an emoji nobody carries is not sent at all.

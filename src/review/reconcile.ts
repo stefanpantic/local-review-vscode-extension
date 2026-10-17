@@ -3,7 +3,7 @@
 // Pure and synchronous, so it is unit-tested. Used by a re-open, the background poll, and the pre-submit
 // re-fetch — every path that pulls fresh remote threads while local work exists.
 import type { Comment, CommentThread } from '../model/Comment';
-import { AGENT_AUTHOR, hasReactionDiff } from '../model/Comment';
+import { hasReactionDiff, isAgentComment } from '../model/Comment';
 
 /** Staged/posted work whose upstream target vanished; reported so the caller can tell the user what moved. */
 export interface OrphanReport {
@@ -20,7 +20,7 @@ export interface Reconciled {
 }
 
 export interface ReconcileOptions {
-  /** The current identity; a comment is "yours" if you or the AI agent authored it. */
+  /** The current identity. A comment is "yours" if it is authored as you or the agent wrote it. */
   viewer?: string;
   /**
    * Whether content absent from `fresh` counts as deleted upstream. A background poll passes `false`, so it
@@ -40,8 +40,18 @@ function toLocalOnly(c: Comment): Comment {
     author: c.author,
     localOnly: true,
   };
+  if (c.origin) out.origin = c.origin;
   if (c.suggestion) out.suggestion = c.suggestion;
   return out;
+}
+
+/**
+ * The fetched copy of a comment, with the local copy's origin carried over. GitHub has no record that the
+ * agent wrote a comment, because Submit posts it under your identity, so the origin exists only locally and
+ * every fetch that replaces the local copy has to keep it.
+ */
+function withOrigin(fetched: Comment, local: Comment): Comment {
+  return local.origin ? { ...fetched, origin: local.origin } : fetched;
 }
 
 function mergeReactions(local: Comment, fetched: Comment): Partial<Pick<Comment, 'reactions' | 'remoteReactions'>> {
@@ -96,7 +106,7 @@ function positionKey(t: CommentThread): string {
 function adoptPostedDrafts(
   local: CommentThread[],
   fresh: CommentThread[],
-  isMine: (author: string) => boolean,
+  isMine: (c: Comment) => boolean,
 ): { threads: CommentThread[]; adopted: number } {
   const claimed = new Set<string>();
   for (const t of local) if (t.remoteThreadId) claimed.add(t.remoteThreadId);
@@ -117,14 +127,15 @@ function adoptPostedDrafts(
     taken.add(match);
   }
 
-  const candidates = unclaimed.filter((ft) => !taken.has(ft) && isMine(ft.comments[0].author));
+  const candidates = unclaimed.filter((ft) => !taken.has(ft) && isMine(ft.comments[0]));
   const drafts = local.filter((t) => {
     const root = t.comments[0];
-    return !t.remoteThreadId && root && !root.remoteId && isMine(root.author);
+    return !t.remoteThreadId && root && !root.remoteId && isMine(root);
   });
-  // Pair on the exact position first: two comments with the same text on different lines must each claim
-  // their own copy. Only a draft left without a positional match (GitHub moved the line) falls back to the
-  // same text anywhere in the file.
+  // Pair on the exact position first, so two comments with the same text on different lines each pair with
+  // their own posted copy. A swap would give each draft the other line's remote thread id, so its follow-up
+  // replies, staged reactions, later edits, and origin would go to the wrong GitHub thread. A draft left
+  // without a positional match (GitHub moved the line) falls back to the same text anywhere in the file.
   for (const key of [positionKey, contentKey]) {
     for (const t of drafts) {
       if (matches.has(t)) continue;
@@ -143,18 +154,21 @@ function adoptPostedDrafts(
     const match = matches.get(t);
     if (!match) return t;
     adopted++;
-    // Take the posted root (it carries the remote ids, the imported baselines, and the author GitHub
-    // recorded), and keep the local follow-ups after it, where the normal rebuild picks them up as pending
-    // replies. A reaction staged on the draft is kept over the
-    // fetched copy too: if it posted with the comment the two agree and nothing stays staged, and if it did
-    // not it is still pending, so the next Submit finishes it instead of dropping it.
+    // Take the posted root (the root holds the remote ids, the imported baselines, and the author GitHub
+    // recorded) with the draft's origin, and keep the local follow-ups after it, where the normal rebuild
+    // picks them up as pending replies. A reaction staged on the draft is kept over the fetched copy too. If
+    // Submit posted it with the comment, the two agree and nothing stays staged. If not, it is still pending,
+    // so the next Submit finishes it instead of dropping it.
     return {
       ...t,
       remoteThreadId: match.remoteThreadId,
       remoteRootId: match.remoteRootId,
       remoteResolved: match.resolved,
       resolved: match.resolved,
-      comments: [{ ...match.comments[0], ...mergeReactions(root, match.comments[0]) }, ...t.comments.slice(1)],
+      comments: [
+        { ...withOrigin(match.comments[0], root), ...mergeReactions(root, match.comments[0]) },
+        ...t.comments.slice(1),
+      ],
     };
   });
   return { threads, adopted };
@@ -171,8 +185,8 @@ function adoptPostedDrafts(
  *   keeps your text until you resolve it either way;
  * - local-draft threads are kept, except one that turns out to be posted already, which is linked to its
  *   remote thread rather than re-sent;
- * - a posted comment takes the author GitHub recorded, so a comment the agent wrote is yours once
- *   submitted, because your identity posted it;
+ * - a posted comment takes the author GitHub recorded and keeps the local copy's origin, so a comment the
+ *   agent wrote is still marked as the agent's after Submit posts it under your identity;
  * - a comment of yours that is gone upstream is NOT removed: it is kept as **local-only** (its remote link
  *   dropped so it reposts, flagged so you can repost on Submit or delete to discard). Someone else's
  *   vanished comment is removed. Both only when `removeMissing` is set, so a poll never removes anything;
@@ -188,7 +202,7 @@ export function reconcile(
   fresh: CommentThread[],
   opts: ReconcileOptions = {},
 ): Reconciled {
-  const mine = (author: string): boolean => author === opts.viewer || author === AGENT_AUTHOR;
+  const mine = (c: Comment): boolean => c.author === opts.viewer || isAgentComment(c);
   const removeMissing = opts.removeMissing ?? true;
   const staged = new Set(pendingDeletes);
 
@@ -241,8 +255,8 @@ export function reconcile(
     }
     const comments: Comment[] = [];
     // Fetched comments we have never seen locally, each with where it sits in `comments`. Either genuinely
-    // new upstream activity, or a reply of yours that posted before a submit failed. The loop below tells
-    // the two apart, and needs the position to put an adopted reply's staged reaction on the fetched copy.
+    // new upstream activity, or a reply of yours that Submit posted before it failed. The loop below separates
+    // the two, and uses the position to put an adopted reply's origin and staged reaction on the fetched copy.
     const unseen: { comment: Comment; at: number }[] = [];
     for (const fc of ft.comments) {
       if (fc.remoteId && staged.has(fc.remoteId)) continue; // staged for deletion: hidden until Submit posts it
@@ -250,7 +264,7 @@ export function reconcile(
       if (!lc) {
         if (fc.remoteId) {
           unseen.push({ comment: fc, at: comments.length });
-          if (!mine(fc.author)) incoming++; // the "new comments" signal is about other people's activity
+          if (!mine(fc)) incoming++; // the "new comments" signal is about other people's activity
         }
         comments.push(fc);
         continue;
@@ -258,28 +272,28 @@ export function reconcile(
       const edited = lc.remoteBody !== undefined && lc.body !== lc.remoteBody;
       const rxMerge = mergeReactions(lc, fc);
       if (!edited && !rxMerge.reactions) {
-        comments.push(fc);
+        comments.push(withOrigin(fc, lc));
         continue;
       }
       if (!edited) {
-        comments.push({ ...fc, ...rxMerge });
+        comments.push({ ...withOrigin(fc, lc), ...rxMerge });
         continue;
       }
       // Your edit wins locally. If upstream moved off the same baseline too, this is a genuine collision.
       const upstreamChanged = lc.remoteBody !== undefined && fc.body !== lc.remoteBody;
       const conflict = lc.conflict === true || upstreamChanged;
-      comments.push({ ...fc, body: lc.body, ...(conflict ? { conflict: true } : {}), ...rxMerge });
+      comments.push({ ...withOrigin(fc, lc), body: lc.body, ...(conflict ? { conflict: true } : {}), ...rxMerge });
     }
     // Pending replies, minus any that turn out to have posted already (a submit that failed after sending
     // them). Same adoption rule as a draft root: match your own content, and consume each fetched comment
     // once so two identical replies cannot both claim it.
     for (const r of repliesByThread.get(ft.remoteThreadId) ?? []) {
-      const i = unseen.findIndex((u) => mine(u.comment.author) && sameContent(u.comment, r));
+      const i = unseen.findIndex((u) => mine(u.comment) && sameContent(u.comment, r));
       if (i >= 0) {
         // Already on the remote: the fetched copy stands and the pending one is retired, so the fetched copy
-        // is where any reaction staged on the pending copy has to land.
+        // receives the pending copy's origin and any reaction staged on it.
         const [u] = unseen.splice(i, 1);
-        comments[u.at] = { ...comments[u.at], ...mergeReactions(r, u.comment) };
+        comments[u.at] = { ...withOrigin(comments[u.at], r), ...mergeReactions(r, u.comment) };
         adopted++;
         continue;
       }
@@ -293,7 +307,7 @@ export function reconcile(
         if (!c.remoteId || freshCommentIds.has(c.remoteId) || staged.has(c.remoteId)) continue;
         if (!removeMissing) {
           comments.push(c);
-        } else if (mine(c.author)) {
+        } else if (mine(c)) {
           comments.push(toLocalOnly(c));
           orphans.localOnly++;
         }
@@ -318,7 +332,7 @@ export function reconcile(
       if (c.remoteId && staged.has(c.remoteId)) continue;
       if (!c.remoteId)
         kept.push(c); // your pending reply -> reposts as a new comment
-      else if (mine(c.author)) {
+      else if (mine(c)) {
         kept.push(toLocalOnly(c));
         orphans.localOnly++;
       }

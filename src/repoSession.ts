@@ -20,7 +20,7 @@ import { orderByTree } from './fileTree';
 import type { DiffResult, DiffSource, FileDiff, PrRef, RepoInfo, ReviewDiff, Side, ViewMode } from './model/ReviewDiff';
 import { prBranchKey, prViewedNamespace } from './model/ReviewDiff';
 import type { LineReferences } from './export/common';
-import type { Comment, CommentThread, ReactionEmoji, RemoteRef, Review } from './model/Comment';
+import type { Comment, CommentOrigin, CommentThread, ReactionEmoji, RemoteRef, Review } from './model/Comment';
 import { durableThread, toggleReaction as toggleReactionOnComment, UNKNOWN_AUTHOR } from './model/Comment';
 import type { RemoteRepoRef, ReviewProvider } from './review/provider';
 import { parseRemoteUrl, type GithubProviderId } from './github/remote';
@@ -585,6 +585,7 @@ export class RepoSession implements vscode.Disposable {
     this.viewerLogin = await getViewerLogin(this.authProviderId());
     // Legacy active threads always migrate onto the real git branch, never a loaded PR.
     await this.reviewStore.migrateLegacy(repoRoot, this.localBranchKey(), this.info.headSha);
+    await this.reviewStore.migrateAgentAuthor(repoRoot, this.authorIdentity());
     if (pref.source === 'pr') {
       // A PR restored from a previous session has never been fetched in this one: re-pin refs a gc may
       // have collected before diffing, and pull the posted set once the diff is up.
@@ -1190,7 +1191,7 @@ export class RepoSession implements vscode.Disposable {
     endLine?: number;
     body: string;
     suggestion?: string;
-    author?: string;
+    origin?: CommentOrigin;
   }): Promise<CommentThread> {
     const { repoRoot, branch, diff, headSha } = this.ctx();
     const loc: AnchorLocator =
@@ -1203,8 +1204,9 @@ export class RepoSession implements vscode.Disposable {
       body: p.body,
       createdAt: now,
       updatedAt: now,
-      author: p.author ?? this.authorIdentity(),
+      author: this.authorIdentity(),
     };
+    if (p.origin) comment.origin = p.origin;
     if (p.suggestion != null && loc.kind === 'line') {
       const original = rangeText(diff, loc.filePath, loc.side, loc.startLine, loc.endLine ?? loc.startLine);
       comment.suggestion = { original, replacement: p.suggestion };
@@ -1223,7 +1225,12 @@ export class RepoSession implements vscode.Disposable {
     return reanchorOne(thread, diff);
   }
 
-  async replyComment(threadId: string, body: string, suggestion?: string, author?: string): Promise<CommentThread> {
+  async replyComment(
+    threadId: string,
+    body: string,
+    suggestion?: string,
+    origin?: CommentOrigin,
+  ): Promise<CommentThread> {
     const { repoRoot, branch, diff } = this.ctx();
     const now = new Date().toISOString();
     const reply: Comment = {
@@ -1231,8 +1238,9 @@ export class RepoSession implements vscode.Disposable {
       body,
       createdAt: now,
       updatedAt: now,
-      author: author ?? this.authorIdentity(),
+      author: this.authorIdentity(),
     };
+    if (origin) reply.origin = origin;
     const thread = await this.changeThread(repoRoot, branch, threadId, (t) => {
       if (suggestion != null) reply.suggestion = this.suggestionFor(t, diff, suggestion);
       t.comments.push(reply);
@@ -1292,17 +1300,12 @@ export class RepoSession implements vscode.Disposable {
     return reanchorOne(thread, diff);
   }
 
-  async toggleReaction(
-    threadId: string,
-    commentId: string,
-    emoji: ReactionEmoji,
-    author?: string,
-  ): Promise<CommentThread> {
+  async toggleReaction(threadId: string, commentId: string, emoji: ReactionEmoji): Promise<CommentThread> {
     const { repoRoot, branch, diff } = this.ctx();
     const thread = await this.changeThread(repoRoot, branch, threadId, (t) => {
       const comment = t.comments.find((c) => c.id === commentId);
       if (!comment) return false;
-      toggleReactionOnComment(comment, emoji, author ?? this.authorIdentity());
+      toggleReactionOnComment(comment, emoji, this.authorIdentity());
     });
     if (!thread) throw new Error('Comment not found.');
     this.afterThreadChange();
@@ -1402,11 +1405,11 @@ export class RepoSession implements vscode.Disposable {
         return diff ? { ...review, threads: reanchor(review.threads, diff) } : review;
       },
       addComment: (a) => this.addComment(a),
-      reply: (a) => this.replyComment(a.threadId, a.body, undefined, a.author),
+      reply: (a) => this.replyComment(a.threadId, a.body, undefined, a.origin),
       resolve: (a) => this.resolveThread(a.threadId, a.resolved),
       editComment: (a) => this.editComment(a.threadId, a.commentId, a.body, a.suggestion),
       deleteComment: (a) => this.deleteComment(a.threadId, a.commentId),
-      toggleReaction: (a) => this.toggleReaction(a.threadId, a.commentId, a.emoji, a.author),
+      toggleReaction: (a) => this.toggleReaction(a.threadId, a.commentId, a.emoji),
     };
   }
 }

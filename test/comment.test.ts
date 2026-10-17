@@ -1,26 +1,29 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { canEditComment, toggleReaction, hasReactionDiff, AGENT_AUTHOR } from '../src/model/Comment';
+import { canEditComment, toggleReaction, hasReactionDiff } from '../src/model/Comment';
 import type { Comment } from '../src/model/Comment';
 
 function comment(author: string): Comment {
   return { id: 'c1', body: 'x', createdAt: '', updatedAt: '', author };
 }
 
+/** A comment the agent wrote, authored under an identity that is no longer the viewer's. */
+const agentComment = (): Comment => ({ ...comment('Stefan Pantic'), origin: 'agent' });
+
 test('local review: every comment is editable regardless of author', () => {
   assert.equal(canEditComment(comment('someone-else'), 'me', false), true);
   assert.equal(canEditComment(comment('unknown'), undefined, false), true);
 });
 
-test('PR review: only your own and agent-authored comments are editable', () => {
+test("PR review: only your own and the agent's comments are editable", () => {
   assert.equal(canEditComment(comment('me'), 'me', true), true);
-  assert.equal(canEditComment(comment(AGENT_AUTHOR), 'me', true), true);
+  assert.equal(canEditComment(agentComment(), 'me', true), true);
   assert.equal(canEditComment(comment('octocat'), 'me', true), false);
 });
 
 test('PR review while signed out: nobody else matches, only agent is editable', () => {
   assert.equal(canEditComment(comment('octocat'), undefined, true), false);
-  assert.equal(canEditComment(comment(AGENT_AUTHOR), undefined, true), true);
+  assert.equal(canEditComment(agentComment(), undefined, true), true);
 });
 
 // --- toggleReaction ---

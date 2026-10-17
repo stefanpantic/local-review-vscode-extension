@@ -2,7 +2,7 @@
 // counts a confirmation shows. Pure and synchronous, so it is unit-tested without a client. The GitHub
 // provider translates this neutral shape into its own API calls; another provider could do the same.
 import type { CommentThread, Comment, Review } from '../model/Comment';
-import { AGENT_AUTHOR, hasReactionDiff, REACTION_EMOJIS } from '../model/Comment';
+import { hasReactionDiff, isAgentComment, REACTION_EMOJIS } from '../model/Comment';
 import { EMOJI_TO_GITHUB } from '../github/mapThreads';
 import type { Side } from '../model/ReviewDiff';
 import type { RateLimitResource } from '../github/rateLimit';
@@ -75,7 +75,7 @@ export interface SubmitCounts {
   deletes: number;
   resolves: number;
   reactions: number;
-  agentComments: number; // how many posted comments/replies are AI-agent authored (shown, still included)
+  agentComments: number; // how many posted comments/replies the AI agent wrote (shown, still included)
   total: number;
 }
 
@@ -140,8 +140,8 @@ function positionOf(t: CommentThread): { line: number; startLine?: number } {
  */
 export function unsubmittedRemoteReview(review: Review, viewer?: string): boolean {
   if (review.kind !== 'remote') return false;
-  const mine = (author: string): boolean => author === viewer || author === AGENT_AUTHOR;
-  return review.threads.some((t) => t.comments.some((c) => c.remotePending === true && mine(c.author)));
+  const mine = (c: Comment): boolean => c.author === viewer || isAgentComment(c);
+  return review.threads.some((t) => t.comments.some((c) => c.remotePending === true && mine(c)));
 }
 
 /**
@@ -153,8 +153,8 @@ export function unsubmittedRemoteReview(review: Review, viewer?: string): boolea
  * - a thread whose resolved state differs from the imported baseline is a resolve/unresolve toggle;
  * - a reaction on a posted comment is an add/remove op against its node id, while one staged on a comment
  *   that has never been posted travels with that comment, for the provider to apply once posting names it.
- * A local review, or one with nothing staged, yields an empty batch. AI-agent comments are included (posted
- * under the human's identity) and counted so the confirmation can show how many are agent-authored.
+ * A local review, or one with nothing staged, yields an empty batch. The AI agent's comments are included
+ * (posted under the human's identity) and counted so the confirmation can show how many the agent wrote.
  * `body` is the optional review summary, posted as the review's own text.
  */
 export function buildSubmitPlan(
@@ -170,7 +170,7 @@ export function buildSubmitPlan(
   const resolves: { threadId: string; resolved: boolean }[] = [];
   let agentComments = 0;
   const countAgent = (c: Comment): void => {
-    if (c.author === AGENT_AUTHOR) agentComments++;
+    if (isAgentComment(c)) agentComments++;
   };
 
   for (const t of review.threads) {

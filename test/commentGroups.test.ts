@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { arrangeComments, rootAuthor } from '../src/review/commentGroups';
 import { endLine, startLine } from '../src/comments/position';
 import type { Comment, CommentThread } from '../src/model/Comment';
-import { UNKNOWN_AUTHOR } from '../src/model/Comment';
+import { AGENT_NAME, UNKNOWN_AUTHOR } from '../src/model/Comment';
 
 const comment = (over: Partial<Comment> & { id: string }): Comment => ({
   body: 'note',
@@ -84,13 +84,20 @@ test('range threads sort by start, then by end', () => {
 test('groups by the root author, so a thread lands in exactly one group', () => {
   const list = [thread('t1', { author: 'octocat' }), thread('t2', { author: 'stefan' })];
   // The agent replied to octocat's thread; the thread still groups under octocat alone.
-  list[0].comments.push(comment({ id: 't1-c2', author: 'AI Agent' }));
+  list[0].comments.push(comment({ id: 't1-c2', author: 'stefan', origin: 'agent' }));
   const groups = arrangeComments(list, { groupBy: 'author', sortBy: 'position' });
   assert.deepEqual(keys(groups), ['octocat', 'stefan']);
   assert.equal(
     groups.reduce((n, g) => n + g.threads.length, 0),
     list.length,
   );
+});
+
+test('a thread the agent opened groups under the agent, though its root is authored as you', () => {
+  const list = [thread('t1', { author: 'stefan' }), thread('t2', { author: 'stefan' })];
+  list[1].comments[0].origin = 'agent';
+  const groups = arrangeComments(list, { groupBy: 'author', sortBy: 'position' });
+  assert.deepEqual(keys(groups).sort(), [AGENT_NAME, 'stefan'].sort());
 });
 
 test('ungrouped returns one flat group with an empty key', () => {

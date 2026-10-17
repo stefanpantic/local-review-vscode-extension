@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { CommentThread, RemoteRef, RemoteReview, Review } from '../model/Comment';
+import type { CommentThread, ReactionEmoji, RemoteRef, RemoteReview, Review } from '../model/Comment';
 import { durableThread, isCommentThread, UNKNOWN_AUTHOR } from '../model/Comment';
 import type { AppliedStep } from '../review/submit';
 
@@ -174,6 +174,45 @@ export class ReviewStore {
     delete legacy[repoRoot];
     await this.store.update(LEGACY_THREADS_KEY, legacy);
   }
+
+  /**
+   * Rewrite comments saved with the agent's old author label: author them as `identity` and mark them as the
+   * agent's by origin, and record the agent's reactions under `identity`. Idempotent, and saves nothing when
+   * no comment carries the old label.
+   */
+  async migrateAgentAuthor(repoRoot: string, identity: string): Promise<void> {
+    const map = this.allMap();
+    let changed = false;
+    for (const review of map[repoRoot] ?? []) {
+      if (migrateAgentAuthor(review, identity)) changed = true;
+    }
+    if (changed) await this.store.update(REVIEWS_KEY, map);
+  }
+}
+
+/** The author every agent comment carried before the origin field recorded who wrote it. */
+const LEGACY_AGENT_AUTHOR = 'AI Agent';
+
+/** Move one review's comments off the agent's old author label, in place. Returns whether anything changed. */
+export function migrateAgentAuthor(review: Review, identity: string): boolean {
+  let changed = false;
+  for (const t of review.threads) {
+    for (const c of t.comments) {
+      if (c.author === LEGACY_AGENT_AUTHOR) {
+        c.author = identity;
+        c.origin = 'agent';
+        changed = true;
+      }
+      for (const [emoji, users] of Object.entries(c.reactions ?? {})) {
+        if (!users?.includes(LEGACY_AGENT_AUTHOR)) continue;
+        c.reactions![emoji as ReactionEmoji] = [
+          ...new Set(users.map((u) => (u === LEGACY_AGENT_AUTHOR ? identity : u))),
+        ];
+        changed = true;
+      }
+    }
+  }
+  return changed;
 }
 
 /** A display name for a remote review: the request title, falling back to `#<number>`. */

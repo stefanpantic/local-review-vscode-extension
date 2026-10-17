@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Markdown } from '../components/Markdown';
 import type { CommentThread, ReactionEmoji } from '../../src/model/Comment';
-import { AGENT_AUTHOR, canEditComment, REACTION_EMOJIS } from '../../src/model/Comment';
+import { AGENT_NAME, canEditComment, isAgentComment, REACTION_EMOJIS } from '../../src/model/Comment';
 import { TokenText } from '../render/UnifiedRows';
 import type { Tok } from '../render/highlight';
 import { CommentForm, hasDraft } from './CommentForm';
@@ -261,7 +261,7 @@ export function CommentThreadView({
             <div className={cls} key={c.id}>
               <div className="lr-comment-main">
                 {c.author && (
-                  <div className={`lr-comment-author${c.author === AGENT_AUTHOR ? ' lr-author-agent' : ''}`}>
+                  <div className="lr-comment-author">
                     {c.author}
                     {c.conflict && (
                       <span
@@ -269,6 +269,11 @@ export function CommentThreadView({
                         title="This comment also changed on GitHub after you edited it. Submitting replaces their version with yours. Edit it to merge the two, or discard your edit to take theirs."
                       >
                         edited on both sides
+                      </span>
+                    )}
+                    {isAgentComment(c) && (
+                      <span className="lr-badge lr-badge-agent" title={`Written by the ${AGENT_NAME} through MCP`}>
+                        via MCP
                       </span>
                     )}
                   </div>

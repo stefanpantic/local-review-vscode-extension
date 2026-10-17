@@ -11,7 +11,6 @@ import { GithubReviewProvider } from '../src/github/provider';
 import { buildSubmitPlan, readBackUntilLinked } from '../src/review/submit';
 import { reconcile } from '../src/review/reconcile';
 import type { CommentThread, RemoteRef, RemoteReview } from '../src/model/Comment';
-import { AGENT_AUTHOR } from '../src/model/Comment';
 import { postedComment } from '../src/github/client';
 import type {
   GhNewComment,
@@ -426,6 +425,12 @@ function draftWithReply(author: string): CommentThread {
   };
 }
 
+/** The same draft and reply written by the agent: authored under the identity at the time, marked by origin. */
+function agentDraftWithReply(author: string): CommentThread {
+  const t = draftWithReply(author);
+  return { ...t, comments: t.comments.map((c) => ({ ...c, origin: 'agent' as const })) };
+}
+
 test('a review GitHub created despite a server error still gets its follow-ups', async () => {
   const { store, id } = await seed([draftWithReply('me')]);
   const client = new FlakyClient();
@@ -534,21 +539,22 @@ const postedCopy = (login: string): CommentThread[] => [
   },
 ];
 
-test("an agent draft takes the human's GitHub login once linked to its posted copy", () => {
-  const rec = reconcile([draftWithReply(AGENT_AUTHOR)], [], postedCopy('octocat'), { viewer: 'octocat' });
+test('an agent draft keeps its origin once linked to its posted copy', () => {
+  const rec = reconcile([agentDraftWithReply('octocat')], [], postedCopy('octocat'), { viewer: 'octocat' });
   assert.equal(rec.adopted, 1);
   assert.equal(rec.threads[0].comments[0].author, 'octocat');
+  assert.equal(rec.threads[0].comments[0].origin, 'agent');
   assert.equal(rec.threads[0].comments[0].remoteId, '500');
 });
 
 test('an agent draft is not linked when the viewer is not the GitHub login', () => {
   // git user.name standing in for the login: the posted copy is not recognised as yours.
-  const rec = reconcile([draftWithReply(AGENT_AUTHOR)], [], postedCopy('octocat'), { viewer: 'Octo Cat' });
+  const rec = reconcile([agentDraftWithReply('Octo Cat')], [], postedCopy('octocat'), { viewer: 'Octo Cat' });
   assert.equal(rec.adopted, 0);
 });
 
 test('a posted draft is linked by its id even when GitHub hands its text back changed', async () => {
-  const { store, id } = await seed([draftWithReply(AGENT_AUTHOR)]);
+  const { store, id } = await seed([agentDraftWithReply('me')]);
   const client = new FlakyClient();
   const provider = new GithubReviewProvider('github', async () => client, instant);
   const { input } = buildSubmitPlan(current(store, id), 'comment');
@@ -573,10 +579,10 @@ test('a posted draft is linked by its id even when GitHub hands its text back ch
   assert.equal(rec.threads.length, 1, 'no leftover draft beside the posted thread');
   assert.equal(rec.threads[0].remoteThreadId, 'T9');
   assert.deepEqual(
-    rec.threads[0].comments.map((c) => [c.remoteId, c.author]),
+    rec.threads[0].comments.map((c) => [c.remoteId, c.author, c.origin]),
     [
-      ['500', 'me'],
-      ['501', 'me'],
+      ['500', 'me', 'agent'],
+      ['501', 'me', 'agent'],
     ],
   );
   await store.updateThreads('/r', id, rec.threads);
@@ -584,7 +590,7 @@ test('a posted draft is linked by its id even when GitHub hands its text back ch
 });
 
 test('a posted draft that is not in the read yet is neither re-sent nor dropped', async () => {
-  const { store, id } = await seed([draftWithReply(AGENT_AUTHOR)]);
+  const { store, id } = await seed([agentDraftWithReply('me')]);
   const client = new FlakyClient();
   const provider = new GithubReviewProvider('github', async () => client, instant);
   const { input } = buildSubmitPlan(current(store, id), 'comment');
@@ -602,7 +608,7 @@ test('roots sent to the same line are paired with their posted copies in the ord
     id: 'one',
     anchor,
     resolved: false,
-    comments: [{ id: 'd1', body: 'same', createdAt: '', updatedAt: '', author: AGENT_AUTHOR }],
+    comments: [{ id: 'd1', body: 'same', createdAt: '', updatedAt: '', author: 'me', origin: 'agent' }],
   };
   const second: CommentThread = {
     id: 'two',
@@ -621,7 +627,7 @@ test('roots sent to the same line are paired with their posted copies in the ord
 });
 
 test('a fetch applied once it arrives keeps what was saved while it was out', async () => {
-  const { store, id } = await seed([draftWithReply(AGENT_AUTHOR)]);
+  const { store, id } = await seed([agentDraftWithReply('me')]);
   // A poll's fetch went out before the Submit, so what it brings back has none of the new comments.
   const fetchedBefore: CommentThread[] = [];
 
@@ -652,10 +658,10 @@ test('a fetch applied once it arrives keeps what was saved while it was out', as
 
   const review = current(store, id);
   assert.deepEqual(
-    review.threads[0].comments.map((c) => [c.remoteId, c.author]),
+    review.threads[0].comments.map((c) => [c.remoteId, c.author, c.origin]),
     [
-      ['500', AGENT_AUTHOR],
-      ['501', AGENT_AUTHOR],
+      ['500', 'me', 'agent'],
+      ['501', 'me', 'agent'],
     ],
     'the posted ids the Submit stamped are kept',
   );

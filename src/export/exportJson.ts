@@ -1,7 +1,7 @@
 // Pure JSON serializer for a review, for scripts and tools that consume the export. Deterministic given its
 // inputs (unit-tested). `threads` are passed as-reviewed (stored) or re-anchored (current), as for Markdown.
 // `version` changes only when the shape below breaks.
-import type { AnchorStatus, Comment, CommentThread, ReactionEmoji } from '../model/Comment';
+import type { AnchorStatus, Comment, CommentOrigin, CommentThread, ReactionEmoji } from '../model/Comment';
 import { REACTION_EMOJIS } from '../model/Comment';
 import type { Side } from '../model/ReviewDiff';
 import { endLine, startLine, threadPath } from '../comments/position';
@@ -58,6 +58,7 @@ export type ExportedThread = ExportedLineThread | ExportedFileThread;
 export interface ExportedComment {
   id: string;
   author: string;
+  origin: CommentOrigin | null; // 'agent' when a coding agent wrote it through MCP
   body: string;
   createdAt: string;
   suggestion: { original: string; replacement: string } | null;
@@ -113,6 +114,7 @@ function exportComment(c: Comment): ExportedComment {
   return {
     id: c.id,
     author: c.author,
+    origin: c.origin ?? null,
     body: c.body,
     createdAt: c.createdAt,
     suggestion: c.suggestion ? { original: c.suggestion.original, replacement: c.suggestion.replacement } : null,

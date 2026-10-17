@@ -107,6 +107,7 @@ test('single-line thread has every field and leaves out PR write-back state', ()
         {
           id: 'cLooks off',
           author: 'tester',
+          origin: null,
           body: 'Looks off',
           createdAt: '2026-07-04T11:00:00.000Z',
           suggestion: null,
@@ -156,16 +157,16 @@ test('file-level thread has null side, lines, and diffHunk', () => {
   assert.equal(t.diffHunk, null);
 });
 
-test('replies keep their order, ids, and authors', () => {
+test('replies keep their order, ids, authors, and origins', () => {
   const [t] = run([
-    thread({ comments: [comment('root'), comment('first', { author: 'AI Agent' }), comment('second')] }),
+    thread({ comments: [comment('root'), comment('first', { origin: 'agent' }), comment('second')] }),
   ]).threads;
   assert.deepEqual(
-    t.comments.map((c) => [c.id, c.author, c.body]),
+    t.comments.map((c) => [c.id, c.author, c.origin, c.body]),
     [
-      ['croot', 'tester', 'root'],
-      ['cfirst', 'AI Agent', 'first'],
-      ['csecond', 'tester', 'second'],
+      ['croot', 'tester', null, 'root'],
+      ['cfirst', 'tester', 'agent', 'first'],
+      ['csecond', 'tester', null, 'second'],
     ],
   );
 });
@@ -182,12 +183,12 @@ test('reactions follow display order and drop empty entries', () => {
   const [t] = run([
     thread({
       comments: [
-        comment('root', { reactions: { '🎉': ['bob'], '👀': [], '👍': ['alice', 'AI Agent'] } }),
+        comment('root', { reactions: { '🎉': ['bob'], '👀': [], '👍': ['alice', 'carol'] } }),
         comment('reply'),
       ],
     }),
   ]).threads;
-  assert.deepEqual(t.comments[0].reactions, { '👍': ['alice', 'AI Agent'], '🎉': ['bob'] });
+  assert.deepEqual(t.comments[0].reactions, { '👍': ['alice', 'carol'], '🎉': ['bob'] });
   assert.deepEqual(Object.keys(t.comments[0].reactions), ['👍', '🎉']);
   assert.deepEqual(t.comments[1].reactions, {});
 });

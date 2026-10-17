@@ -8,7 +8,7 @@ import {
   parseCommentFilter,
 } from '../src/review/commentFilter';
 import type { Comment, CommentThread } from '../src/model/Comment';
-import { AGENT_AUTHOR } from '../src/model/Comment';
+import { AGENT_NAME } from '../src/model/Comment';
 
 const comment = (over: Partial<Comment> & { id: string }): Comment => ({
   body: 'looks off',
@@ -36,13 +36,13 @@ const thread = (over: Partial<CommentThread> & { id: string }): CommentThread =>
 const list: CommentThread[] = [
   thread({ id: 't1', status: 'anchored' }),
   thread({ id: 't2', resolved: true, status: 'anchored' }),
-  thread({ id: 't3', status: 'outdated', comments: [comment({ id: 't3-c1', author: AGENT_AUTHOR })] }),
+  thread({ id: 't3', status: 'outdated', comments: [comment({ id: 't3-c1', origin: 'agent' })] }),
   thread({ id: 't4', status: 'moved', comments: [comment({ id: 't4-c1', author: 'octocat' })] }),
-  // A thread someone else opened that the agent replied to.
+  // A thread someone else opened that the agent replied to. The agent's comments are authored as stefan.
   thread({
     id: 't5',
     status: 'anchored',
-    comments: [comment({ id: 't5-c1', author: 'octocat' }), comment({ id: 't5-c2', author: AGENT_AUTHOR })],
+    comments: [comment({ id: 't5-c1', author: 'octocat' }), comment({ id: 't5-c2', origin: 'agent' })],
   }),
 ];
 
@@ -115,11 +115,20 @@ test('author matches any comment in the thread, not only the root', () => {
   assert.deepEqual(ids(applyCommentFilter(list, parseCommentFilter('author:octocat'), 'stefan')), ['t4', 't5']);
 });
 
+test("a plain name matches the agent's comments authored under it", () => {
+  assert.deepEqual(ids(applyCommentFilter(list, parseCommentFilter('author:stefan'), 'stefan')), [
+    't1',
+    't2',
+    't3',
+    't5',
+  ]);
+});
+
 test('author matching is case-insensitive', () => {
   assert.deepEqual(ids(applyCommentFilter(list, parseCommentFilter('author:OCTOCAT'), 'stefan')), ['t4', 't5']);
 });
 
-test('@me resolves to the viewer identity', () => {
+test("@me resolves to the viewer identity and leaves out the agent's comments", () => {
   assert.deepEqual(ids(applyCommentFilter(list, parseCommentFilter('author:@me'), 'stefan')), ['t1', 't2']);
   assert.deepEqual(ids(applyCommentFilter(list, parseCommentFilter('author:@me'), 'octocat')), ['t4', 't5']);
   // An identity nobody wrote under simply matches nothing.
@@ -144,7 +153,7 @@ test('describe names the single-dimension cases and falls back to tokens', () =>
   assert.equal(describeCommentFilter(parseCommentFilter('is:resolved')), 'Resolved');
   assert.equal(describeCommentFilter(parseCommentFilter('is:outdated')), 'Outdated');
   assert.equal(describeCommentFilter(parseCommentFilter('author:@me')), 'By me');
-  assert.equal(describeCommentFilter(parseCommentFilter('author:@agent')), `By ${AGENT_AUTHOR}`);
+  assert.equal(describeCommentFilter(parseCommentFilter('author:@agent')), `By ${AGENT_NAME}`);
   assert.equal(describeCommentFilter(parseCommentFilter('author:octocat')), 'By octocat');
   assert.equal(describeCommentFilter(parseCommentFilter('author:@me is:unresolved')), 'author:@me is:unresolved');
 });

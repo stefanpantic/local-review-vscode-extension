@@ -22,7 +22,7 @@ import * as path from 'node:path';
 import { WindowClaims } from './windowClaims';
 import type { DiffSource } from './model/ReviewDiff';
 import type { CommentThread, Review } from './model/Comment';
-import { AGENT_AUTHOR } from './model/Comment';
+import { AGENT_NAME } from './model/Comment';
 import { parsePrReference, type GithubProviderId } from './github/remote';
 import { githubTokenSource } from './github/auth';
 import { githubErrorText } from './github/errors';
@@ -1170,7 +1170,7 @@ function pickCommentFilter(current: string, sets: ThreadSet[]): Promise<string |
     { label: 'Outdated', description: `is:outdated · ${matches('is:outdated')}`, tokens: 'is:outdated' },
     { label: 'Moved', description: `is:moved · ${matches('is:moved')}`, tokens: 'is:moved' },
     { label: 'Mine', description: `author:@me · ${viewer} · ${matches('author:@me')}`, tokens: 'author:@me' },
-    { label: AGENT_AUTHOR, description: `author:@agent · ${matches('author:@agent')}`, tokens: 'author:@agent' },
+    { label: AGENT_NAME, description: `author:@agent · ${matches('author:@agent')}`, tokens: 'author:@agent' },
   ].map((p) => ({ ...p, alwaysShow: true }));
 
   // Everyone who wrote anything in the review, most-prolific first. Counted per thread, not per comment, so

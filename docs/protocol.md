@@ -209,7 +209,8 @@ interface Comment {
   body: string;
   createdAt: string; // ISO
   updatedAt: string; // ISO
-  author: string; // git username, "AI Agent" (MCP), a remote login (imported), or "unknown"  [it.9/it.11]
+  author: string; // your GitHub login or git user.name (also for the agent's comments), a remote login (imported), or "unknown"  [it.9/it.11]
+  origin?: 'agent'; // set when a coding agent wrote it through MCP. It never changes, including across Submit
   suggestion?: {
     // [it.4b] proposed replacement for the anchored range (capture + export only)
     original: string; // the range's code at creation (captured by the host from its diff)
@@ -229,7 +230,7 @@ interface Comment {
   // collision cannot be re-derived on a later pass. Cleared once the edit is no longer pending.
   conflict?: boolean;
   // [it.16] Emoji reactions per comment. Each key is a ReactionEmoji, mapping to the identities who reacted
-  // (a GitHub login, `git user.name`, or "AI Agent"). On a PR these round-trip with GitHub.
+  // (a GitHub login or `git user.name`, the agent's included). On a PR these round-trip with GitHub.
   reactions?: Partial<Record<ReactionEmoji, string[]>>;
   remoteReactions?: Partial<Record<ReactionEmoji, string[]>>; // baseline from import (same pattern as remoteBody)
 }
@@ -334,7 +335,7 @@ On a remote review, all local work is a **pending change set** derived by diffin
 
 Reconcile also **adopts** local content that turns out to be posted already, matching on file, side, body, and suggestion among your own content in the fetch: a draft thread whose root is now a fetched thread, and a pending reply that is now a fetched comment in its thread. That is what makes a retry after a partial submit safe: created content has no local id to stamp, so re-import is how it is retired. A pending edit whose upstream body also moved off the imported baseline is flagged **`conflict`** and keeps your text, instead of silently winning.
 
-Whenever a fetched comment replaces a local one, it takes the **fetched author**. The agent's comments are submitted under your identity, so once posted they come back authored by you and stay that way: `AGENT_AUTHOR` marks only agent content that has not posted yet, and the agent badge and the `author:@agent` filter match only that. The agent can still edit and delete its posted comments, because edit permission measures against your login. Your own comments take the fetched login too, which need not equal the `git user.name` they were written under.
+Reconcile gives a fetched comment that replaces a local one the **fetched author**, and copies the local copy's **`origin`** onto it. The MCP tools create the agent's comments under your identity and mark them `origin: 'agent'`. Submit posts them under your identity, so a fetch returns them authored by you, and GitHub has no record of the origin. Reconcile keeps the origin at adoption and at every later sync and poll, so the `via MCP` badge, the `author:@agent` filter, and the agent's ability to find its own comments all hold after Submit. Your own comments take the fetched login, which need not equal the `git user.name` you wrote them under.
 
 **Submit applies as it goes.** Each id-addressable step (edit, delete, resolve, and `[it.16]` a comment's reactions) is reported back through an `onApplied` callback the moment it lands, and the host retires it from the pending set right then. Whatever the outcome, a reconcile from a fresh fetch runs afterwards. Between the two, a submit that dies partway leaves only genuinely unsent work staged, so a retry finishes the job without posting anything twice. Submit also carries an optional **review summary** as the review body.
 
@@ -459,6 +460,7 @@ interface ExportedFileThread extends ExportedThreadBase {
 interface ExportedComment {
   id: string;
   author: string;
+  origin: 'agent' | null; // 'agent' when a coding agent wrote it through MCP
   body: string;
   createdAt: string; // ISO
   suggestion: { original: string; replacement: string } | null;
@@ -471,6 +473,8 @@ In a current export, `startLine` and `endLine` are the re-anchored lines. An as-
 ## 10. MCP tools `[it.9; repositories it.19]`
 
 The MCP server exposes the review to a coding agent. Its tools run in the host against the same sessions the UI uses. Tool output is readable text, and the tool list and descriptions live in `src/mcp/tools.ts`.
+
+`post_comment` and `reply` create comments under the human's identity with `origin: 'agent'`, and `react` records its reaction under the human's identity. `get_review` and `get_active_review` print `· via MCP` after the author of each comment with that origin, so the agent can find its own comments before and after Submit.
 
 `[it.19]` A workspace can hold several repositories:
 

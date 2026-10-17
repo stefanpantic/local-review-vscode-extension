@@ -16,7 +16,7 @@ A pull-request review surface inside VS Code, for three things: your own uncommi
 - **Reviews your working-tree diff** as a continuous, PR-style surface: unified or side-by-side, syntax-highlighted, with comments on any line, range, or whole file.
 - **Reviews a real GitHub pull request** in the same UI. The PR is fetched in place, with no checkout and no change to your working tree, and every existing review thread is imported. github.com and GitHub Enterprise.
 - **Writes your review back.** Comment, reply, resolve, edit, and suggest, then post the lot as one GitHub review with **Comment**, **Approve**, or **Request changes**.
-- **Lets a coding agent review with you** over a local MCP server. It reads the diff and posts its own comments, replies, and suggestions into the same review, attributed to "AI Agent".
+- **Lets a coding agent review with you** over a local MCP server. It reads the diff and posts its own comments, replies, and suggestions into the same review, marked "via MCP".
 - **Exports any review** as an agent-ready Markdown work list for agents you have not wired up over MCP, or as JSON for scripts and tools.
 - **Keeps comments anchored** as code shifts. They follow their lines, or go "outdated". They are never silently lost.
 - **Saves a review per branch** automatically, including one per pull request.
@@ -91,7 +91,7 @@ For **GitHub Enterprise**, set `agenticReview.github.enterpriseUri` to your serv
 
 ## Agent integration (MCP)
 
-ReviewMate runs a standard, local MCP server (bound to `127.0.0.1`, token-guarded, off by default) that any MCP client can use. You comment and the agent acts on it. The agent can also post its own comments, replies, and suggestions. They show up in the panel attributed to "AI Agent", anchored like yours, and on a pull request they post to GitHub with the rest of your review, under your account. Once submitted, they show under your login, matching what GitHub records.
+ReviewMate runs a standard, local MCP server (bound to `127.0.0.1`, token-guarded, off by default) that any MCP client can use. You comment and the agent acts on it. The agent can also post its own comments, replies, and suggestions. They show up in the panel under your name with a purple "via MCP" badge, anchored like yours. On a pull request they post to GitHub with the rest of your review, under your account, and keep the badge after you submit.
 
 1. Run **ReviewMate: Set up MCP**. Pick a port and whether to start it on launch.
 2. It generates an mcp.json (URL, token, and ready-to-run connect commands: Claude Code, plus a generic `mcpServers` config for other clients) and opens it. Reopen it anytime with **Open MCP Config**. It lives in the extension's per-workspace storage, not in your repo.
@@ -130,7 +130,7 @@ The **Current Review** sidebar lists every thread in the review. Click the funne
 | Filter                                     | Shows                                                      |
 | ------------------------------------------ | ---------------------------------------------------------- |
 | `author:<name>`                            | Threads where that person wrote any comment, root or reply |
-| `author:@me` / `author:@agent`             | Threads you commented in, or the agent did                 |
+| `author:@me` / `author:@agent`             | Threads you commented in, or the agent did (via MCP)       |
 | `is:unresolved` / `is:resolved`            | Open or resolved threads                                   |
 | `is:anchored` / `is:moved` / `is:outdated` | Threads by where their line is now                         |
 

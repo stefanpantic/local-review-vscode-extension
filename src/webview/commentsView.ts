@@ -3,7 +3,7 @@ import type { RepoSession } from '../repoSession';
 import type { WorkspaceReviews } from '../workspaceReviews';
 import type { ReviewState } from '../reviewState';
 import type { CommentThread } from '../model/Comment';
-import { AGENT_AUTHOR } from '../model/Comment';
+import { AGENT_NAME } from '../model/Comment';
 import {
   applyCommentFilter,
   describeCommentFilter,
@@ -219,7 +219,7 @@ export class CommentsView implements vscode.TreeDataProvider<CommentsNode> {
       item.tooltip = node.label;
       item.iconPath =
         node.mode === 'author'
-          ? new vscode.ThemeIcon(node.key === AGENT_AUTHOR ? 'hubot' : 'account')
+          ? new vscode.ThemeIcon(node.key === AGENT_NAME ? 'hubot' : 'account')
           : vscode.ThemeIcon.File;
       return item;
     }

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { reconcile } from '../src/review/reconcile';
-import { AGENT_AUTHOR, type Comment, type CommentThread } from '../src/model/Comment';
+import type { Comment, CommentThread } from '../src/model/Comment';
 
 function comment(over: Partial<Comment> = {}): Comment {
   return { id: 'c', body: 'b', createdAt: '', updatedAt: '', author: 'me', ...over };
@@ -285,7 +285,7 @@ test('drafts with the same text on different lines each adopt the copy on their 
   const agentDraft = thread({
     id: 'agent',
     anchor: at(5),
-    comments: [comment({ id: 'a1', body: 'same here', author: AGENT_AUTHOR })],
+    comments: [comment({ id: 'a1', body: 'same here', origin: 'agent' })],
   });
   const myDraft = thread({
     id: 'mine',
@@ -304,7 +304,9 @@ test('drafts with the same text on different lines each adopt the copy on their 
   assert.equal(adopted, 2);
   const onLine = (n: number) => threads.find((t) => t.anchor.kind === 'line' && t.anchor.lineNumber === n)!;
   assert.equal(onLine(5).remoteThreadId, 'T5');
+  assert.equal(onLine(5).comments[0].origin, 'agent');
   assert.equal(onLine(9).remoteThreadId, 'T9');
+  assert.equal(onLine(9).comments[0].origin, undefined);
 });
 
 test('a draft whose line moved upstream still adopts its copy by text', () => {
@@ -326,7 +328,7 @@ test('a draft adopts its copy when the import trimmed the text', () => {
       comment({
         id: 'n1',
         body: 'use this\r\n',
-        author: AGENT_AUTHOR,
+        origin: 'agent',
         suggestion: { original: 'x', replacement: 'y\n' },
       }),
     ],
@@ -347,6 +349,7 @@ test('a draft adopts its copy when the import trimmed the text', () => {
   const { threads, adopted } = reconcile([draft], [], fresh, { viewer: 'me' });
   assert.equal(adopted, 1);
   assert.equal(threads.length, 1, 'no pending copy left beside the posted one');
+  assert.equal(threads[0].comments[0].origin, 'agent');
 });
 
 test("someone else's identical comment is never adopted as your draft (#3)", () => {
@@ -467,82 +470,78 @@ test('your local edit of an unsubmitted comment keeps both the edit and the flag
   assert.equal(threads[0].comments[0].remotePending, true);
 });
 
-// The agent's comments are posted under your identity, so every fetch after a submit hands them back
-// authored by you, and that is the author they keep. Only a comment that has not posted stays the agent's.
+// The agent's comments are authored as you and marked by origin. Submit posts them under your identity, so
+// GitHub has no record of the origin, and reconcile carries it from the local copy onto every fetched copy.
 
-test('an agent draft that has posted takes the author GitHub recorded', () => {
-  const draft = thread({ id: 'draft', comments: [comment({ id: 'n1', body: 'agent note', author: AGENT_AUTHOR })] });
-  // Posted under your identity, so it comes back as yours.
-  const fresh = [
-    imported('T9', 'agent note', {
-      comments: [comment({ id: 'T9c', remoteId: 'T9c', body: 'agent note', remoteBody: 'agent note', author: 'me' })],
-    }),
-  ];
+/** A comment the agent wrote: authored as you, marked by origin. */
+const agentComment = (over: Partial<Comment> = {}): Comment => comment({ origin: 'agent', ...over });
+
+test('an agent draft that has posted keeps its origin on the fetched copy', () => {
+  const draft = thread({ id: 'draft', comments: [agentComment({ id: 'n1', body: 'agent note' })] });
+  const fresh = [imported('T9', 'agent note')]; // the helper authors as 'me', which is what GitHub reports
   const { threads, adopted } = reconcile([draft], [], fresh, { viewer: 'me' });
   assert.equal(adopted, 1);
   assert.equal(threads[0].comments[0].remoteId, 'T9c'); // linked, so it is not re-sent
   assert.equal(threads[0].comments[0].author, 'me');
+  assert.equal(threads[0].comments[0].origin, 'agent');
 });
 
-test("an agent draft that has not posted stays the agent's", () => {
-  const draft = thread({ id: 'draft', comments: [comment({ id: 'n1', body: 'agent note', author: AGENT_AUTHOR })] });
-  const { threads, adopted } = reconcile([draft], [], [], { viewer: 'me' });
+test('an agent draft with no posted copy in the fetch is left as it is', () => {
+  const draft = thread({ id: 'draft', comments: [agentComment({ id: 'n1', body: 'agent note' })] });
+  // Your own posted comment, with other text on another line, so adoption runs and finds no match.
+  const fresh = [imported('T9', 'something else', { anchor: at(7) })];
+  const { threads, adopted } = reconcile([draft], [], fresh, { viewer: 'me' });
   assert.equal(adopted, 0);
-  assert.equal(threads[0].comments[0].author, AGENT_AUTHOR);
+  const kept = threads.find((t) => t.id === 'draft')!;
+  assert.equal(kept.remoteThreadId, undefined);
+  assert.equal(kept.comments[0].origin, 'agent');
 });
 
-test('a posted comment stored as the agent takes the fetched login on the next sync or poll', () => {
-  // A review saved while posted comments kept the agent's mark corrects itself on the next fetch.
+test("a later sync or poll keeps the origin of the agent's posted comment", () => {
   const local = [
     imported('T1', 'agent note', {
-      comments: [
-        comment({ id: 'T1c', remoteId: 'T1c', body: 'agent note', remoteBody: 'agent note', author: AGENT_AUTHOR }),
-      ],
+      comments: [agentComment({ id: 'T1c', remoteId: 'T1c', body: 'agent note', remoteBody: 'agent note' })],
     }),
   ];
-  const fresh = [imported('T1', 'agent note')]; // the helper authors as 'me', which is what GitHub reports
+  const fresh = [imported('T1', 'agent note')];
   for (const removeMissing of [true, false]) {
     const { threads } = reconcile(local, [], fresh, { viewer: 'me', removeMissing });
-    assert.equal(threads[0].comments[0].author, 'me', `removeMissing: ${removeMissing}`);
+    assert.equal(threads[0].comments[0].origin, 'agent', `removeMissing: ${removeMissing}`);
   }
 });
 
-test("an upstream edit of the agent's posted comment lands with the fetched author", () => {
+test("an upstream edit of the agent's posted comment arrives with its origin kept", () => {
   const local = [
     imported('T1', 'agent note', {
-      comments: [
-        comment({ id: 'T1c', remoteId: 'T1c', body: 'agent note', remoteBody: 'agent note', author: AGENT_AUTHOR }),
-      ],
+      comments: [agentComment({ id: 'T1c', remoteId: 'T1c', body: 'agent note', remoteBody: 'agent note' })],
     }),
   ];
   const fresh = [imported('T1', 'reworded on github')];
   const { threads } = reconcile(local, [], fresh, { viewer: 'me' });
   assert.equal(threads[0].comments[0].body, 'reworded on github');
-  assert.equal(threads[0].comments[0].author, 'me');
+  assert.equal(threads[0].comments[0].origin, 'agent');
 });
 
-test("a pending edit of the agent's posted comment survives with the fetched author", () => {
+test("a pending edit of the agent's posted comment keeps the edit and the origin", () => {
   const local = [
     imported('T1', 'agent note', {
-      comments: [
-        comment({ id: 'T1c', remoteId: 'T1c', body: 'agent rewrite', remoteBody: 'agent note', author: AGENT_AUTHOR }),
-      ],
+      comments: [agentComment({ id: 'T1c', remoteId: 'T1c', body: 'agent rewrite', remoteBody: 'agent note' })],
     }),
   ];
   const fresh = [imported('T1', 'agent note')];
   const { threads } = reconcile(local, [], fresh, { viewer: 'me' });
   assert.equal(threads[0].comments[0].body, 'agent rewrite'); // still pending, still submittable
-  assert.equal(threads[0].comments[0].author, 'me');
+  assert.equal(threads[0].comments[0].origin, 'agent');
 });
 
-test('an agent reply that has posted takes the author GitHub recorded', () => {
+test('an agent reply that has posted keeps its origin on the fetched copy', () => {
   const local = [imported('T1', 'root')];
-  local[0].comments.push(comment({ id: 'r1', body: 'agent reply', author: AGENT_AUTHOR }));
+  local[0].comments.push(agentComment({ id: 'r1', body: 'agent reply' }));
   const fresh = [
     imported('T1', 'root', {
       comments: [
         comment({ id: 'T1c', remoteId: 'T1c', body: 'root', remoteBody: 'root' }),
-        comment({ id: 'T1r', remoteId: 'T1r', body: 'agent reply', remoteBody: 'agent reply', author: 'me' }),
+        comment({ id: 'T1r', remoteId: 'T1r', body: 'agent reply', remoteBody: 'agent reply' }),
       ],
     }),
   ];
@@ -553,7 +552,20 @@ test('an agent reply that has posted takes the author GitHub recorded', () => {
     ['root', 'agent reply'], // exactly one copy of the reply, and it is the posted one
   );
   assert.equal(threads[0].comments[1].remoteId, 'T1r');
-  assert.equal(threads[0].comments[1].author, 'me');
+  assert.equal(threads[0].comments[1].origin, 'agent');
+  assert.equal(threads[0].comments[0].origin, undefined, 'your root stays yours');
+});
+
+test('an agent comment deleted upstream turns local-only with its origin kept', () => {
+  const local = [
+    imported('T1', 'agent note', {
+      comments: [agentComment({ id: 'T1c', remoteId: 'T1c', body: 'agent note', remoteBody: 'agent note' })],
+    }),
+  ];
+  const { threads, orphans } = reconcile(local, [], [], { viewer: 'me' });
+  assert.equal(orphans.localOnly, 1);
+  assert.equal(threads[0].comments[0].localOnly, true);
+  assert.equal(threads[0].comments[0].origin, 'agent');
 });
 
 test('your own comment takes the fetched login, which is what edit permission measures against', () => {
