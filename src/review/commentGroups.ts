@@ -1,7 +1,7 @@
 // Grouping and ordering for the review's comment list. Pure: no vscode, no state, no mutation of the
 // threads it is handed.
 import type { CommentThread } from '../model/Comment';
-import { UNKNOWN_AUTHOR } from '../model/Comment';
+import { AGENT_NAME, isAgentComment, UNKNOWN_AUTHOR } from '../model/Comment';
 import { endLine, startLine } from '../comments/position';
 
 export type CommentGroupBy = 'file' | 'author' | 'none';
@@ -17,9 +17,14 @@ export interface CommentGroup {
   threads: CommentThread[];
 }
 
-/** Who opened the thread. Grouping keys off the root alone, so a thread lands in exactly one group. */
+/**
+ * Who opened the thread. Grouping keys off the root alone, so a thread lands in exactly one group. A thread
+ * the agent opened groups under the agent, even though its root is authored as you.
+ */
 export function rootAuthor(t: CommentThread): string {
-  return t.comments[0]?.author || UNKNOWN_AUTHOR;
+  const root = t.comments[0];
+  if (root && isAgentComment(root)) return AGENT_NAME;
+  return root?.author || UNKNOWN_AUTHOR;
 }
 
 /**

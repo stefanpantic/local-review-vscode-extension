@@ -7,10 +7,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { TOOLS, type McpReviewApi } from '../src/mcp/tools';
-import { canEditComment, AGENT_AUTHOR, type Comment, type CommentThread, type Review } from '../src/model/Comment';
+import { canEditComment, type Comment, type CommentThread, type Review } from '../src/model/Comment';
 
 /** The human whose identity the agent posts under, and who the rule measures against. */
 const VIEWER = 'me';
+
+/** The agent's comments are authored as the human and marked by origin. */
+const AGENT: Partial<Comment> = { origin: 'agent' };
 
 const comment = (author: string, over: Partial<Comment> = {}): Comment => ({
   id: 'c1',
@@ -134,11 +137,14 @@ test('the host surface handed to MCP is exactly these methods', () => {
 });
 
 test('on a pull request the agent may change its own comments and yours, and no one else can be touched', async () => {
-  for (const author of [AGENT_AUTHOR, VIEWER]) {
-    const ours = api(review(author, 'remote'));
+  for (const [label, over] of [
+    ['agent', AGENT],
+    ['you', {}],
+  ] as const) {
+    const ours = api(review(VIEWER, 'remote', over));
     await tool('edit_comment').handler(ours, { ...ids, body: 'reworded' });
     await tool('delete_comment').handler(ours, ids);
-    assert.deepEqual(ours.mutations, ['edit', 'delete'], author);
+    assert.deepEqual(ours.mutations, ['edit', 'delete'], label);
   }
 
   const theirs = api(review('octocat', 'remote'));
@@ -148,18 +154,20 @@ test('on a pull request the agent may change its own comments and yours, and no 
 });
 
 test('a comment the agent already submitted to the pull request stays its to revise', async () => {
-  // Submitting posts it under your identity; reconcile keeps the agent's authorship so the rule still holds,
-  // and it holds either way now that the rule measures against you.
-  for (const author of [AGENT_AUTHOR, VIEWER]) {
-    const posted = api(review(author, 'remote', { remoteId: '99', remoteBody: 'b' }));
+  // Submit posts it under your identity, and the rule measures against you, so it stays editable.
+  for (const [label, over] of [
+    ['agent', AGENT],
+    ['you', {}],
+  ] as const) {
+    const posted = api(review(VIEWER, 'remote', { remoteId: '99', remoteBody: 'b', ...over }));
     await tool('edit_comment').handler(posted, { ...ids, body: 'a second pass' });
     await tool('delete_comment').handler(posted, ids);
-    assert.deepEqual(posted.mutations, ['edit', 'delete'], author);
+    assert.deepEqual(posted.mutations, ['edit', 'delete'], label);
   }
 });
 
 test('on a local review the agent may change every comment, whoever wrote it', async () => {
-  for (const author of [AGENT_AUTHOR, 'me', 'someone-else']) {
+  for (const author of ['me', 'someone-else']) {
     const local = api(review(author, 'local'));
     await tool('edit_comment').handler(local, { ...ids, body: 'reworded' });
     await tool('delete_comment').handler(local, ids);
@@ -171,7 +179,7 @@ test('the refusal names the author, so a caller learns why instead of retrying',
   const theirs = api(review('octocat', 'remote'));
   await assert.rejects(
     () => tool('edit_comment').handler(theirs, { ...ids, body: 'x' }),
-    (e: Error) => e.message.includes('octocat') && e.message.includes(AGENT_AUTHOR) && e.message.includes(VIEWER),
+    (e: Error) => e.message.includes('octocat') && e.message.includes('via MCP') && e.message.includes(VIEWER),
   );
 });
 
@@ -183,7 +191,7 @@ test('resolve stays open to any thread, whoever wrote it', async () => {
 });
 
 test('the rule itself, at the boundary the tools apply it on', () => {
-  assert.equal(canEditComment(comment(AGENT_AUTHOR), VIEWER, true), true);
+  assert.equal(canEditComment(comment('Stefan Pantic', AGENT), VIEWER, true), true);
   assert.equal(canEditComment(comment(VIEWER), VIEWER, true), true);
   assert.equal(canEditComment(comment('octocat'), VIEWER, true), false);
   assert.equal(canEditComment(comment('octocat'), VIEWER, false), true);

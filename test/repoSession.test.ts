@@ -8,7 +8,7 @@ import { RepoSession } from '../src/repoSession';
 import { ReviewState } from '../src/reviewState';
 import { ReviewStore, type KeyValueStore } from '../src/comments/ReviewStore';
 import { GithubReviewProvider } from '../src/github/provider';
-import { AGENT_AUTHOR, type Comment, type RemoteRef, type RemoteReview } from '../src/model/Comment';
+import { type Comment, type RemoteRef, type RemoteReview } from '../src/model/Comment';
 import { prBranchKey, type DiffRow, type PrRef, type ReviewDiff } from '../src/model/ReviewDiff';
 import { FakeGithub } from './helpers/fakeGithub';
 
@@ -109,26 +109,26 @@ async function setup(opts?: { prLockWaitMs?: number }): Promise<{
   return { session, github, review, [Symbol.dispose]: () => session.dispose() };
 }
 
-/** Every comment in the review by its text, with who it is attributed to and whether it is on GitHub. */
-function byBody(review: RemoteReview): Record<string, { author: string; posted: boolean }> {
-  const out: Record<string, { author: string; posted: boolean }> = {};
+/** Every comment in the review by its text: who it is attributed to, whether the agent wrote it, and whether it is on GitHub. */
+function byBody(review: RemoteReview): Record<string, { author: string; agent: boolean; posted: boolean }> {
+  const out: Record<string, { author: string; agent: boolean; posted: boolean }> = {};
   const all: Comment[] = review.threads.flatMap((t) => t.comments);
-  for (const c of all) out[c.body] = { author: c.author, posted: c.remoteId != null };
+  for (const c of all) out[c.body] = { author: c.author, agent: c.origin === 'agent', posted: c.remoteId != null };
   return out;
 }
 
 /** A mix of agent and human comments: same line, file-level beside line comments, a range, a reply, a suggestion. */
 async function stageMixedReview(session: RepoSession): Promise<void> {
-  await session.addComment({ filePath: 'a.ts', side: 'new', startLine: 2, body: 'agent on 2', author: AGENT_AUTHOR });
+  await session.addComment({ filePath: 'a.ts', side: 'new', startLine: 2, body: 'agent on 2', origin: 'agent' });
   await session.addComment({ filePath: 'a.ts', side: 'new', startLine: 2, body: 'human on 2' });
-  await session.addComment({ filePath: 'a.ts', body: 'agent on the file', author: AGENT_AUTHOR });
+  await session.addComment({ filePath: 'a.ts', body: 'agent on the file', origin: 'agent' });
   await session.addComment({ filePath: 'a.ts', side: 'new', startLine: 3, endLine: 4, body: 'human on 3-4' });
   const thread = await session.addComment({
     filePath: 'a.ts',
     side: 'new',
     startLine: 6,
     body: 'agent on 6',
-    author: AGENT_AUTHOR,
+    origin: 'agent',
   });
   await session.replyComment(thread.id, 'human reply on 6');
   await session.addComment({
@@ -137,25 +137,25 @@ async function stageMixedReview(session: RepoSession): Promise<void> {
     startLine: 8,
     body: 'agent suggests',
     suggestion: 'better line 8',
-    author: AGENT_AUTHOR,
+    origin: 'agent',
   });
 }
 
-// Every comment posted under the human's login, so that is who each one is attributed to once read back,
-// the agent's included.
+// Submit posts each comment, the agent's included, under the human's login, so the fetch after Submit
+// returns the human's login as the author of each one. The agent's comments keep their origin.
 const expectedAuthors = {
-  'agent on 2': { author: 'me', posted: true },
-  'human on 2': { author: 'me', posted: true },
-  'agent on the file': { author: 'me', posted: true },
-  'human on 3-4': { author: 'me', posted: true },
-  'agent on 6': { author: 'me', posted: true },
-  'human reply on 6': { author: 'me', posted: true },
-  'agent suggests': { author: 'me', posted: true },
+  'agent on 2': { author: 'me', agent: true, posted: true },
+  'human on 2': { author: 'me', agent: false, posted: true },
+  'agent on the file': { author: 'me', agent: true, posted: true },
+  'human on 3-4': { author: 'me', agent: false, posted: true },
+  'agent on 6': { author: 'me', agent: true, posted: true },
+  'human reply on 6': { author: 'me', agent: false, posted: true },
+  'agent suggests': { author: 'me', agent: true, posted: true },
 };
 
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 20));
 
-test("every comment takes the human's login through a Submit, a Sync, and a second Submit", async () => {
+test('every comment keeps its author and origin through a Submit, a Sync, and a second Submit', async () => {
   using s = await setup();
   await stageMixedReview(s.session);
 
@@ -204,8 +204,8 @@ test('a poll answered before a Submit and arriving after it does not undo the Su
 
   assert.deepEqual(byBody(s.review()), {
     ...expectedAuthors,
-    'edited before Submit': { author: 'me', posted: true },
-    'added while the poll was out': { author: 'me', posted: false },
+    'edited before Submit': { author: 'me', agent: false, posted: true },
+    'added while the poll was out': { author: 'me', agent: false, posted: false },
   });
   const comments = s.review().threads.flatMap((t) => t.comments);
   assert.ok(!comments.some((c) => c.conflict), 'the edit that posted is not shown as a conflict');
@@ -231,8 +231,8 @@ test("a poll that a Submit overtook discards its answer, and the next poll bring
   await s.session.pollPullRequest();
   assert.deepEqual(byBody(s.review()), {
     ...expectedAuthors,
-    'edited before Submit': { author: 'me', posted: true },
-    'from someone else': { author: 'them', posted: true },
+    'edited before Submit': { author: 'me', agent: false, posted: true },
+    'from someone else': { author: 'them', agent: false, posted: true },
   });
   assert.equal(s.session.submitPreview()?.counts.total, 0);
 });
@@ -259,8 +259,8 @@ test('a poll whose answer arrives in the middle of a Submit leaves its fetch una
   await submit;
   assert.deepEqual(byBody(s.review()), {
     ...expectedAuthors,
-    'edited before Submit': { author: 'me', posted: true },
-    'from someone else': { author: 'them', posted: true },
+    'edited before Submit': { author: 'me', agent: false, posted: true },
+    'from someone else': { author: 'them', agent: false, posted: true },
   });
   assert.equal(s.session.submitPreview()?.counts.total, 0);
 });
@@ -302,7 +302,7 @@ test('a comment added while Submit reads its result back is kept, and stays stag
   assert.equal(result.readBack, undefined, 'the read-back did not wait on a comment that was never sent');
   assert.deepEqual(byBody(s.review()), {
     ...expectedAuthors,
-    'added meanwhile': { author: 'me', posted: false },
+    'added meanwhile': { author: 'me', agent: false, posted: false },
   });
   assert.equal(s.session.submitPreview()?.counts.total, 1, 'only the new comment is left to post');
 });

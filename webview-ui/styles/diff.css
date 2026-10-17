@@ -749,12 +749,8 @@ body {
   font-weight: 600;
   color: var(--vscode-descriptionForeground);
   margin-bottom: 2px;
-}
-.lr-comment-author.lr-author-agent {
-  color: var(--vscode-charts-purple, var(--vscode-textLink-foreground));
-}
-.lr-comment-author.lr-author-agent::before {
-  content: '✦ ';
+  display: flex;
+  align-items: center;
 }
 .lr-comment-body {
   word-break: break-word;
@@ -898,6 +894,12 @@ body {
 .lr-badge-conflict {
   margin-left: 6px;
   color: var(--vscode-editorError-foreground, #f14c4c);
+  border-color: currentColor;
+}
+/* Top right of a comment the agent wrote, before and after Submit. */
+.lr-badge-agent {
+  margin-left: auto;
+  color: var(--vscode-charts-purple, #b180d7);
   border-color: currentColor;
 }
 

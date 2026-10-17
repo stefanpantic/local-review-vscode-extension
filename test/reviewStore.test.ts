@@ -241,3 +241,28 @@ test('durableThread persists thread-level remote ids across an autosave round-tr
   assert.equal(saved?.remoteThreadId, 'THREAD_1');
   assert.equal(saved?.remoteRootId, 'C_1');
 });
+
+test("comments saved under the agent's old author label move to your identity and the agent origin", async () => {
+  const kv = new FakeStore();
+  const store = new ReviewStore(kv);
+  const r = await store.create('/r', 'main', 'sha');
+  const t = thread('1');
+  t.comments = [
+    { ...t.comments[0], author: 'AI Agent', reactions: { '👍': ['AI Agent', 'me'], '👀': ['AI Agent'] } },
+    { id: 'c2', body: 'mine', createdAt: '', updatedAt: '', author: 'me' },
+  ];
+  await store.updateThreads('/r', r.id, [t]);
+
+  await store.migrateAgentAuthor('/r', 'me');
+  const [agent, mine] = store.get('/r', r.id)!.threads[0].comments;
+  assert.equal(agent.author, 'me');
+  assert.equal(agent.origin, 'agent');
+  assert.deepEqual(agent.reactions, { '👍': ['me'], '👀': ['me'] });
+  assert.equal(mine.author, 'me');
+  assert.equal(mine.origin, undefined);
+
+  // A second run finds nothing to move and saves nothing.
+  const before = kv.data.get('agenticReview.reviews');
+  await store.migrateAgentAuthor('/r', 'me');
+  assert.equal(kv.data.get('agenticReview.reviews'), before);
+});

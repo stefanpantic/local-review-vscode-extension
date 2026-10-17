@@ -33,7 +33,10 @@ export interface Comment {
   body: string;
   createdAt: string; // ISO
   updatedAt: string; // ISO
-  author: string; // who wrote it: the human's git username, "AI Agent" for MCP-posted comments, or "unknown"
+  author: string; // who it is attributed to: your GitHub login or git user.name, a remote login, or "unknown"
+  // Set when a coding agent wrote the comment through MCP. The agent's comments are authored as you, because
+  // Submit posts them under your identity, so this is the only record of who wrote them. It never changes.
+  origin?: CommentOrigin;
   // A proposed replacement for the anchored range (capture-and-export only; never written to disk).
   suggestion?: { original: string; replacement: string };
   // Set when this comment mirrors one posted on a remote (populated on import; used for write-back).
@@ -57,16 +60,25 @@ export interface Comment {
 /** Fallback author when the writer is unknown (git user.name unset, or a legacy comment). */
 export const UNKNOWN_AUTHOR = 'unknown';
 
-/** Author stamped on comments posted by a coding agent through MCP. Shared by host and webview. */
-export const AGENT_AUTHOR = 'AI Agent';
+/** Where a comment came from, when that is not the human typing it in the panel. */
+export type CommentOrigin = 'agent';
+
+/** How the UI names the coding agent. Shared by host and webview. */
+export const AGENT_NAME = 'AI Agent';
+
+/** Whether a coding agent wrote the comment through MCP. */
+export function isAgentComment(comment: Comment): boolean {
+  return comment.origin === 'agent';
+}
 
 /**
  * Whether the current user may edit/delete a comment. In a local review everything is theirs; in a remote
- * (pull-request) review only their own and agent-authored comments are, so imported comments by others are
- * read-only. `viewer` is the current identity (GitHub login or git user.name).
+ * (pull-request) review only their own and the agent's comments are, so imported comments by others are
+ * read-only. `viewer` is the current identity (GitHub login or git user.name). The agent's comments stay
+ * editable when that identity changes after they were written, for example on signing in to GitHub.
  */
 export function canEditComment(comment: Comment, viewer: string | undefined, remote: boolean): boolean {
-  return !remote || comment.author === viewer || comment.author === AGENT_AUTHOR;
+  return !remote || comment.author === viewer || isAgentComment(comment);
 }
 
 export interface CommentThread {

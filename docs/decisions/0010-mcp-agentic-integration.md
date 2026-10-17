@@ -52,8 +52,9 @@ Two things follow.
 **Authorship survives the round trip.** Reconcile keeps `AGENT_AUTHOR` on a comment whose local copy carried
 it, so submitting no longer turns the agent's comment into one of the human's. This also keeps the agent
 badge and the `author:@agent` filter honest on a review that has been submitted, which the old behavior
-silently broke. It is provenance only: the remote record stays what it is. _(**Superseded.** Posted comments now take the
-GitHub author. See the addendum on attribution after Submit below.)_
+broke. It is provenance only: the remote record does not change. _(**Superseded.** An `origin` field now
+records that the agent wrote a comment, and the author is the human's from the start. See "Addendum: the
+agent's comments are authored as the human and marked by origin" below.)_
 
 **The rule measures against the human's identity.** `canEditComment(comment, viewer, remote)` with `viewer`
 from `authorIdentity()`, exactly the call the human UI makes, so the agent may change whatever the human may
@@ -66,7 +67,8 @@ human's explicit Submit.
 
 ## Addendum (iterations 16 and 17): reactions, file-level comments, and the config location
 
-**`react` joins the surface.** It toggles an emoji reaction on a comment, recorded as `AI Agent`. It has no
+**`react` joins the surface.** It toggles an emoji reaction on a comment, recorded as `AI Agent` _(now
+recorded under the human's identity, see the origin addendum below)_. It has no
 permission gate: the agent can react to any comment in the review, including a third party's, the same as
 the human in the panel. On a pull request the reaction is staged like any other change and posted under the
 human's account on Submit.
@@ -79,18 +81,34 @@ the repo, and the `localReview.mcp.autoStart` setting. The connect file now live
 per-workspace storage, so nothing is written into the repository, and **Open MCP Config** opens it. The
 setting is `agenticReview.mcp.autoStart`, renamed with the extension.
 
-## Addendum: a submitted comment takes the GitHub author
+## Addendum: the agent's comments are authored as the human and marked by origin (supersedes "Authorship survives the round trip")
 
-Keeping `AGENT_AUTHOR` after Submit left the agent's comments labelled "AI Agent" forever, while GitHub shows
-them under the human's account. The review then disagreed with the pull request it mirrors.
+Keeping `AGENT_AUTHOR` as the author after Submit left the agent's comments labelled "AI Agent" on every later
+sync, while GitHub shows them under the human's account. The review and the pull request then named
+different authors for the same comment. Taking the fetched author instead fixed that mismatch, but it
+changed the author of the same comment at Submit and erased the only record that the agent wrote it.
 
-Reconcile now takes the fetched author for every posted comment. `AGENT_AUTHOR` marks only agent content that
-has not posted yet: drafts and pending replies. Once Submit posts a comment and a fetch reads it back, it is
-the human's, in the panel, the sidebar, exports, and MCP output. The agent badge and the `author:@agent` filter
-match only unposted agent content. A review saved under the old rule corrects itself on its next sync or poll.
+Author and provenance are now two fields:
 
-The permission rule does not change. It measures against the human's identity, so the agent can still edit
-and delete a comment it wrote after that comment is submitted.
+- **Author.** The MCP tools create every comment and reply under the identity the human's own comments use,
+  the GitHub login when signed in, else `git config user.name`. Reconcile takes the fetched author as before,
+  and for the agent's comments that is the same identity, so the author does not change at Submit.
+  `AGENT_AUTHOR` is gone as an author value. The agent's reactions are recorded under the human's identity
+  too, because Submit posts them under it.
+- **Origin.** `post_comment` and `reply` set `origin: 'agent'` on what they create. Nothing changes it
+  afterwards. Reconcile copies it from the local copy onto the fetched copy at adoption and at every later
+  sync and poll, because GitHub has no record of it. MCP output marks these comments `via MCP`, so an agent
+  can find its own comments to revise them for a second Submit. The panel shows a purple `via MCP` badge on
+  them before and after Submit. The `author:@agent` filter and the "AI Agent" preset match on origin, and
+  `author:@me` leaves the agent's comments out, so the two never overlap. Grouping by author puts a thread
+  the agent opened under "AI Agent". The JSON export carries `origin`.
+
+The permission rule does not change. It checks edits against the human's identity, so the agent can still
+edit and delete a comment it wrote after the human submits that comment. A comment marked as the agent's also
+stays editable if the human's identity changes later, for example on signing in to GitHub.
+
+On refresh, each repository's session rewrites stored comments that still carry the old `AI Agent` author:
+the author becomes the human's identity and the origin becomes `agent`.
 
 ## Consequences
 

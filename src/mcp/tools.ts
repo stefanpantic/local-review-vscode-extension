@@ -2,12 +2,9 @@
 // Handlers return readable text (or throw Error on failure); the server wraps both into MCP content.
 import { z } from 'zod';
 import type { PrCommit, ReviewDiff, Side } from '../model/ReviewDiff';
-import type { Comment, CommentThread, ReactionEmoji, Review } from '../model/Comment';
-import { AGENT_AUTHOR, canEditComment, REACTION_EMOJIS } from '../model/Comment';
+import type { Comment, CommentOrigin, CommentThread, ReactionEmoji, Review } from '../model/Comment';
+import { canEditComment, isAgentComment, REACTION_EMOJIS } from '../model/Comment';
 import { endLine, startLine, threadPath } from '../comments/position';
-
-// Re-exported for existing importers; the definition now lives in the shared model.
-export { AGENT_AUTHOR };
 
 /**
  * What the pull request under review is, beyond its lines: which request, what its author asked for, and
@@ -48,9 +45,9 @@ export interface McpReviewApi {
     endLine?: number;
     body: string;
     suggestion?: string;
-    author: string;
+    origin: CommentOrigin;
   }): Promise<CommentThread>;
-  reply(a: { threadId: string; body: string; author: string }): Promise<CommentThread>;
+  reply(a: { threadId: string; body: string; origin: CommentOrigin }): Promise<CommentThread>;
   resolve(a: { threadId: string; resolved: boolean }): Promise<CommentThread>;
   /** `suggestion`: a string sets it, `null` clears it, omitting it leaves the existing one. */
   editComment(a: {
@@ -60,12 +57,8 @@ export interface McpReviewApi {
     suggestion?: string | null;
   }): Promise<CommentThread>;
   deleteComment(a: { threadId: string; commentId: string }): Promise<{ threadId: string; threadDeleted: boolean }>;
-  toggleReaction(a: {
-    threadId: string;
-    commentId: string;
-    emoji: ReactionEmoji;
-    author: string;
-  }): Promise<CommentThread>;
+  /** Toggles the reaction as the human, because Submit posts it under the human's identity. */
+  toggleReaction(a: { threadId: string; commentId: string; emoji: ReactionEmoji }): Promise<CommentThread>;
 }
 
 /** A repository the agent can address, as `list_repos` reports it. */
@@ -116,7 +109,8 @@ function formatThread(t: CommentThread): string {
           .map((e) => `${e} ${c.reactions![e]!.length}`)
           .join(' ')
       : '';
-    return `  [${c.id}] ${c.author}: ${c.body}${suggestion}${rx}`;
+    const via = isAgentComment(c) ? ' · via MCP' : '';
+    return `  [${c.id}] ${c.author}${via}: ${c.body}${suggestion}${rx}`;
   });
   return [head, ...body].join('\n');
 }
@@ -231,7 +225,7 @@ function requireEditable(api: McpReviewApi, threadId: string, commentId: string)
   const viewer = api.viewer();
   if (!canEditComment(comment, viewer, review?.kind === 'remote')) {
     throw new Error(
-      `Comment ${commentId} was written by ${comment.author}, so it is not yours to change. On a pull request you can only edit or delete comments authored by ${AGENT_AUTHOR} or by ${viewer}.`,
+      `Comment ${commentId} was written by ${comment.author}, so it is not yours to change. On a pull request you can only edit or delete comments marked "via MCP" or authored by ${viewer}.`,
     );
   }
   return comment;
@@ -259,7 +253,8 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'get_review',
     title: 'Get review',
-    description: 'Get a review (default: the current one): its comment threads with ids, positions, status, and text.',
+    description:
+      'Get a review (default: the current one): its comment threads with ids, positions, status, and text. Comments marked "via MCP" were written by an agent.',
     inputShape: { reviewId: z.string().optional() },
     handler: async (api, args) => {
       const review = api.getReview(args.reviewId as string | undefined);
@@ -271,7 +266,7 @@ export const TOOLS: ToolDef[] = [
     name: 'get_active_review',
     title: 'Get the active review',
     description:
-      'Get the review currently being worked on, with each thread and comment id, position, status, and text. Each repository has its own active review. With several repositories, pass `repo` to pick one; without it, the review panel focused last is used. Use the ids it returns to reply, resolve, edit, or delete.',
+      'Get the review currently being worked on, with each thread and comment id, position, status, and text. Each repository has its own active review. With several repositories, pass `repo` to pick one; without it, the review panel focused last is used. Use the ids it returns to reply, resolve, edit, or delete. Comments marked "via MCP" were written by an agent through these tools, and are authored as the human because Submit posts them under the human\'s account.',
     inputShape: {},
     handler: async (api) => {
       const review = api.getReview();
@@ -323,7 +318,7 @@ export const TOOLS: ToolDef[] = [
           endLine: args.endLine as number | undefined,
           body: args.body as string,
           suggestion: args.suggestion as string | undefined,
-          author: AGENT_AUTHOR,
+          origin: 'agent',
         });
         return `Posted thread ${thread.id} at ${threadLoc(thread)} · ${thread.status ?? 'anchored'}.`;
       }
@@ -334,7 +329,7 @@ export const TOOLS: ToolDef[] = [
       const thread = await api.addComment({
         filePath: file,
         body: args.body as string,
-        author: AGENT_AUTHOR,
+        origin: 'agent',
       });
       return `Posted file-level thread ${thread.id} on ${threadLoc(thread)} · ${thread.status ?? 'anchored'}.`;
     },
@@ -349,7 +344,7 @@ export const TOOLS: ToolDef[] = [
       const thread = await api.reply({
         threadId: args.threadId as string,
         body: args.body as string,
-        author: AGENT_AUTHOR,
+        origin: 'agent',
       });
       return `Added reply to thread ${thread.id}.`;
     },
@@ -428,7 +423,7 @@ export const TOOLS: ToolDef[] = [
         throw new Error(
           `Comment ${commentId} not found in thread ${threadId}. Call get_active_review for current ids.`,
         );
-      await api.toggleReaction({ threadId, commentId, emoji, author: AGENT_AUTHOR });
+      await api.toggleReaction({ threadId, commentId, emoji });
       return `Toggled ${emoji} on comment ${commentId} in thread ${threadId}.`;
     },
   },
