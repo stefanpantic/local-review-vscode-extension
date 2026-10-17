@@ -315,11 +315,13 @@ test('a review GitHub created despite a server error is reported as posted, with
   const result = await s.session.submitPullRequest('comment');
   assert.equal(result.unsent, undefined);
   assert.equal(s.github.reviews.length, 1, 'the review was not posted a second time');
+  // With a file-level comment the provider creates a pending review, and recovery finds that review by author and commit without listing comments.
   assert.deepEqual(
     s.github.calls.filter((c) => c === 'listPullRequestComments').length,
-    2,
-    'one listing to recognise the review, one to read its comments back',
+    1,
+    'one listing to read its comments back',
   );
+  assert.equal(s.github.calls.filter((c) => c === 'submitPendingReview').length, 1);
   assert.equal(s.github.rest.length, 7, 'the reply on a new thread still posted');
   assert.deepEqual(byBody(s.review()), expectedAuthors);
   assert.equal(s.session.submitPreview()?.counts.total, 0);

@@ -347,6 +347,24 @@ test('submitBatches lists the non-empty batches in send order, counting requests
   );
 });
 
+test('submitBatches counts the pending flow: the check, a request per file-level comment, and the submit', () => {
+  const batches = submitBatches(
+    input({
+      newThreads: [
+        { root: { path: 'a.ts', side: 'new', line: 1, body: 'x' }, replies: [] },
+        { root: { path: 'a.ts', body: 'f1', subject_type: 'file' }, replies: [] },
+        { root: { path: 'b.ts', body: 'f2', subject_type: 'file' }, replies: [] },
+      ],
+    }),
+  );
+  // The pending-review check (two requests), the pending review, the two file-level comments, the submit, and
+  // one read of the created comments.
+  assert.deepEqual(
+    batches.map((b) => [b.kind, b.total]),
+    [['review', 7]],
+  );
+});
+
 test('submitBatches has only the review for new comments with nothing else staged', () => {
   const threads = Array.from({ length: 38 }, (_, i) => ({
     root: { path: 'a.ts', side: 'new' as const, line: i + 1, body: `c${i}` },

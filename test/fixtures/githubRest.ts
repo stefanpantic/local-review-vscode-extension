@@ -3,16 +3,30 @@
 // client uses, so a test cannot pass on a field GitHub never sends.
 import type { GhNewComment, GhRestReviewComment } from '../../src/github/client';
 
-/** The comment GitHub creates for one entry of a create-review batch. */
-export function restRoot(id: number, reviewId: number, c: GhNewComment): GhRestReviewComment {
-  const file = c.subject_type === 'file';
+/** The state GitHub gives a review submitted with each event. */
+export const REVIEW_STATES = {
+  COMMENT: 'COMMENTED',
+  APPROVE: 'APPROVED',
+  REQUEST_CHANGES: 'CHANGES_REQUESTED',
+} as const;
+
+/** A file-level comment added to a pending review. */
+export interface FileComment {
+  path: string;
+  body: string;
+  subject_type: 'file';
+}
+
+/** The comment GitHub creates for one entry of a create-review batch, or for a file-level comment. */
+export function restRoot(id: number, reviewId: number, c: GhNewComment | FileComment): GhRestReviewComment {
+  const file = 'subject_type' in c;
   return {
     id,
     node_id: `node-${id}`,
     path: c.path,
     body: c.body,
-    side: file ? null : (c.side ?? 'RIGHT'),
-    original_line: file ? null : (c.line ?? null),
+    side: file ? null : c.side,
+    original_line: file ? null : c.line,
     original_start_line: file ? null : (c.start_line ?? null),
     subject_type: file ? 'file' : 'line',
     pull_request_review_id: reviewId,

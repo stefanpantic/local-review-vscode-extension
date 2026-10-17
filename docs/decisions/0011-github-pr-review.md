@@ -32,7 +32,7 @@ This reframes the vision to **local-first with opt-in GitHub PR review**: nothin
 
 Implementing the write half settled a few mechanics on top of the decision above:
 
-- **One review, posted last, pinned.** Submit performs the housekeeping calls (edits, deletes, imported-thread replies, resolves) and then a single create-review batch carrying the new comments and the chosen event, pinned to the reviewed `commit_id`. The neutral `SubmitReviewInput` (built by a pure `buildSubmitPlan`) is what the GitHub provider translates into these calls, so the batch logic is host-agnostic and unit-tested.
+- **One review, posted last, pinned.** Submit performs the housekeeping calls (edits, deletes, imported-thread replies, resolves) and then a single create-review batch carrying the new comments and the chosen event, pinned to the reviewed `commit_id`. A review with file-level comments is created pending and submitted afterwards, as the file-level threads bullet below describes. The neutral `SubmitReviewInput` (built by a pure `buildSubmitPlan`) is what the GitHub provider translates into these calls, so the batch logic is host-agnostic and unit-tested.
 - **A draft you replied to before submitting posts in one press.** A reply needs its root's id, which only exists once the review is created, so the provider posts the batch, reads back the created comments, matches each root, and posts its follow-up replies — all within the one Submit. No "submit twice".
 - **Reconcile is the single merge primitive.** Open, the poll, refresh, and the pre-submit re-fetch all merge a fresh posted set over local pending through one function: upstream content refreshes, local pending re-applies, a vanished reply target re-homes to a draft (never a 404), and **your own comment deleted upstream is kept `localOnly` and repostable rather than removed**. Ids reconcile by re-import after Submit, so a re-run can't double-post.
 - **Sync is gentle and non-surprising.** A background poll (PR-mode only, configurable interval) live-updates comment changes; an advanced head is never swapped in automatically — it raises a Refresh banner. Concurrent edits are last-write-wins for now.
@@ -105,7 +105,15 @@ network capability.
   change when the pull request gains commits. Submit tries a copy with the same place and the same text first, so
   two comments on one line each pair with the right copy. A file-level root pairs only with a file-level comment.
 - **File-level threads round-trip (iteration 17).** Import no longer drops a thread with no line. It becomes
-  a `FileAnchor` thread, and a new file-level comment posts with `subject_type: "file"`.
+  a `FileAnchor` thread. GitHub's create-review call rejects file-level comments. When a Submit includes
+  file-level comments, ReviewMate first refuses if you already have a pending review on the pull request, then
+  creates the review pending with the line comments, adds each file-level comment through GraphQL
+  `addPullRequestReviewThread` (`subjectType: FILE`), and submits the review with the event and summary. GitHub
+  records one review. If a step fails after GitHub created the pending review, ReviewMate deletes the pending
+  review and reports the error, unless the failed submit call took effect. When no lookup can tell whether the
+  submit took effect, ReviewMate reports the error and leaves the review alone. When the pending create call fails
+  but GitHub may have created the review, ReviewMate looks up your pending review on the reviewed commit and
+  continues with that review. ReviewMate posts a Submit with line comments only in one call.
 - **Rate limits (PR #89).** The client uses Octokit's throttling plugin. It retries a request once after a
   primary or secondary rate limit, and spaces writes out so a large Submit doesn't burst. Writes, including the ones that notify people, are spaced 1 second apart, the gap GitHub asks for. Each client has its own queues, so one repository's Submit never waits behind another repository's poll. Every request fails after 2 minutes without an answer, so a request GitHub never answers cannot hold a Submit forever. The provider reuses
   one client while the token is unchanged, so the plugin keeps its rate-limit state across calls. The

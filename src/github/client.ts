@@ -44,16 +44,21 @@ export interface GhViewerTeam {
   org: string; // organization login
 }
 
-/** One new comment in a create-review batch, in GitHub's shape. File-level comments omit line/side. */
+/**
+ * One new line comment in a create-review batch, in GitHub's shape. The create-review call rejects file-level
+ * comments, so the provider adds them to a pending review through `addFileThread`.
+ */
 export interface GhNewComment {
   path: string;
   body: string;
-  line?: number;
-  side?: 'LEFT' | 'RIGHT';
+  line: number;
+  side: 'LEFT' | 'RIGHT';
   start_line?: number;
   start_side?: 'LEFT' | 'RIGHT';
-  subject_type?: 'file';
 }
+
+/** The event a review is submitted with. */
+export type GhReviewEvent = 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
 
 /** A review comment as posted, enough to match it back to the local comment that created it. */
 export interface GhPostedComment {
@@ -108,6 +113,7 @@ export function createdByReview(comments: GhRestReviewComment[], reviewId: numbe
 /** A submitted or pending review on a pull request, enough to recognise one a failed create made anyway. */
 export interface GhReview {
   id: number;
+  nodeId: string;
   author?: string;
   commitId?: string;
   state: string; // 'COMMENTED' | 'APPROVED' | 'CHANGES_REQUESTED' | 'PENDING' | 'DISMISSED'
@@ -116,16 +122,29 @@ export interface GhReview {
 
 /** The write operations Submit needs, on top of the read surface. All egress runs through these. */
 export interface GithubWriteClient extends GithubReadClient {
+  /**
+   * Without an event, GitHub creates the review pending, visible only to you until `submitPendingReview` submits
+   * the review.
+   */
   createReview(
     repo: RemoteRepoRef,
     number: number,
     input: {
       commitId: string;
-      event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
+      event?: GhReviewEvent;
       body: string;
       comments: GhNewComment[];
     },
-  ): Promise<{ id: number }>;
+  ): Promise<{ id: number; nodeId: string }>;
+  /** Add a file-level comment to a pending review, addressed by the review's node id. */
+  addFileThread(reviewNodeId: string, input: { path: string; body: string }): Promise<void>;
+  submitPendingReview(
+    repo: RemoteRepoRef,
+    number: number,
+    reviewId: number,
+    input: { event: GhReviewEvent; body: string },
+  ): Promise<void>;
+  deletePendingReview(repo: RemoteRepoRef, number: number, reviewId: number): Promise<void>;
   /** Every review on the pull request, oldest first. */
   listReviews(repo: RemoteRepoRef, number: number): Promise<GhReview[]>;
   /**
@@ -248,6 +267,9 @@ interface ReactionsResponse {
   node: { reactions: ReactionPage };
 }
 
+// The REST API cannot add a file-level comment to a review, so the client sends this GraphQL mutation instead.
+const ADD_FILE_THREAD_MUTATION = `mutation ($reviewId: ID!, $path: String!, $body: String!) { addPullRequestReviewThread(input: { pullRequestReviewId: $reviewId, path: $path, body: $body, subjectType: FILE }) { thread { id } } }`;
+
 const ADD_REACTION_MUTATION = `mutation ($subjectId: ID!, $content: ReactionContent!) { addReaction(input: { subjectId: $subjectId, content: $content }) { reaction { id } } }`;
 const REMOVE_REACTION_MUTATION = `mutation ($subjectId: ID!, $content: ReactionContent!) { removeReaction(input: { subjectId: $subjectId, content: $content }) { reaction { id } } }`;
 
@@ -348,11 +370,11 @@ class OctokitClient implements GithubWriteClient {
     number: number,
     input: {
       commitId: string;
-      event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
+      event?: GhReviewEvent;
       body: string;
       comments: GhNewComment[];
     },
-  ): Promise<{ id: number }> {
+  ): Promise<{ id: number; nodeId: string }> {
     const { data } = await this.kit.rest.pulls.createReview({
       owner: repo.owner,
       repo: repo.repo,
@@ -362,7 +384,36 @@ class OctokitClient implements GithubWriteClient {
       body: input.body || undefined,
       comments: input.comments,
     });
-    return { id: data.id };
+    return { id: data.id, nodeId: data.node_id };
+  }
+
+  async addFileThread(reviewNodeId: string, input: { path: string; body: string }): Promise<void> {
+    await this.gql(ADD_FILE_THREAD_MUTATION, { reviewId: reviewNodeId, path: input.path, body: input.body });
+  }
+
+  async submitPendingReview(
+    repo: RemoteRepoRef,
+    number: number,
+    reviewId: number,
+    input: { event: GhReviewEvent; body: string },
+  ): Promise<void> {
+    await this.kit.rest.pulls.submitReview({
+      owner: repo.owner,
+      repo: repo.repo,
+      pull_number: number,
+      review_id: reviewId,
+      event: input.event,
+      body: input.body || undefined,
+    });
+  }
+
+  async deletePendingReview(repo: RemoteRepoRef, number: number, reviewId: number): Promise<void> {
+    await this.kit.rest.pulls.deletePendingReview({
+      owner: repo.owner,
+      repo: repo.repo,
+      pull_number: number,
+      review_id: reviewId,
+    });
   }
 
   async listReviews(repo: RemoteRepoRef, number: number): Promise<GhReview[]> {
@@ -374,6 +425,7 @@ class OctokitClient implements GithubWriteClient {
     });
     return data.map((r) => ({
       id: r.id,
+      nodeId: r.node_id,
       author: r.user?.login,
       commitId: r.commit_id ?? undefined,
       state: r.state,

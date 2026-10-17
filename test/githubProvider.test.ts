@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import { GithubReviewProvider, createGithubProvider, pairCreated } from '../src/github/provider';
 import captured from './fixtures/review-comments.json';
 import { createdByReview, postedComment } from '../src/github/client';
-import { restReply, restRoot } from './fixtures/githubRest';
+import { REVIEW_STATES, restReply, restRoot } from './fixtures/githubRest';
 import type {
   GhNewComment,
   GhPostedComment,
   GhRestReviewComment,
   GhReview,
+  GhReviewEvent,
   GhViewerTeam,
   GithubWriteClient,
   ThrottleListener,
@@ -33,9 +34,23 @@ function diff(rows: DiffRow[]): ReviewDiff {
   return { repoRoot: '/r', source: 'pr', headSha: 'head', files: [file], generatedAt: 'x' };
 }
 
+function httpError(status: number): Error {
+  return Object.assign(new Error(`HTTP ${status}`), { status });
+}
+
 class FakeClient implements GithubWriteClient {
   // Recorded write calls, so a submit's translation + sequencing can be asserted without the network.
-  reviews: { event: string; commitId: string; body: string; comments: GhNewComment[] }[] = [];
+  reviews: { event?: string; commitId: string; body: string; comments: GhNewComment[] }[] = [];
+  states = new Map<number, string>(); // each created review's state, by id
+  fileThreads: { reviewNodeId: string; path: string; body: string }[] = [];
+  submitted: { reviewId: number; event: string; body: string }[] = [];
+  deletedPending: number[] = [];
+  failAddFileThread?: unknown;
+  /** Make createReview throw this error after creating the review, as GitHub does under load. */
+  createdThenFails?: unknown;
+  /** Make the submit call throw this error, after submitting the review when `submitLands` is set. */
+  failSubmit?: unknown;
+  submitLands = false;
   rest: GhRestReviewComment[] = []; // every review comment on the pull request, as GitHub lists them
   replies: { inReplyTo: number; body: string }[] = [];
   edits: { commentId: number; body: string }[] = [];
@@ -56,18 +71,52 @@ class FakeClient implements GithubWriteClient {
     _number: number,
     input: {
       commitId: string;
-      event: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
+      event?: GhReviewEvent;
       body: string;
       comments: GhNewComment[];
     },
-  ): Promise<{ id: number }> {
+  ): Promise<{ id: number; nodeId: string }> {
+    // GitHub's create call refuses a file-level comment.
+    if (input.comments.some((c) => 'subject_type' in c || c.line == null)) throw httpError(422);
     this.reviews.push(input);
     const reviewId = this.reviews.length;
+    this.states.set(reviewId, input.event ? REVIEW_STATES[input.event] : 'PENDING');
     for (const c of input.comments) this.rest.push(restRoot(this.nextId++, reviewId, c));
-    return { id: reviewId };
+    if (this.createdThenFails) throw this.createdThenFails;
+    return { id: reviewId, nodeId: `review-${reviewId}` };
+  }
+  async addFileThread(reviewNodeId: string, input: { path: string; body: string }): Promise<void> {
+    if (this.failAddFileThread) throw this.failAddFileThread;
+    const reviewId = Number(reviewNodeId.replace('review-', ''));
+    assert.equal(this.states.get(reviewId), 'PENDING', 'a file-level comment joins a pending review');
+    this.fileThreads.push({ reviewNodeId, ...input });
+    this.rest.push(restRoot(this.nextId++, reviewId, { ...input, subject_type: 'file' }));
+  }
+  async submitPendingReview(
+    _repo: unknown,
+    _number: number,
+    reviewId: number,
+    input: { event: GhReviewEvent; body: string },
+  ): Promise<void> {
+    if (this.failSubmit && !this.submitLands) throw this.failSubmit;
+    this.submitted.push({ reviewId, ...input });
+    this.states.set(reviewId, REVIEW_STATES[input.event]);
+    if (this.failSubmit) throw this.failSubmit;
+  }
+  async deletePendingReview(_repo: unknown, _number: number, reviewId: number): Promise<void> {
+    this.deletedPending.push(reviewId);
+    this.states.delete(reviewId);
+    this.rest = this.rest.filter((c) => c.pull_request_review_id !== reviewId);
   }
   async listReviews(): Promise<GhReview[]> {
-    return [];
+    return [...this.states].map(([id, state]) => ({
+      id,
+      nodeId: `review-${id}`,
+      author: 'octocat',
+      commitId: 'H',
+      state,
+      body: '',
+    }));
   }
   async listPullRequestComments(): Promise<GhRestReviewComment[]> {
     return this.rest;
@@ -75,7 +124,8 @@ class FakeClient implements GithubWriteClient {
   async reply(_repo: unknown, _number: number, input: { inReplyTo: number; body: string }): Promise<GhPostedComment> {
     this.replies.push(input);
     const root =
-      this.rest.find((c) => c.id === input.inReplyTo) ?? restRoot(input.inReplyTo, 0, { path: 'a.ts', body: '' });
+      this.rest.find((c) => c.id === input.inReplyTo) ??
+      restRoot(input.inReplyTo, 0, { path: 'a.ts', body: '', line: 1, side: 'RIGHT' });
     const reply = restReply(this.nextId++, this.reviews.length + 1000, root, input.body);
     this.rest.push(reply);
     return postedComment(reply);
@@ -482,11 +532,168 @@ test('a line root and a file-level root on one file both get their follow-up rep
       if (step.kind === 'created') stamped.push(`${step.commentId}=${step.remoteId}`);
     },
   );
-  assert.deepEqual(stamped, ['f=500', 'l=501']);
+  // The provider creates the review pending with the line comment (500), adds the file-level comment (501), then submits the review.
+  assert.equal(client.reviews[0].event, undefined);
+  assert.deepEqual(
+    client.reviews[0].comments.map((c) => c.body),
+    ['line'],
+  );
+  assert.deepEqual(client.fileThreads, [{ reviewNodeId: 'review-1', path: 'a.ts', body: 'file' }]);
+  assert.deepEqual(client.submitted, [{ reviewId: 1, event: 'COMMENT', body: '' }]);
+  assert.deepEqual(stamped, ['f=501', 'l=500']);
   assert.deepEqual(client.replies, [
-    { inReplyTo: 500, body: 'r1' },
-    { inReplyTo: 501, body: 'r2' },
+    { inReplyTo: 501, body: 'r1' },
+    { inReplyTo: 500, body: 'r2' },
   ]);
+});
+
+// --- the provider posts file-level comments through a pending review ---
+
+/** A Submit with one file-level comment and nothing else. */
+function fileOnly(event: SubmitReviewInput['event'], body: string): SubmitReviewInput {
+  return {
+    event,
+    commitId: 'H',
+    body,
+    newThreads: [{ root: { path: 'a.ts', body: 'file', subject_type: 'file', localId: 'f' }, replies: [] }],
+    replies: [],
+    edits: [],
+    deletes: [],
+    resolves: [],
+    reactions: [],
+  };
+}
+
+const noPause = async (): Promise<void> => {};
+
+test('a file-level comment alone posts in a pending review submitted with the event and summary', async () => {
+  const client = new FakeClient();
+  const p = new GithubReviewProvider('github', async () => client);
+  const stamped: string[] = [];
+  const steps: string[] = [];
+  await p.submitReview(
+    repo,
+    7,
+    fileOnly('approve', 'LGTM'),
+    (step) => {
+      if (step.kind === 'created') stamped.push(`${step.commentId}=${step.remoteId}`);
+    },
+    (step) => {
+      if (step.kind === 'request-done') steps.push(step.batch);
+    },
+  );
+  assert.deepEqual(client.reviews, [{ commitId: 'H', body: '', comments: [] }]);
+  assert.deepEqual(client.submitted, [{ reviewId: 1, event: 'APPROVE', body: 'LGTM' }]);
+  assert.deepEqual(stamped, ['f=500']);
+  // The pending-review check (two requests), the pending create, the file-level comment, the submit, and the read back.
+  assert.equal(steps.length, 6);
+  assert.ok(steps.every((b) => b === 'review'));
+});
+
+test('when GitHub refuses a file-level comment, the provider deletes the pending review and posts nothing', async () => {
+  const client = new FakeClient();
+  client.failAddFileThread = httpError(422);
+  const p = new GithubReviewProvider('github', async () => client);
+  const stamped: string[] = [];
+  await assert.rejects(
+    () =>
+      p.submitReview(repo, 7, fileOnly('comment', ''), (step) => {
+        if (step.kind === 'created') stamped.push(step.commentId);
+      }),
+    /HTTP 422/,
+  );
+  assert.deepEqual(client.deletedPending, [1]);
+  assert.deepEqual(client.submitted, []);
+  assert.deepEqual(stamped, []);
+});
+
+test('a submit that fails after GitHub submitted the review still links the comment', async () => {
+  const client = new FakeClient();
+  client.failSubmit = httpError(502);
+  client.submitLands = true;
+  const p = new GithubReviewProvider('github', async () => client, noPause);
+  const stamped: string[] = [];
+  await p.submitReview(repo, 7, fileOnly('comment', ''), (step) => {
+    if (step.kind === 'created') stamped.push(`${step.commentId}=${step.remoteId}`);
+  });
+  assert.deepEqual(client.deletedPending, []);
+  assert.deepEqual(stamped, ['f=500']);
+});
+
+test('a submit that fails while the review is still pending deletes it', async () => {
+  const client = new FakeClient();
+  client.failSubmit = httpError(502);
+  const p = new GithubReviewProvider('github', async () => client, noPause);
+  await assert.rejects(() => p.submitReview(repo, 7, fileOnly('comment', '')), /HTTP 502/);
+  assert.deepEqual(client.deletedPending, [1]);
+});
+
+test('a submit that went through is recognised even when the first lookup fails', async () => {
+  const client = new FakeClient();
+  client.failSubmit = httpError(502);
+  client.submitLands = true;
+  const p = new GithubReviewProvider('github', async () => client, noPause);
+  // The pending-review check before the create lists reviews once; the first lookup after the submit fails.
+  const listReviews = client.listReviews.bind(client);
+  let calls = 0;
+  client.listReviews = async (): Promise<GhReview[]> => {
+    if (++calls === 2) throw httpError(502);
+    return listReviews();
+  };
+  const stamped: string[] = [];
+  await p.submitReview(repo, 7, fileOnly('comment', ''), (step) => {
+    if (step.kind === 'created') stamped.push(`${step.commentId}=${step.remoteId}`);
+  });
+  assert.deepEqual(client.deletedPending, []);
+  assert.deepEqual(stamped, ['f=500']);
+});
+
+test('a submit whose outcome no lookup can tell is reported without deleting the review', async () => {
+  const client = new FakeClient();
+  client.failSubmit = httpError(502);
+  client.submitLands = true;
+  const p = new GithubReviewProvider('github', async () => client, noPause);
+  const listReviews = client.listReviews.bind(client);
+  let calls = 0;
+  client.listReviews = async (): Promise<GhReview[]> => {
+    if (++calls > 1) throw httpError(502); // every lookup after the pending-review check fails
+    return listReviews();
+  };
+  await assert.rejects(() => p.submitReview(repo, 7, fileOnly('comment', '')), /HTTP 502/);
+  assert.deepEqual(client.deletedPending, []);
+});
+
+test('a pending review you already have is refused before anything is sent', async () => {
+  const client = new FakeClient();
+  client.states.set(1, 'PENDING');
+  const p = new GithubReviewProvider('github', async () => client);
+  await assert.rejects(() => p.submitReview(repo, 7, fileOnly('comment', '')), /pending review on this pull request/);
+  assert.deepEqual(client.reviews, []);
+  assert.deepEqual(client.deletedPending, []);
+});
+
+test('a pending create that fails after GitHub made the review continues with that review', async () => {
+  const client = new FakeClient();
+  client.createdThenFails = httpError(502);
+  const p = new GithubReviewProvider('github', async () => client, noPause);
+  const stamped: string[] = [];
+  await p.submitReview(repo, 7, fileOnly('comment', ''), (step) => {
+    if (step.kind === 'created') stamped.push(`${step.commentId}=${step.remoteId}`);
+  });
+  assert.equal(client.reviews.length, 1, 'the review was not opened a second time');
+  assert.deepEqual(client.submitted, [{ reviewId: 1, event: 'COMMENT', body: '' }]);
+  assert.deepEqual(stamped, ['f=500']);
+});
+
+test('a pending create that fails without making a review is reported', async () => {
+  const client = new FakeClient();
+  client.createReview = async (): Promise<{ id: number; nodeId: string }> => {
+    throw httpError(502);
+  };
+  const p = new GithubReviewProvider('github', async () => client, noPause);
+  await assert.rejects(() => p.submitReview(repo, 7, fileOnly('comment', '')), /HTTP 502/);
+  assert.deepEqual(client.fileThreads, []);
+  assert.deepEqual(client.submitted, []);
 });
 
 // --- client caching via createGithubProvider ---

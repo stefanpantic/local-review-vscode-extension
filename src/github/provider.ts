@@ -19,6 +19,7 @@ import {
   createGithubClient,
   type GhNewComment,
   type GhPostedComment,
+  type GhReviewEvent,
   type GithubWriteClient,
 } from './client';
 import { mayHaveLanded } from './errors';
@@ -28,14 +29,13 @@ import { enterpriseHost, type GithubProviderId } from './remote';
 
 const ghSide = (side: Side): 'LEFT' | 'RIGHT' => (side === 'old' ? 'LEFT' : 'RIGHT');
 
-/** A new-thread root in GitHub's create-review comment shape. */
+/** A new line-comment root in the comment shape that GitHub's create-review call takes. */
 function ghComment(root: NewInlineComment): GhNewComment {
-  if (root.subject_type === 'file') return { path: root.path, body: root.body, subject_type: 'file' };
   const side = ghSide(root.side!);
   return {
     path: root.path,
     body: root.body,
-    line: root.line,
+    line: root.line!,
     side,
     ...(root.startLine != null ? { start_line: root.startLine, start_side: side } : {}),
   };
@@ -233,21 +233,15 @@ class GithubReviewProvider implements ReviewProvider {
     let reviewId: number | undefined;
     let pairs: (GhPostedComment | undefined)[] = [];
     await run('review', async (landed) => {
-      const event =
+      const event: GhReviewEvent =
         input.event === 'approve' ? 'APPROVE' : input.event === 'request-changes' ? 'REQUEST_CHANGES' : 'COMMENT';
-      try {
-        const review = await client.createReview(repo, number, {
-          commitId: input.commitId,
-          event,
-          body: input.body,
-          comments: input.newThreads.map((t) => ghComment(t.root)),
-        });
-        reviewId = review.id;
-      } catch (err) {
-        if (!mayHaveLanded(err)) throw err;
-        reviewId = await this.findCreatedReview(client, repo, number, input, REVIEW_STATE[event]);
-        if (reviewId === undefined) throw err;
-      }
+      const roots = input.newThreads.map((t) => t.root);
+      const comments = roots.filter((r) => r.subject_type !== 'file').map(ghComment);
+      const fileRoots = roots.filter((r) => r.subject_type === 'file');
+      reviewId =
+        fileRoots.length === 0
+          ? await this.postReview(client, repo, number, input, event, comments)
+          : await this.postPendingReview(client, repo, number, input, event, comments, fileRoots, landed);
       landed();
       // Read the created comments back to learn their ids: the drafts that made them are stamped with them,
       // and follow-up replies and staged reactions need them.
@@ -274,6 +268,144 @@ class GithubReviewProvider implements ReviewProvider {
         }
       }
     });
+  }
+
+  /** Post the review in one create call, recovering it when the call failed but GitHub may have created it. */
+  private async postReview(
+    client: GithubWriteClient,
+    repo: RemoteRepoRef,
+    number: number,
+    input: SubmitReviewInput,
+    event: GhReviewEvent,
+    comments: GhNewComment[],
+  ): Promise<number> {
+    try {
+      const review = await client.createReview(repo, number, {
+        commitId: input.commitId,
+        event,
+        body: input.body,
+        comments,
+      });
+      return review.id;
+    } catch (err) {
+      if (!mayHaveLanded(err)) throw err;
+      const found = await this.findCreatedReview(client, repo, number, input, REVIEW_STATE[event]);
+      if (found === undefined) throw err;
+      return found;
+    }
+  }
+
+  /**
+   * Post a review that includes file-level comments. GitHub's create call accepts line comments only, so this
+   * method creates the review pending with the line comments, adds each file-level comment, and then submits
+   * the review with the event. GitHub shows a pending review only to its author and allows one pending review
+   * per person on a pull request. When a step fails after the create, this method deletes the pending review,
+   * so GitHub has posted none of the comments and the next Submit can create a fresh review. This method
+   * reports each request before the submit through `landed`. The caller reports the submit.
+   */
+  private async postPendingReview(
+    client: GithubWriteClient,
+    repo: RemoteRepoRef,
+    number: number,
+    input: SubmitReviewInput,
+    event: GhReviewEvent,
+    comments: GhNewComment[],
+    fileRoots: NewInlineComment[],
+    landed: () => void,
+  ): Promise<number> {
+    // A pending review you already have makes GitHub refuse the create. Refusing here first also means any
+    // pending review of yours found after a failed create is the one that create made.
+    const login = await client.viewer();
+    landed();
+    const ownPending = (await client.listReviews(repo, number)).some(
+      (r) => r.author === login && r.state === 'PENDING',
+    );
+    landed();
+    if (ownPending) {
+      throw new Error(
+        'You have a pending review on this pull request on GitHub. Submit or discard it there, then retry.',
+      );
+    }
+
+    let review: { id: number; nodeId: string } | undefined;
+    try {
+      review = await client.createReview(repo, number, { commitId: input.commitId, body: '', comments });
+    } catch (err) {
+      if (!mayHaveLanded(err)) throw err;
+      review = await this.findCreatedPending(client, repo, number, login, input.commitId);
+      if (!review) throw err;
+    }
+    landed();
+    let submitting = false;
+    try {
+      for (const root of fileRoots) {
+        await client.addFileThread(review.nodeId, { path: root.path, body: root.body });
+        landed();
+      }
+      submitting = true;
+      await client.submitPendingReview(repo, number, review.id, { event, body: input.body });
+    } catch (err) {
+      // Only a submit call that may have taken effect leaves the review's state in doubt.
+      const state =
+        submitting && mayHaveLanded(err) ? await this.reviewState(client, repo, number, review.id) : 'pending';
+      if (state === 'submitted') return review.id;
+      // When no lookup answered, the review may be submitted. A delete would fail on it and the drafts would
+      // post a second time, so the error is reported and the review left as it is.
+      if (state === 'pending') await deletePending(client, repo, number, review.id);
+      throw err;
+    }
+    return review.id;
+  }
+
+  /**
+   * Find the pending review a failed create call made anyway: yours, on the reviewed commit. The caller has
+   * checked that you had no pending review before the create. Looks a few times, because GitHub may still be
+   * creating the review.
+   */
+  private async findCreatedPending(
+    client: GithubWriteClient,
+    repo: RemoteRepoRef,
+    number: number,
+    login: string,
+    commitId: string,
+  ): Promise<{ id: number; nodeId: string } | undefined> {
+    for (const delay of RECOVERY_DELAYS_MS) {
+      await (this.pause ?? sleep)(delay);
+      try {
+        const pending = (await client.listReviews(repo, number))
+          .filter((r) => r.author === login && r.commitId === commitId && r.state === 'PENDING')
+          .sort((a, b) => b.id - a.id);
+        if (pending.length > 0) return { id: pending[0].id, nodeId: pending[0].nodeId };
+      } catch {
+        // The lookup failed too. Try again after the next wait.
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * The state of a review after a submit call reported a failure: submitted when GitHub applied the call
+   * anyway, pending when every lookup that answered found it still pending, unknown when no lookup answered.
+   * Looks a few times, because GitHub may still be applying the submit.
+   */
+  private async reviewState(
+    client: GithubWriteClient,
+    repo: RemoteRepoRef,
+    number: number,
+    reviewId: number,
+  ): Promise<'submitted' | 'pending' | 'unknown'> {
+    let state: 'pending' | 'unknown' = 'unknown';
+    for (const delay of RECOVERY_DELAYS_MS) {
+      await (this.pause ?? sleep)(delay);
+      try {
+        const review = (await client.listReviews(repo, number)).find((r) => r.id === reviewId);
+        if (review && review.state !== 'PENDING') return 'submitted';
+        state = 'pending';
+      } catch {
+        // The lookup failed too. Try again after the next wait.
+      }
+    }
+    return state;
   }
 
   /**
@@ -314,6 +446,20 @@ class GithubReviewProvider implements ReviewProvider {
       }
     }
     return undefined;
+  }
+}
+
+/** Delete a pending review and ignore a failure, so the caller reports the error that triggered the delete. */
+async function deletePending(
+  client: GithubWriteClient,
+  repo: RemoteRepoRef,
+  number: number,
+  reviewId: number,
+): Promise<void> {
+  try {
+    await client.deletePendingReview(repo, number, reviewId);
+  } catch {
+    // While this pending review exists, GitHub rejects the next Submit.
   }
 }
 
